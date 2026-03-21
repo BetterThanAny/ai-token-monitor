@@ -7,7 +7,11 @@
 
 A macOS menu bar app that tracks Claude Code token usage and costs in real time.
 
-<!-- TODO: Add screenshot -->
+<p align="center">
+  <img src="docs/screenshots/overview.png" width="280" alt="Overview" />
+  <img src="docs/screenshots/analytics.png" width="280" alt="Analytics" />
+  <img src="docs/screenshots/leaderboard.png" width="280" alt="Leaderboard" />
+</p>
 
 ## Download
 

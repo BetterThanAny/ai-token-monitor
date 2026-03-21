@@ -7,7 +7,11 @@
 
 一款 macOS 選單列應用程式，即時追蹤 Claude Code 的 Token 使用量和費用。
 
-<!-- TODO: 新增螢幕截圖 -->
+<p align="center">
+  <img src="screenshots/overview.png" width="280" alt="Overview" />
+  <img src="screenshots/analytics.png" width="280" alt="Analytics" />
+  <img src="screenshots/leaderboard.png" width="280" alt="Leaderboard" />
+</p>
 
 ## 下載
 
