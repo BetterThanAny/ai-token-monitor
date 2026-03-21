@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { LeaderboardEntry } from "../hooks/useLeaderboardSync";
 import { formatTokens, formatCost } from "../lib/format";
 import { useSettings } from "../contexts/SettingsContext";
@@ -36,65 +37,87 @@ export function LeaderboardRow({ entry, rank, isMe }: Props) {
         {rank <= 3 ? MEDALS[rank] : rank}
       </div>
 
-      {/* Avatar */}
-      {entry.avatar_url ? (
-        <img
-          src={entry.avatar_url}
-          alt=""
-          style={{
+      {/* Avatar + Name (clickable → GitHub profile) */}
+      <div
+        onClick={() => openUrl(`https://github.com/${entry.nickname}`)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flex: 1,
+          minWidth: 0,
+          cursor: "pointer",
+        }}
+      >
+        {entry.avatar_url ? (
+          <img
+            src={entry.avatar_url}
+            alt=""
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 14,
+              flexShrink: 0,
+            }}
+          />
+        ) : (
+          <div style={{
             width: 28,
             height: 28,
             borderRadius: 14,
+            background: "var(--heat-1)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 12,
+            fontWeight: 700,
+            color: "var(--accent-purple)",
             flexShrink: 0,
-          }}
-        />
-      ) : (
-        <div style={{
-          width: 28,
-          height: 28,
-          borderRadius: 14,
-          background: "var(--heat-1)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 12,
-          fontWeight: 700,
-          color: "var(--accent-purple)",
-          flexShrink: 0,
-        }}>
-          {entry.nickname.charAt(0).toUpperCase()}
-        </div>
-      )}
+          }}>
+            {entry.nickname.charAt(0).toUpperCase()}
+          </div>
+        )}
 
-      {/* Name + stats */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: 12,
-          fontWeight: 700,
-          color: isMe ? "var(--accent-purple)" : "var(--text-primary)",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}>
-          {entry.nickname}
-          {isMe && (
-            <span style={{
-              fontSize: 9,
-              fontWeight: 600,
-              color: "var(--accent-purple)",
-              marginLeft: 4,
-              opacity: 0.7,
-            }}>
-              (you)
-            </span>
-          )}
-        </div>
-        <div style={{
-          fontSize: 10,
-          color: "var(--text-secondary)",
-          fontWeight: 600,
-        }}>
-          {entry.messages} msgs
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: isMe ? "var(--accent-purple)" : "var(--text-primary)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}>
+            {entry.nickname}
+            {isMe && (
+              <span style={{
+                fontSize: 9,
+                fontWeight: 600,
+                color: "var(--accent-purple)",
+                marginLeft: 4,
+                opacity: 0.7,
+              }}>
+                (you)
+              </span>
+            )}
+            {/* GitHub link icon */}
+            <svg
+              width="10" height="10" viewBox="0 0 24 24"
+              fill="none" stroke="var(--text-muted)" strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round"
+              style={{ marginLeft: 4, verticalAlign: "middle", opacity: 0.5 }}
+            >
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+              <polyline points="15 3 21 3 21 9"/>
+              <line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+          </div>
+          <div style={{
+            fontSize: 10,
+            color: "var(--text-secondary)",
+            fontWeight: 600,
+          }}>
+            {entry.messages} msgs
+          </div>
         </div>
       </div>
 
