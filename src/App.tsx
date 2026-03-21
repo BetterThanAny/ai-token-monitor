@@ -16,6 +16,7 @@ import { PeriodTotals } from "./components/PeriodTotals";
 import { CacheEfficiency } from "./components/CacheEfficiency";
 import { Leaderboard } from "./components/Leaderboard";
 import { ActivityGraph } from "./components/ActivityGraph";
+import { SupportBanner } from "./components/SupportBanner";
 
 function AppContent() {
   const { stats, error, loading } = useTokenStats();
@@ -119,6 +120,8 @@ function AppContent() {
       {activeTab === "leaderboard" && (
         <Leaderboard stats={stats} />
       )}
+
+      <SupportBanner />
     </PopoverShell>
   );
 }
