@@ -192,6 +192,10 @@ pub fn run() {
                 match event {
                     tauri::WindowEvent::Focused(focused) => {
                         eprintln!("[WINDOW] Focused({})", focused);
+                        if !focused {
+                            let _ = win_clone.hide();
+                            eprintln!("[WINDOW] Hidden on focus lost");
+                        }
                     }
                     tauri::WindowEvent::CloseRequested { .. } => {
                         eprintln!("[WINDOW] CloseRequested");
