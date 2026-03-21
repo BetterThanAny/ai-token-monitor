@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import html2canvas from "html2canvas";
 import { SettingsOverlay } from "./SettingsOverlay";
 import type { AllStats } from "../lib/types";
 import { formatTokens, formatCost, getTotalTokens, toLocalDateStr } from "../lib/format";
@@ -10,6 +11,29 @@ interface Props {
 export function Header({ stats }: Props) {
   const [showSettings, setShowSettings] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [captured, setCaptured] = useState(false);
+
+  const handleCapture = useCallback(async () => {
+    const el = document.getElementById("app-root");
+    if (!el) return;
+    try {
+      const canvas = await html2canvas(el, {
+        backgroundColor: null,
+        scale: 2,
+      });
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        navigator.clipboard.write([
+          new ClipboardItem({ "image/png": blob }),
+        ]).then(() => {
+          setCaptured(true);
+          setTimeout(() => setCaptured(false), 2000);
+        });
+      }, "image/png");
+    } catch {
+      // fallback: ignore
+    }
+  }, []);
 
   const handleExport = useCallback(() => {
     if (!stats) return;
@@ -117,6 +141,35 @@ export function Header({ stats }: Props) {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+        )}
+      </button>
+
+      {/* Capture button */}
+      <button
+        onClick={handleCapture}
+        title="Capture screenshot to clipboard"
+        style={{
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          padding: 4,
+          borderRadius: 6,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: captured ? "var(--accent-mint)" : "var(--text-secondary)",
+          transition: "color 0.2s ease",
+        }}
+      >
+        {captured ? (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
           </svg>
         )}
       </button>

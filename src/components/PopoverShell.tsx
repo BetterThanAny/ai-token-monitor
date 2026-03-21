@@ -6,7 +6,7 @@ interface Props {
 
 export function PopoverShell({ children }: Props) {
   return (
-    <div style={{
+    <div id="app-root" style={{
       width: "100vw",
       height: "100vh",
       display: "flex",
