@@ -31,4 +31,5 @@ export interface UserPreferences {
   number_format: "compact" | "full";
   show_tray_cost: boolean;
   leaderboard_opted_in: boolean;
+  theme: "github" | "purple" | "ocean" | "sunset";
 }

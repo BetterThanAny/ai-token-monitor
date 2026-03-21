@@ -13,6 +13,7 @@ const defaultPrefs: UserPreferences = {
   number_format: "compact",
   show_tray_cost: true,
   leaderboard_opted_in: false,
+  theme: "github",
 };
 
 const SettingsContext = createContext<SettingsContextType>({
@@ -36,6 +37,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setReady(true);
     });
   }, []);
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", prefs.theme);
+  }, [prefs.theme]);
 
   // Persist to disk when prefs change
   useEffect(() => {
