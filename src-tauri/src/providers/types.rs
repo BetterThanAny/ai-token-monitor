@@ -37,6 +37,7 @@ pub struct AllStats {
 pub struct UserPreferences {
     pub number_format: String,
     pub show_tray_cost: bool,
+    pub leaderboard_opted_in: bool,
 }
 
 impl Default for UserPreferences {
@@ -44,6 +45,7 @@ impl Default for UserPreferences {
         Self {
             number_format: "compact".to_string(),
             show_tray_cost: true,
+            leaderboard_opted_in: false,
         }
     }
 }

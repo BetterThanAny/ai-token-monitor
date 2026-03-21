@@ -1,6 +1,8 @@
+export type TabType = "overview" | "analytics" | "leaderboard";
+
 interface Props {
-  activeTab: "overview" | "analytics";
-  onChange: (tab: "overview" | "analytics") => void;
+  activeTab: TabType;
+  onChange: (tab: TabType) => void;
 }
 
 export function TabBar({ activeTab, onChange }: Props) {
@@ -22,6 +24,12 @@ export function TabBar({ activeTab, onChange }: Props) {
         active={activeTab === "analytics"}
         onClick={() => onChange("analytics")}
       />
+      <TabButton
+        label="Leaderboard"
+        active={activeTab === "leaderboard"}
+        onClick={() => onChange("leaderboard")}
+        icon="🏆"
+      />
     </div>
   );
 }
@@ -30,18 +38,20 @@ function TabButton({
   label,
   active,
   onClick,
+  icon,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  icon?: string;
 }) {
   return (
     <button
       onClick={onClick}
       style={{
         flex: 1,
-        padding: "6px 12px",
-        fontSize: 12,
+        padding: "6px 8px",
+        fontSize: 11,
         fontWeight: 700,
         border: "none",
         borderRadius: 6,
@@ -52,6 +62,7 @@ function TabButton({
         transition: "all 0.15s ease",
       }}
     >
+      {icon && <span style={{ marginRight: 3 }}>{icon}</span>}
       {label}
     </button>
   );

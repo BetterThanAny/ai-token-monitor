@@ -6,43 +6,54 @@ import type { UserPreferences } from "../lib/types";
 interface SettingsContextType {
   prefs: UserPreferences;
   updatePrefs: (partial: Partial<UserPreferences>) => void;
+  ready: boolean;
 }
 
 const defaultPrefs: UserPreferences = {
   number_format: "compact",
   show_tray_cost: true,
+  leaderboard_opted_in: false,
 };
 
 const SettingsContext = createContext<SettingsContextType>({
   prefs: defaultPrefs,
   updatePrefs: () => {},
+  ready: false,
 });
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefs] = useState<UserPreferences>(defaultPrefs);
-  const initialized = useRef(false);
+  const [ready, setReady] = useState(false);
+  const skipNextPersist = useRef(true);
 
   useEffect(() => {
     invoke<UserPreferences>("get_preferences").then((p) => {
       setPrefs(p);
-      initialized.current = true;
+      // Skip the persist effect triggered by this setPrefs
+      skipNextPersist.current = true;
+      setReady(true);
     }).catch(() => {
-      initialized.current = true;
+      setReady(true);
     });
   }, []);
 
-  // Persist to disk when prefs change (skip initial load)
+  // Persist to disk when prefs change
   useEffect(() => {
-    if (!initialized.current) return;
+    if (skipNextPersist.current) {
+      skipNextPersist.current = false;
+      return;
+    }
+    if (!ready) return;
     invoke("set_preferences", { prefs }).catch(() => {});
-  }, [prefs]);
+  }, [prefs, ready]);
 
   const updatePrefs = useCallback((partial: Partial<UserPreferences>) => {
+    if (!ready) return; // Block updates until loaded
     setPrefs((prev) => ({ ...prev, ...partial }));
-  }, []);
+  }, [ready]);
 
   return (
-    <SettingsContext.Provider value={{ prefs, updatePrefs }}>
+    <SettingsContext.Provider value={{ prefs, updatePrefs, ready }}>
       {children}
     </SettingsContext.Provider>
   );
