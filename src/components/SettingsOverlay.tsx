@@ -46,6 +46,14 @@ export function SettingsOverlay({ visible, onClose }: Props) {
           Settings
         </div>
 
+        {/* Theme selector */}
+        <SettingRow label="Theme">
+          <ThemeSelector
+            value={prefs.theme}
+            onChange={(v) => updatePrefs({ theme: v })}
+          />
+        </SettingRow>
+
         <SettingRow
           label="Number Format"
           description={prefs.number_format === "compact" ? "377.0K" : "377,000"}
@@ -261,6 +269,43 @@ function ToggleSwitch({
         transition: "left 0.2s ease",
         boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
       }} />
+    </div>
+  );
+}
+
+const THEMES: { id: "github" | "purple" | "ocean" | "sunset"; label: string; colors: [string, string] }[] = [
+  { id: "github", label: "GitHub", colors: ["#2da44e", "#216e39"] },
+  { id: "purple", label: "Purple", colors: ["#7C5CFC", "#B5A0EF"] },
+  { id: "ocean", label: "Ocean", colors: ["#0284c7", "#38bdf8"] },
+  { id: "sunset", label: "Sunset", colors: ["#d97706", "#f59e0b"] },
+];
+
+function ThemeSelector({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: "github" | "purple" | "ocean" | "sunset") => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      {THEMES.map((t) => (
+        <div
+          key={t.id}
+          onClick={() => onChange(t.id)}
+          title={t.label}
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: 10,
+            background: `linear-gradient(135deg, ${t.colors[0]}, ${t.colors[1]})`,
+            cursor: "pointer",
+            border: value === t.id ? "2px solid var(--text-primary)" : "2px solid transparent",
+            transition: "border 0.15s ease",
+            flexShrink: 0,
+          }}
+        />
+      ))}
     </div>
   );
 }
