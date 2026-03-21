@@ -15,6 +15,7 @@ import { ModelBreakdown } from "./components/ModelBreakdown";
 import { PeriodTotals } from "./components/PeriodTotals";
 import { CacheEfficiency } from "./components/CacheEfficiency";
 import { Leaderboard } from "./components/Leaderboard";
+import { ActivityGraph } from "./components/ActivityGraph";
 
 function AppContent() {
   const { stats, error, loading } = useTokenStats();
@@ -107,6 +108,7 @@ function AppContent() {
 
       {activeTab === "analytics" && (
         <>
+          <ActivityGraph daily={stats.daily} />
           <DailyChart daily={stats.daily} days={30} />
           <PeriodTotals daily={stats.daily} />
           <ModelBreakdown modelUsage={stats.model_usage} />
