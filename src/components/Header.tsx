@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
-import html2canvas from "html2canvas";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { invoke } from "@tauri-apps/api/core";
 import { SettingsOverlay } from "./SettingsOverlay";
 import type { AllStats } from "../lib/types";
 import { formatTokens, formatCost, getTotalTokens, toLocalDateStr } from "../lib/format";
@@ -12,26 +13,22 @@ export function Header({ stats }: Props) {
   const [showSettings, setShowSettings] = useState(false);
   const [copied, setCopied] = useState(false);
   const [captured, setCaptured] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2000);
+  }, []);
 
   const handleCapture = useCallback(async () => {
-    const el = document.getElementById("app-root");
-    if (!el) return;
     try {
-      const canvas = await html2canvas(el, {
-        backgroundColor: null,
-        scale: 2,
-      });
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        navigator.clipboard.write([
-          new ClipboardItem({ "image/png": blob }),
-        ]).then(() => {
-          setCaptured(true);
-          setTimeout(() => setCaptured(false), 2000);
-        });
-      }, "image/png");
-    } catch {
-      // fallback: ignore
+      await invoke("capture_window");
+      setCaptured(true);
+      setTimeout(() => setCaptured(false), 2000);
+      showToast("Copied to clipboard!");
+    } catch (e) {
+      console.error("Capture failed:", e);
+      showToast("Capture failed");
     }
   }, []);
 
@@ -67,20 +64,23 @@ export function Header({ stats }: Props) {
       ),
     ];
 
-    navigator.clipboard.writeText(lines.join("\n")).then(() => {
+    writeText(lines.join("\n")).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      showToast("Summary copied!");
     });
   }, [stats]);
 
   return (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      paddingBottom: 4,
-      position: "relative",
-    }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        paddingBottom: 4,
+        position: "relative",
+      }}
+    >
       <div style={{
         width: 36,
         height: 36,
@@ -202,6 +202,36 @@ export function Header({ stats }: Props) {
         visible={showSettings}
         onClose={() => setShowSettings(false)}
       />
+
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          position: "absolute",
+          top: "100%",
+          left: "50%",
+          transform: "translateX(-50%)",
+          marginTop: 8,
+          padding: "6px 14px",
+          borderRadius: 8,
+          background: "var(--bg-card)",
+          color: "var(--text-primary)",
+          fontSize: 12,
+          fontWeight: 600,
+          boxShadow: "0 2px 12px rgba(0,0,0,0.2)",
+          whiteSpace: "nowrap",
+          zIndex: 100,
+          animation: "toast-in 0.2s ease",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-mint)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
+

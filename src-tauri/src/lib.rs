@@ -112,15 +112,24 @@ fn hide_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
 
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    eprintln!("[CMD] quit_app called");
+    app.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_all_stats,
             commands::get_preferences,
             commands::set_preferences,
-            hide_window
+            hide_window,
+            quit_app,
+            commands::capture_window
         ])
         .setup(|app| {
             // Build tray icon
