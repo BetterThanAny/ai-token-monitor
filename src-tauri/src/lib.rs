@@ -30,7 +30,7 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
 
     if !prefs.show_tray_cost {
         if let Some(tray) = app_handle.tray_by_id("main-tray") {
-            let _ = tray.set_title(None::<&str>);
+            let _ = tray.set_title(Some(""));
         }
         return;
     }
