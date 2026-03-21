@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { useSettings } from "../contexts/SettingsContext";
 import { useAuth } from "../hooks/useAuth";
 
@@ -10,6 +12,11 @@ interface Props {
 export function SettingsOverlay({ visible, onClose }: Props) {
   const { prefs, updatePrefs } = useSettings();
   const { user, profile, signIn, signOut, available: leaderboardAvailable } = useAuth();
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    getVersion().then(setAppVersion);
+  }, []);
 
   if (!visible) return null;
 
@@ -166,6 +173,49 @@ export function SettingsOverlay({ visible, onClose }: Props) {
             )}
           </>
         )}
+
+        {/* Quit */}
+        <div style={{
+          height: 1,
+          background: "var(--heat-0)",
+          margin: "8px 0",
+        }} />
+
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}>
+          <span style={{
+            fontSize: 10,
+            color: "var(--text-muted)",
+            fontWeight: 500,
+          }}>
+            v{appVersion}
+          </span>
+          <button
+            onClick={() => invoke("quit_app")}
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              padding: "4px 12px",
+              borderRadius: 6,
+              border: "none",
+              cursor: "pointer",
+              background: "rgba(239, 68, 68, 0.1)",
+              color: "#ef4444",
+              transition: "background 0.15s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(239, 68, 68, 0.2)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(239, 68, 68, 0.1)";
+            }}
+          >
+            Quit
+          </button>
+        </div>
       </div>
     </>
   );
