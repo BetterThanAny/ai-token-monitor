@@ -38,6 +38,10 @@ pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<
         .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
     fs::write(&path, json)
         .map_err(|e| format!("Failed to write preferences: {}", e))?;
-    crate::update_tray_title(&app);
+    // Update tray in background to avoid blocking the IPC response
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        crate::update_tray_title(&handle);
+    });
     Ok(())
 }
