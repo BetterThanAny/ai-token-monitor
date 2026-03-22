@@ -17,7 +17,7 @@ struct CachedStats {
 }
 
 static STATS_CACHE: Mutex<Option<CachedStats>> = Mutex::new(None);
-const CACHE_TTL: Duration = Duration::from_secs(5);
+const CACHE_TTL: Duration = Duration::from_secs(60);
 
 /// Per-million-token pricing (from LiteLLM / Anthropic pricing page)
 struct ModelPricing {

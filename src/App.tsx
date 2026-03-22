@@ -98,28 +98,24 @@ function AppContent() {
       <Header stats={stats} />
       <TabBar activeTab={activeTab} onChange={setActiveTab} />
 
-      {activeTab === "overview" && (
-        <>
-          <TodaySummary today={today} weekAvg={weekAvg} />
-          <DailyChart daily={stats.daily} days={7} />
-          <PeriodTotals daily={stats.daily} />
-          <Heatmap daily={stats.daily} weeks={8} />
-        </>
-      )}
+      <div style={{ display: activeTab === "overview" ? "block" : "none" }}>
+        <TodaySummary today={today} weekAvg={weekAvg} />
+        <DailyChart daily={stats.daily} days={7} />
+        <PeriodTotals daily={stats.daily} />
+        <Heatmap daily={stats.daily} weeks={8} />
+      </div>
 
-      {activeTab === "analytics" && (
-        <>
-          <ActivityGraph daily={stats.daily} />
-          <DailyChart daily={stats.daily} days={30} />
-          <PeriodTotals daily={stats.daily} />
-          <ModelBreakdown modelUsage={stats.model_usage} />
-          <CacheEfficiency stats={stats} />
-        </>
-      )}
+      <div style={{ display: activeTab === "analytics" ? "block" : "none" }}>
+        <ActivityGraph daily={stats.daily} />
+        <DailyChart daily={stats.daily} days={30} />
+        <PeriodTotals daily={stats.daily} />
+        <ModelBreakdown modelUsage={stats.model_usage} />
+        <CacheEfficiency stats={stats} />
+      </div>
 
-      {activeTab === "leaderboard" && (
+      <div style={{ display: activeTab === "leaderboard" ? "block" : "none" }}>
         <Leaderboard stats={stats} />
-      )}
+      </div>
 
       <SupportBanner />
     </PopoverShell>
