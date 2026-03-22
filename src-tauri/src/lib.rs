@@ -92,17 +92,22 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
         let _ = watcher.watch(&claude_dir, RecursiveMode::NonRecursive);
 
         loop {
-            // Wait for file change with 5s timeout for periodic tray refresh
-            match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            match rx.recv_timeout(std::time::Duration::from_secs(60)) {
                 Ok(()) => {
-                    // Drain any queued events
-                    while rx.try_recv().is_ok() {}
-                    eprintln!("[WATCH] file changed, emitting stats-updated");
+                    // Debounce: wait 2s for events to settle before processing
+                    loop {
+                        match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                            Ok(()) => continue,
+                            Err(mpsc::RecvTimeoutError::Timeout) => break,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                        }
+                    }
+                    eprintln!("[WATCH] file changed (debounced), emitting stats-updated");
                     let _ = app_handle.emit("stats-updated", ());
                     update_tray_title(&app_handle);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    // Periodic tray refresh even without file changes
+                    // Periodic tray refresh
                     update_tray_title(&app_handle);
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,

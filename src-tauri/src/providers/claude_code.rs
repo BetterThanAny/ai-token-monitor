@@ -2,11 +2,22 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
 use super::traits::TokenProvider;
 use super::types::{AllStats, DailyUsage, ModelUsage};
+
+/// In-memory cache for parsed stats to avoid re-parsing all JSONL files on every request.
+struct CachedStats {
+    stats: AllStats,
+    computed_at: Instant,
+}
+
+static STATS_CACHE: Mutex<Option<CachedStats>> = Mutex::new(None);
+const CACHE_TTL: Duration = Duration::from_secs(5);
 
 /// Per-million-token pricing (from LiteLLM / Anthropic pricing page)
 struct ModelPricing {
@@ -142,6 +153,15 @@ impl TokenProvider for ClaudeCodeProvider {
     }
 
     fn fetch_stats(&self) -> Result<AllStats, String> {
+        // Return cached stats if still fresh
+        if let Ok(cache) = STATS_CACHE.lock() {
+            if let Some(ref cached) = *cache {
+                if cached.computed_at.elapsed() < CACHE_TTL {
+                    return Ok(cached.stats.clone());
+                }
+            }
+        }
+
         let entries = self.parse_session_files();
 
         let mut daily_map: HashMap<String, DailyUsage> = HashMap::new();
@@ -221,13 +241,23 @@ impl TokenProvider for ClaudeCodeProvider {
         // Estimate total sessions
         let total_sessions = daily.iter().map(|d| d.sessions as u32).sum::<u32>();
 
-        Ok(AllStats {
+        let stats = AllStats {
             daily,
             model_usage: model_usage_map,
             total_sessions,
             total_messages,
             first_session_date: first_date,
-        })
+        };
+
+        // Update cache
+        if let Ok(mut cache) = STATS_CACHE.lock() {
+            *cache = Some(CachedStats {
+                stats: stats.clone(),
+                computed_at: Instant::now(),
+            });
+        }
+
+        Ok(stats)
     }
 
     fn is_available(&self) -> bool {
