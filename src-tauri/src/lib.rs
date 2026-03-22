@@ -58,7 +58,7 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
 
 fn start_file_watcher(app_handle: tauri::AppHandle) {
     let claude_dir = get_claude_dir();
-    let stats_file = claude_dir.join("stats-cache.json");
+    let projects_dir = claude_dir.join("projects");
 
     thread::spawn(move || {
         let (tx, rx) = mpsc::channel();
@@ -69,7 +69,14 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                     event.kind,
                     EventKind::Modify(_) | EventKind::Create(_)
                 ) {
-                    let _ = tx.send(());
+                    // Only trigger for JSONL and JSON files
+                    let dominated = event.paths.iter().any(|p| {
+                        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        ext == "jsonl" || ext == "json"
+                    });
+                    if dominated {
+                        let _ = tx.send(());
+                    }
                 }
             }
         }) {
@@ -77,19 +84,28 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
             Err(_) => return,
         };
 
-        if watcher
-            .watch(&stats_file, RecursiveMode::NonRecursive)
-            .is_err()
-        {
-            let _ = watcher.watch(&claude_dir, RecursiveMode::NonRecursive);
+        // Watch projects directory recursively for JSONL changes
+        if projects_dir.exists() {
+            let _ = watcher.watch(&projects_dir, RecursiveMode::Recursive);
         }
+        // Also watch claude_dir for stats-cache.json
+        let _ = watcher.watch(&claude_dir, RecursiveMode::NonRecursive);
 
         loop {
-            if rx.recv().is_ok() {
-                while rx.try_recv().is_ok() {}
-                eprintln!("[WATCH] stats-cache.json changed, emitting stats-updated");
-                let _ = app_handle.emit("stats-updated", ());
-                update_tray_title(&app_handle);
+            // Wait for file change with 5s timeout for periodic tray refresh
+            match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                Ok(()) => {
+                    // Drain any queued events
+                    while rx.try_recv().is_ok() {}
+                    eprintln!("[WATCH] file changed, emitting stats-updated");
+                    let _ = app_handle.emit("stats-updated", ());
+                    update_tray_title(&app_handle);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    // Periodic tray refresh even without file changes
+                    update_tray_title(&app_handle);
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
     });
