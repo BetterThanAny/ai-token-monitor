@@ -5,7 +5,7 @@
 
 > **[한국어](docs/README.ko.md) | [日本語](docs/README.ja.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md)**
 
-A macOS menu bar app that tracks Claude Code token usage and costs in real time.
+A system tray app for macOS and Windows that tracks Claude Code token usage and costs in real time.
 
 | Overview | Analytics | Leaderboard |
 |:---:|:---:|:---:|
@@ -14,9 +14,12 @@ A macOS menu bar app that tracks Claude Code token usage and costs in real time.
 
 ## Download
 
-**[Download Latest Release (.dmg)](https://github.com/soulduse/ai-token-monitor/releases/latest)**
+**[Download Latest Release](https://github.com/soulduse/ai-token-monitor/releases/latest)**
 
-> Requires macOS (Apple Silicon). Intel Mac support coming soon.
+| Platform | File | Notes |
+|----------|------|-------|
+| **macOS** (Apple Silicon) | `.dmg` | Intel Mac support coming soon |
+| **Windows** | `.exe` installer | Windows 10+ (WebView2 required, auto-installed) |
 
 ## Features
 
@@ -27,7 +30,7 @@ A macOS menu bar app that tracks Claude Code token usage and costs in real time.
 - **Period Navigation** — Browse weekly/monthly totals with `< >` arrows
 - **Model Breakdown** — Input/Output/Cache ratio visualization
 - **Cache Efficiency** — Donut chart showing cache hit ratio
-- **Menu Bar Cost** — Today's cost displayed next to tray icon ($45)
+- **Tray Cost** — Today's cost displayed next to tray icon (macOS: menu bar title, Windows: tooltip)
 - **4 Themes** — GitHub (green), Purple, Ocean, Sunset — with dark mode support
 - **Screenshot** — Capture the app window to clipboard
 - **Clipboard Export** — Copy usage summary as markdown
@@ -57,7 +60,7 @@ npm run tauri build   # production build
 
 ### Basics
 
-1. Launch the app — an icon appears in the macOS menu bar
+1. Launch the app — an icon appears in the system tray (macOS menu bar / Windows taskbar)
 2. Click the icon to open the dashboard
 3. Switch between **Overview**, **Analytics**, and **Leaderboard** tabs
 
@@ -74,7 +77,7 @@ npm run tauri build   # production build
 Click the gear icon (top right) to configure:
 - **Theme**: GitHub / Purple / Ocean / Sunset
 - **Number Format**: Compact (377.0K) vs Full (377,000)
-- **Menu Bar Cost**: Show/hide today's cost in menu bar
+- **Tray Cost**: Show/hide today's cost in system tray
 - **Leaderboard**: Opt-in to share usage data + GitHub sign-in
 
 ### Leaderboard
@@ -111,7 +114,7 @@ Without leaderboard, the app runs completely offline.
 │  Backend (Tauri v2 / Rust)   │
 │  ├── JSONL Session Parser    │
 │  ├── File Watcher (notify)   │
-│  ├── Tray Icon + Cost Title  │
+│  ├── Tray Icon + Cost Display │
 │  └── Preferences (JSON)      │
 ├──────────────────────────────┤
 │  Data Source                  │
@@ -124,8 +127,8 @@ Without leaderboard, the app runs completely offline.
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| **macOS** | Supported | Menu bar integration, dock hiding, tray cost |
-| **Windows** | Planned | Core logic is cross-platform. macOS-specific code is gated with `#[cfg(target_os)]` |
+| **macOS** | Supported | Menu bar integration, dock hiding, tray cost title |
+| **Windows** | Supported | System tray integration, NSIS installer, tooltip cost display |
 | **Linux** | Untested | May work since Tauri supports Linux |
 
 ## Support
