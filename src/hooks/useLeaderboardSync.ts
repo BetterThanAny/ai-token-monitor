@@ -20,11 +20,18 @@ interface UseLeaderboardSyncProps {
   optedIn: boolean;
 }
 
+const LEADERBOARD_CACHE_TTL = 60_000; // 60 seconds
+
 export function useLeaderboardSync({ stats, user, optedIn }: UseLeaderboardSyncProps) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [period, setPeriod] = useState<"today" | "week">("today");
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const cacheRef = useRef<{
+    data: LeaderboardEntry[];
+    fetchedAt: number;
+    period: "today" | "week";
+  } | null>(null);
 
   // Upload today's snapshot (debounced)
   useEffect(() => {
@@ -41,8 +48,20 @@ export function useLeaderboardSync({ stats, user, optedIn }: UseLeaderboardSyncP
   }, [stats, user, optedIn]);
 
   // Fetch leaderboard data
-  const fetchLeaderboard = useCallback(async () => {
+  const fetchLeaderboard = useCallback(async (forceRefresh = false) => {
     if (!supabase) return;
+
+    // Return cached data if still fresh and period matches
+    if (
+      !forceRefresh &&
+      cacheRef.current &&
+      cacheRef.current.period === period &&
+      Date.now() - cacheRef.current.fetchedAt < LEADERBOARD_CACHE_TTL
+    ) {
+      setLeaderboard(cacheRef.current.data);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -57,15 +76,21 @@ export function useLeaderboardSync({ stats, user, optedIn }: UseLeaderboardSyncP
           .limit(100);
 
         if (data) {
-          setLeaderboard(data.map((row: any) => ({
-            user_id: row.user_id,
-            nickname: row.profiles?.nickname ?? "Unknown",
-            avatar_url: row.profiles?.avatar_url ?? null,
-            total_tokens: row.total_tokens,
-            cost_usd: Number(row.cost_usd),
-            messages: row.messages,
-            sessions: row.sessions,
-          })));
+          const entries = (data as Record<string, unknown>[]).map((row) => {
+            const profiles = row.profiles;
+            const profile = Array.isArray(profiles) ? profiles[0] : profiles;
+            return {
+              user_id: row.user_id as string,
+              nickname: (profile as Record<string, unknown> | null)?.nickname as string ?? "Unknown",
+              avatar_url: (profile as Record<string, unknown> | null)?.avatar_url as string | null ?? null,
+              total_tokens: row.total_tokens as number,
+              cost_usd: Number(row.cost_usd),
+              messages: row.messages as number,
+              sessions: row.sessions as number,
+            };
+          });
+          setLeaderboard(entries);
+          cacheRef.current = { data: entries, fetchedAt: Date.now(), period };
         }
       } else {
         // Weekly: aggregate snapshots from monday to today
@@ -85,28 +110,31 @@ export function useLeaderboardSync({ stats, user, optedIn }: UseLeaderboardSyncP
 
         if (data) {
           const userMap = new Map<string, LeaderboardEntry>();
-          for (const row of data as any[]) {
-            const existing = userMap.get(row.user_id);
+          for (const row of (data as Record<string, unknown>[])) {
+            const profiles = row.profiles;
+            const profile = Array.isArray(profiles) ? profiles[0] : profiles;
+            const userId = row.user_id as string;
+            const existing = userMap.get(userId);
             if (existing) {
-              existing.total_tokens += row.total_tokens;
+              existing.total_tokens += row.total_tokens as number;
               existing.cost_usd += Number(row.cost_usd);
-              existing.messages += row.messages;
-              existing.sessions += row.sessions;
+              existing.messages += row.messages as number;
+              existing.sessions += row.sessions as number;
             } else {
-              userMap.set(row.user_id, {
-                user_id: row.user_id,
-                nickname: row.profiles?.nickname ?? "Unknown",
-                avatar_url: row.profiles?.avatar_url ?? null,
-                total_tokens: row.total_tokens,
+              userMap.set(userId, {
+                user_id: userId,
+                nickname: (profile as Record<string, unknown> | null)?.nickname as string ?? "Unknown",
+                avatar_url: (profile as Record<string, unknown> | null)?.avatar_url as string | null ?? null,
+                total_tokens: row.total_tokens as number,
                 cost_usd: Number(row.cost_usd),
-                messages: row.messages,
-                sessions: row.sessions,
+                messages: row.messages as number,
+                sessions: row.sessions as number,
               });
             }
           }
-          setLeaderboard(
-            Array.from(userMap.values()).sort((a, b) => b.total_tokens - a.total_tokens)
-          );
+          const sorted = Array.from(userMap.values()).sort((a, b) => b.total_tokens - a.total_tokens);
+          setLeaderboard(sorted);
+          cacheRef.current = { data: sorted, fetchedAt: Date.now(), period };
         }
       }
     } finally {
@@ -114,14 +142,14 @@ export function useLeaderboardSync({ stats, user, optedIn }: UseLeaderboardSyncP
     }
   }, [period]);
 
-  // Auto-refresh every 60s
+  // Auto-refresh every 60s (force refresh to bypass cache on interval)
   useEffect(() => {
     fetchLeaderboard();
-    const interval = setInterval(fetchLeaderboard, 60_000);
+    const interval = setInterval(() => fetchLeaderboard(true), 60_000);
     return () => clearInterval(interval);
   }, [fetchLeaderboard]);
 
-  return { leaderboard, loading, period, setPeriod, refetch: fetchLeaderboard };
+  return { leaderboard, loading, period, setPeriod, refetch: () => fetchLeaderboard(true) };
 }
 
 async function uploadSnapshot(userId: string, stats: AllStats) {

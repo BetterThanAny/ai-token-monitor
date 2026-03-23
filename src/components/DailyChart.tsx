@@ -13,6 +13,12 @@ export function DailyChart({ daily, days = 7 }: Props) {
   const [mode, setMode] = useState<"tokens" | "cost">("tokens");
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
+  const dailyMap = useMemo(() => {
+    const map = new Map<string, DailyUsage>();
+    for (const d of daily) map.set(d.date, d);
+    return map;
+  }, [daily]);
+
   const chartData = useMemo(() => {
     const today = new Date();
     const result: { date: string; tokens: number; cost: number }[] = [];
@@ -21,7 +27,7 @@ export function DailyChart({ daily, days = 7 }: Props) {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
       const dateStr = toLocalDateStr(d);
-      const usage = daily.find((u) => u.date === dateStr);
+      const usage = dailyMap.get(dateStr);
       result.push({
         date: dateStr,
         tokens: usage ? getTotalTokens(usage.tokens) : 0,
@@ -29,7 +35,7 @@ export function DailyChart({ daily, days = 7 }: Props) {
       });
     }
     return result;
-  }, [daily, days]);
+  }, [dailyMap, days]);
 
   const values = chartData.map((d) => (mode === "tokens" ? d.tokens : d.cost));
   const maxVal = Math.max(...values, 1);
