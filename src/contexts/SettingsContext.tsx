@@ -14,6 +14,7 @@ const defaultPrefs: UserPreferences = {
   show_tray_cost: true,
   leaderboard_opted_in: false,
   theme: "github",
+  color_mode: "system",
 };
 
 const SettingsContext = createContext<SettingsContextType>({
@@ -42,6 +43,29 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", prefs.theme);
   }, [prefs.theme]);
+
+  // Apply color mode (light/dark/system)
+  useEffect(() => {
+    const root = document.documentElement;
+    const apply = (isDark: boolean) => {
+      root.setAttribute("data-color-mode", isDark ? "dark" : "light");
+    };
+
+    if (prefs.color_mode === "dark") {
+      apply(true);
+      return;
+    }
+    if (prefs.color_mode === "light") {
+      apply(false);
+      return;
+    }
+    // system: follow OS preference
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    apply(mq.matches);
+    const handler = (e: MediaQueryListEvent) => apply(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [prefs.color_mode]);
 
   // Persist to disk when prefs change
   useEffect(() => {

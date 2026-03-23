@@ -61,6 +61,13 @@ export function SettingsOverlay({ visible, onClose }: Props) {
           />
         </SettingRow>
 
+        <SettingRow label="Appearance">
+          <ColorModeToggle
+            value={prefs.color_mode}
+            onChange={(v) => updatePrefs({ color_mode: v })}
+          />
+        </SettingRow>
+
         <SettingRow
           label="Number Format"
           description={prefs.number_format === "compact" ? "377.0K" : "377,000"}
@@ -355,6 +362,49 @@ function ThemeSelector({
             flexShrink: 0,
           }}
         />
+      ))}
+    </div>
+  );
+}
+
+const COLOR_MODES: { id: "system" | "light" | "dark"; label: string }[] = [
+  { id: "system", label: "Auto" },
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+];
+
+function ColorModeToggle({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: "system" | "light" | "dark") => void;
+}) {
+  return (
+    <div style={{
+      display: "flex",
+      background: "var(--heat-0)",
+      borderRadius: 6,
+      padding: 2,
+    }}>
+      {COLOR_MODES.map((m) => (
+        <button
+          key={m.id}
+          onClick={() => onChange(m.id)}
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            padding: "3px 8px",
+            borderRadius: 4,
+            border: "none",
+            cursor: "pointer",
+            background: value === m.id ? "var(--accent-purple)" : "transparent",
+            color: value === m.id ? "#fff" : "var(--text-secondary)",
+            transition: "all 0.15s ease",
+          }}
+        >
+          {m.label}
+        </button>
       ))}
     </div>
   );

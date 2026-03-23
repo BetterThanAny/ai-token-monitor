@@ -32,4 +32,5 @@ export interface UserPreferences {
   show_tray_cost: boolean;
   leaderboard_opted_in: boolean;
   theme: "github" | "purple" | "ocean" | "sunset";
+  color_mode: "system" | "light" | "dark";
 }
