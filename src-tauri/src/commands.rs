@@ -51,9 +51,10 @@ pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
+#[allow(deprecated)]
 pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
+    #[allow(deprecated)]
     use cocoa::base::{id, nil};
-    use cocoa::foundation::{NSArray, NSData};
     use objc::{msg_send, sel, sel_impl, class};
 
     let window = app.get_webview_window("main")
