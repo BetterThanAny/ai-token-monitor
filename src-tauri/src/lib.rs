@@ -88,8 +88,6 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
         if projects_dir.exists() {
             let _ = watcher.watch(&projects_dir, RecursiveMode::Recursive);
         }
-        // Also watch claude_dir for stats-cache.json
-        let _ = watcher.watch(&claude_dir, RecursiveMode::NonRecursive);
 
         loop {
             match rx.recv_timeout(std::time::Duration::from_secs(60)) {

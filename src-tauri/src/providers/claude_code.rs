@@ -6,8 +6,6 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
-
 use super::traits::TokenProvider;
 use super::types::{AllStats, DailyUsage, ModelUsage};
 
@@ -99,6 +97,7 @@ impl ClaudeCodeProvider {
 struct SessionEntry {
     date: String,
     model: String,
+    session_id: String,
     message_id: String,
     request_id: String,
     input_tokens: u64,
@@ -135,6 +134,7 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
         return None;
     }
 
+    let session_id = value.get("sessionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let message_id = message.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let request_id = value.get("requestId").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
@@ -146,6 +146,7 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
     Some(SessionEntry {
         date,
         model,
+        session_id,
         message_id,
         request_id,
         input_tokens,
@@ -182,7 +183,7 @@ impl TokenProvider for ClaudeCodeProvider {
         let mut daily_map: HashMap<String, DailyUsage> = HashMap::new();
         let mut model_usage_map: HashMap<String, ModelUsage> = HashMap::new();
         let mut total_messages: u32 = 0;
-        let _session_ids: HashSet<String> = HashSet::new();
+        let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
         let mut first_date: Option<String> = None;
 
         for entry in &entries {
@@ -225,6 +226,14 @@ impl TokenProvider for ClaudeCodeProvider {
             daily.cache_read_tokens += entry.cache_read_input_tokens;
             daily.cache_write_tokens += entry.cache_creation_input_tokens;
 
+            // Track unique session IDs per day
+            if !entry.session_id.is_empty() {
+                daily_session_ids
+                    .entry(entry.date.clone())
+                    .or_default()
+                    .insert(entry.session_id.clone());
+            }
+
             // Model aggregation
             let mu = model_usage_map.entry(entry.model.clone()).or_insert_with(|| ModelUsage {
                 input_tokens: 0,
@@ -240,13 +249,10 @@ impl TokenProvider for ClaudeCodeProvider {
             mu.cost_usd += cost;
         }
 
-        // Count sessions from stats-cache (session JSONL doesn't have unique session markers easily)
-        if let Ok(cache) = self.parse_stats_cache() {
-            for activity in &cache.daily_activity {
-                if let Some(daily) = daily_map.get_mut(&activity.date) {
-                    daily.sessions = activity.session_count;
-                    daily.tool_calls = activity.tool_call_count;
-                }
+        // Count sessions from unique sessionId values per day
+        for (date, session_ids) in &daily_session_ids {
+            if let Some(daily) = daily_map.get_mut(date) {
+                daily.sessions = session_ids.len() as u32;
             }
         }
 
@@ -280,28 +286,3 @@ impl TokenProvider for ClaudeCodeProvider {
     }
 }
 
-impl ClaudeCodeProvider {
-    fn parse_stats_cache(&self) -> Result<StatsCache, String> {
-        let path = self.claude_dir.join("stats-cache.json");
-        let content = fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read stats-cache.json: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse stats-cache.json: {}", e))
-    }
-}
-
-// --- Deserialization types for stats-cache.json (supplementary) ---
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StatsCache {
-    daily_activity: Vec<DailyActivity>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DailyActivity {
-    date: String,
-    session_count: u32,
-    tool_call_count: u32,
-}
