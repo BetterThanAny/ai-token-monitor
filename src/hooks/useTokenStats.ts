@@ -14,7 +14,10 @@ export function useTokenStats() {
       setStats(data);
       setError(null);
     } catch (e) {
-      setError(String(e));
+      setStats((prev) => {
+        if (!prev) setError(String(e));
+        return prev;
+      });
     } finally {
       setLoading(false);
     }
