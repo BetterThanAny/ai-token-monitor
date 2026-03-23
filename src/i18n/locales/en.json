@@ -104,6 +104,14 @@
   "settings.auto": "Auto",
   "settings.light": "Light",
   "settings.dark": "Dark",
+  "settings.configDirs": "Config Directories",
+  "settings.configDirsPrimary": "primary",
+  "settings.configDirsAutoDetect": "Auto Detect",
+  "settings.configDirsAdd": "Add",
+  "settings.configDirsAddPlaceholder": "Path (e.g. ~/.claude-work)",
+  "settings.configDirsNotFound": "No new directories found",
+  "settings.configDirsFound": "Found {{count}} new directory(ies)",
+  "settings.configDirsInvalid": "Invalid path or no projects folder found",
 
   "support.buyMeCoffee": "Buy me a coffee",
 

@@ -1,6 +1,7 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useSettings } from "../contexts/SettingsContext";
 import { useAuth } from "../hooks/useAuth";
 import { useI18n, LANGUAGE_OPTIONS } from "../i18n/I18nContext";
@@ -95,6 +96,18 @@ export function SettingsOverlay({ visible, onClose }: Props) {
             onChange={(v) => updatePrefs({ show_tray_cost: v })}
           />
         </SettingRow>
+
+        {/* Config Directories section */}
+        <div style={{
+          height: 1,
+          background: "var(--heat-0)",
+          margin: "8px 0",
+        }} />
+
+        <ConfigDirsSection
+          dirs={prefs.config_dirs}
+          onChange={(dirs) => updatePrefs({ config_dirs: dirs })}
+        />
 
         {/* Leaderboard section */}
         {leaderboardAvailable && (
@@ -451,5 +464,204 @@ function LanguageSelector({
         </option>
       ))}
     </select>
+  );
+}
+
+function ConfigDirsSection({
+  dirs,
+  onChange,
+}: {
+  dirs: string[];
+  onChange: (dirs: string[]) => void;
+}) {
+  const t = useI18n();
+  const [detecting, setDetecting] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const showMessage = useCallback((msg: string) => {
+    setMessage(msg);
+    setTimeout(() => setMessage(""), 3000);
+  }, []);
+
+  const handleAutoDetect = useCallback(async () => {
+    setDetecting(true);
+    try {
+      const found = await invoke<string[]>("detect_claude_dirs");
+      const newDirs = found.filter((d) => !dirs.includes(d));
+      if (newDirs.length > 0) {
+        onChange([...dirs, ...newDirs]);
+        showMessage(t("settings.configDirsFound", { count: String(newDirs.length) }));
+      } else {
+        showMessage(t("settings.configDirsNotFound"));
+      }
+    } catch {
+      showMessage(t("settings.configDirsNotFound"));
+    } finally {
+      setDetecting(false);
+    }
+  }, [dirs, onChange, showMessage, t]);
+
+  const handleAddFolder = useCallback(async () => {
+    try {
+      await invoke("set_dialog_open", { open: true });
+      const home = await invoke<string>("get_home_dir");
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: home ? `${home}/.claude` : undefined,
+      });
+      if (!selected) return;
+      // Convert absolute path to ~/... format
+      const homePath = selected.replace(/^\/Users\/[^/]+/, "~");
+      if (dirs.includes(homePath) || dirs.includes(selected)) return;
+      const valid = await invoke<boolean>("validate_claude_dir", { path: homePath });
+      if (valid) {
+        onChange([...dirs, homePath]);
+      } else {
+        showMessage(t("settings.configDirsInvalid"));
+      }
+    } finally {
+      await invoke("set_dialog_open", { open: false });
+    }
+  }, [dirs, onChange, showMessage, t]);
+
+  const handleRemove = useCallback((dir: string) => {
+    onChange(dirs.filter((d) => d !== dir));
+  }, [dirs, onChange]);
+
+  return (
+    <div>
+      <div style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: "var(--text-secondary)",
+        textTransform: "uppercase",
+        letterSpacing: "0.5px",
+        marginBottom: 8,
+      }}>
+        {t("settings.configDirs")}
+      </div>
+
+      {/* Directory list */}
+      <div style={{
+        maxHeight: 120,
+        overflowY: "auto",
+        marginBottom: 6,
+      }}>
+        {dirs.map((dir, i) => (
+          <div
+            key={dir}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "3px 0",
+              fontSize: 11,
+              color: "var(--text-primary)",
+            }}
+          >
+            <span style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flex: 1,
+              fontWeight: 500,
+            }}>
+              {dir}
+            </span>
+            {i === 0 ? (
+              <span style={{
+                fontSize: 9,
+                fontWeight: 600,
+                color: "var(--text-muted)",
+                marginLeft: 4,
+                flexShrink: 0,
+              }}>
+                ({t("settings.configDirsPrimary")})
+              </span>
+            ) : (
+              <button
+                onClick={() => handleRemove(dir)}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  width: 18,
+                  height: 18,
+                  borderRadius: 4,
+                  border: "none",
+                  cursor: "pointer",
+                  background: "transparent",
+                  color: "var(--text-muted)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  marginLeft: 4,
+                  transition: "color 0.15s ease",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+              >
+                x
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Buttons */}
+      <div style={{ display: "flex", gap: 4 }}>
+        <button
+          onClick={handleAutoDetect}
+          disabled={detecting}
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            padding: "4px 8px",
+            borderRadius: 4,
+            border: "none",
+            cursor: detecting ? "wait" : "pointer",
+            background: "var(--heat-0)",
+            color: "var(--text-secondary)",
+            opacity: detecting ? 0.6 : 1,
+            transition: "background 0.15s ease",
+          }}
+          onMouseEnter={(e) => { if (!detecting) e.currentTarget.style.background = "var(--heat-1)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "var(--heat-0)"; }}
+        >
+          {detecting ? "..." : t("settings.configDirsAutoDetect")}
+        </button>
+        <button
+          onClick={handleAddFolder}
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            padding: "4px 8px",
+            borderRadius: 4,
+            border: "none",
+            cursor: "pointer",
+            background: "var(--heat-0)",
+            color: "var(--text-secondary)",
+            transition: "background 0.15s ease",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--heat-1)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "var(--heat-0)"; }}
+        >
+          + {t("settings.configDirsAdd")}
+        </button>
+      </div>
+
+      {/* Feedback message */}
+      {message && (
+        <div style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          marginTop: 4,
+          fontWeight: 500,
+        }}>
+          {message}
+        </div>
+      )}
+    </div>
   );
 }

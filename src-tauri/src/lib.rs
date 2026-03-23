@@ -2,18 +2,35 @@ mod commands;
 mod providers;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
+
+/// When true, the window will not auto-hide on focus loss (e.g. during dialog).
+static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 
 use providers::types::UserPreferences;
 
-fn get_claude_dir() -> PathBuf {
-    dirs::home_dir()
+fn get_config_dirs_from_prefs() -> Vec<PathBuf> {
+    let prefs_path = dirs::home_dir()
         .unwrap_or_default()
         .join(".claude")
+        .join("ai-token-monitor-prefs.json");
+    let prefs: UserPreferences = std::fs::read_to_string(&prefs_path)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_default();
+    let home = dirs::home_dir().unwrap_or_default();
+    prefs.config_dirs.iter().map(|d| {
+        if d.starts_with("~/") {
+            home.join(d.strip_prefix("~/").unwrap_or(d))
+        } else {
+            PathBuf::from(d)
+        }
+    }).collect()
 }
 
 pub fn update_tray_title(app_handle: &tauri::AppHandle) {
@@ -59,8 +76,7 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
 }
 
 fn start_file_watcher(app_handle: tauri::AppHandle) {
-    let claude_dir = get_claude_dir();
-    let projects_dir = claude_dir.join("projects");
+    let config_dirs = get_config_dirs_from_prefs();
 
     thread::spawn(move || {
         let (tx, rx) = mpsc::channel();
@@ -85,8 +101,13 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
             Err(_) => return,
         };
 
-        if projects_dir.exists() {
-            let _ = watcher.watch(&projects_dir, RecursiveMode::Recursive);
+        let mut watched_dirs: Vec<PathBuf> = Vec::new();
+        for dir in &config_dirs {
+            let projects_dir = dir.join("projects");
+            if projects_dir.exists() {
+                let _ = watcher.watch(&projects_dir, RecursiveMode::Recursive);
+                watched_dirs.push(projects_dir);
+            }
         }
 
         // Adaptive debounce: escalate during burst activity
@@ -122,6 +143,26 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                     update_tray_title(&app_handle);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
+                    // Re-read config dirs and update watched paths if changed
+                    let new_dirs = get_config_dirs_from_prefs();
+                    let new_projects: Vec<PathBuf> = new_dirs.iter()
+                        .map(|d| d.join("projects"))
+                        .filter(|p| p.exists())
+                        .collect();
+                    if new_projects != watched_dirs {
+                        // Unwatch old dirs
+                        for dir in &watched_dirs {
+                            let _ = watcher.unwatch(dir);
+                        }
+                        // Watch new dirs
+                        for dir in &new_projects {
+                            let _ = watcher.watch(dir, RecursiveMode::Recursive);
+                        }
+                        watched_dirs = new_projects;
+                        // Trigger stats refresh for new dirs
+                        providers::claude_code::invalidate_stats_cache();
+                        let _ = app_handle.emit("stats-updated", ());
+                    }
                     update_tray_title(&app_handle);
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -172,6 +213,17 @@ fn configure_window_for_fullscreen(window: &tauri::WebviewWindow) {
 }
 
 #[tauri::command]
+fn get_home_dir() -> Option<String> {
+    dirs::home_dir().map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn set_dialog_open(open: bool) {
+    DIALOG_OPEN.store(open, Ordering::Relaxed);
+    eprintln!("[CMD] set_dialog_open({})", open);
+}
+
+#[tauri::command]
 fn hide_window(window: tauri::WebviewWindow) {
     eprintln!("[CMD] hide_window called");
     let _ = window.hide();
@@ -194,11 +246,16 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_all_stats,
             commands::get_preferences,
             commands::set_preferences,
+            commands::detect_claude_dirs,
+            commands::validate_claude_dir,
+            get_home_dir,
+            set_dialog_open,
             hide_window,
             quit_app,
             commands::capture_window
@@ -281,13 +338,20 @@ pub fn run() {
                     tauri::WindowEvent::Focused(focused) => {
                         eprintln!("[WINDOW] Focused({})", focused);
                         if !focused {
+                            // Skip auto-hide when a dialog (e.g. folder picker) is open
+                            if DIALOG_OPEN.load(Ordering::Relaxed) {
+                                eprintln!("[WINDOW] Skipping hide — dialog is open");
+                                return;
+                            }
                             // Delay hide to prevent race condition with fullscreen spaces
                             // where macOS fires focus-lost immediately after show
                             let win = win_clone.clone();
                             std::thread::spawn(move || {
                                 std::thread::sleep(std::time::Duration::from_millis(200));
-                                // Only hide if still unfocused after delay
-                                if !win.is_focused().unwrap_or(true) {
+                                // Only hide if still unfocused after delay and no dialog open
+                                if !DIALOG_OPEN.load(Ordering::Relaxed)
+                                    && !win.is_focused().unwrap_or(true)
+                                {
                                     let _ = win.hide();
                                     eprintln!("[WINDOW] Hidden on focus lost (delayed)");
                                 }
