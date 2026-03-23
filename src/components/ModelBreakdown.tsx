@@ -1,5 +1,5 @@
 import type { ModelUsage } from "../lib/types";
-import { formatTokens } from "../lib/format";
+import { formatTokens, formatCost } from "../lib/format";
 import { useSettings } from "../contexts/SettingsContext";
 
 interface Props {
@@ -67,6 +67,9 @@ export function ModelBreakdown({ modelUsage }: Props) {
               }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
                   {shortModelName(model)}
+                  <span style={{ fontSize: 9, fontWeight: 500, color: "var(--text-secondary)", marginLeft: 4 }}>
+                    {formatCost(usage.cost_usd)}
+                  </span>
                 </span>
                 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)" }}>
                   {formatTokens(total, prefs.number_format)}

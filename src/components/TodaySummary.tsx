@@ -1,6 +1,7 @@
 import type { DailyUsage } from "../lib/types";
 import { formatTokens, formatCost, getTotalTokens } from "../lib/format";
 import { useSettings } from "../contexts/SettingsContext";
+import { InfoTooltip } from "./InfoTooltip";
 
 interface Props {
   today: DailyUsage | null;
@@ -69,7 +70,35 @@ export function TodaySummary({ today, weekAvg }: Props) {
         gap: 16,
         marginTop: 8,
       }}>
-        <StatChip label="Cost" value={formatCost(cost)} color="var(--accent-orange)" />
+        <StatChip
+          label="Cost"
+          value={formatCost(cost)}
+          color="var(--accent-orange)"
+          tooltip={
+            <InfoTooltip>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Estimated API cost ($/MTok)</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9 }}>
+                <thead>
+                  <tr style={{ opacity: 0.7 }}>
+                    <th style={{ textAlign: "left", paddingBottom: 2 }}>Model</th>
+                    <th style={{ textAlign: "right", paddingBottom: 2 }}>In</th>
+                    <th style={{ textAlign: "right", paddingBottom: 2 }}>Out</th>
+                    <th style={{ textAlign: "right", paddingBottom: 2 }}>Cache R</th>
+                    <th style={{ textAlign: "right", paddingBottom: 2 }}>Cache W</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>Opus</td><td style={{ textAlign: "right" }}>$5</td><td style={{ textAlign: "right" }}>$25</td><td style={{ textAlign: "right" }}>$0.50</td><td style={{ textAlign: "right" }}>$6.25</td></tr>
+                  <tr><td>Sonnet</td><td style={{ textAlign: "right" }}>$3</td><td style={{ textAlign: "right" }}>$15</td><td style={{ textAlign: "right" }}>$0.30</td><td style={{ textAlign: "right" }}>$3.75</td></tr>
+                  <tr><td>Haiku</td><td style={{ textAlign: "right" }}>$1</td><td style={{ textAlign: "right" }}>$5</td><td style={{ textAlign: "right" }}>$0.10</td><td style={{ textAlign: "right" }}>$1.25</td></tr>
+                </tbody>
+              </table>
+              <div style={{ marginTop: 6, opacity: 0.7, fontSize: 9 }}>
+                Pro/Max plan users pay subscription, not per-token.
+              </div>
+            </InfoTooltip>
+          }
+        />
         <StatChip label="Messages" value={String(messages)} color="var(--accent-purple)" />
         <StatChip label="Sessions" value={String(sessions)} color="var(--accent-mint)" />
       </div>
@@ -77,12 +106,15 @@ export function TodaySummary({ today, weekAvg }: Props) {
   );
 }
 
-function StatChip({ label, value, color }: { label: string; value: string; color: string }) {
+function StatChip({ label, value, color, tooltip }: { label: string; value: string; color: string; tooltip?: React.ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <span style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 600 }}>
-        {label}
-      </span>
+      <div style={{ display: "flex", alignItems: "center" }}>
+        <span style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 600 }}>
+          {label}
+        </span>
+        {tooltip}
+      </div>
       <span style={{ fontSize: 15, fontWeight: 700, color }}>
         {value}
       </span>
