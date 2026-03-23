@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useTokenStats } from "./hooks/useTokenStats";
 import { useToday } from "./hooks/useToday";
 import { getTotalTokens } from "./lib/format";
@@ -21,16 +21,7 @@ import { SupportBanner } from "./components/SupportBanner";
 function AppContent() {
   const { stats, error, loading } = useTokenStats();
   const [activeTab, setActiveTab] = useState<TabType>("overview");
-  const [visitedTabs, setVisitedTabs] = useState<Set<TabType>>(new Set(["overview"]));
   const todayStr = useToday();
-
-  // Track visited tabs for lazy mounting
-  useEffect(() => {
-    setVisitedTabs((prev) => {
-      if (prev.has(activeTab)) return prev;
-      return new Set(prev).add(activeTab);
-    });
-  }, [activeTab]);
 
   const { today, weekAvg } = useMemo(() => {
     if (!stats) return { today: null, weekAvg: 0 };
@@ -107,32 +98,28 @@ function AppContent() {
       <Header stats={stats} />
       <TabBar activeTab={activeTab} onChange={setActiveTab} />
 
-      <div style={{ display: activeTab === "overview" ? "block" : "none" }}>
-        <TodaySummary today={today} weekAvg={weekAvg} />
-        <DailyChart daily={stats.daily} days={7} />
-        <PeriodTotals daily={stats.daily} />
-        <Heatmap daily={stats.daily} weeks={8} />
-      </div>
+      {activeTab === "overview" && (
+        <>
+          <TodaySummary today={today} weekAvg={weekAvg} />
+          <DailyChart daily={stats.daily} days={7} />
+          <PeriodTotals daily={stats.daily} />
+          <Heatmap daily={stats.daily} weeks={8} />
+        </>
+      )}
 
-      <div style={{ display: activeTab === "analytics" ? "block" : "none" }}>
-        {/* Lazy mount: only render after first visit */}
-        {visitedTabs.has("analytics") && (
-          <>
-            <ActivityGraph daily={stats.daily} />
-            <DailyChart daily={stats.daily} days={30} />
-            <PeriodTotals daily={stats.daily} />
-            <ModelBreakdown modelUsage={stats.model_usage} />
-            <CacheEfficiency stats={stats} />
-          </>
-        )}
-      </div>
+      {activeTab === "analytics" && (
+        <>
+          <ActivityGraph daily={stats.daily} />
+          <DailyChart daily={stats.daily} days={30} />
+          <PeriodTotals daily={stats.daily} />
+          <ModelBreakdown modelUsage={stats.model_usage} />
+          <CacheEfficiency stats={stats} />
+        </>
+      )}
 
-      <div style={{ display: activeTab === "leaderboard" ? "block" : "none" }}>
-        {/* Lazy mount: only render after first visit */}
-        {visitedTabs.has("leaderboard") && (
-          <Leaderboard stats={stats} />
-        )}
-      </div>
+      {activeTab === "leaderboard" && (
+        <Leaderboard stats={stats} />
+      )}
 
       <SupportBanner />
     </PopoverShell>
