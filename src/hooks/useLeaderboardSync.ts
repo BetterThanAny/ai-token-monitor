@@ -76,16 +76,17 @@ export function useLeaderboardSync({ stats, user, optedIn }: UseLeaderboardSyncP
           .limit(100);
 
         if (data) {
-          const entries = data.map((row) => {
-            const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+          const entries = (data as Record<string, unknown>[]).map((row) => {
+            const profiles = row.profiles;
+            const profile = Array.isArray(profiles) ? profiles[0] : profiles;
             return {
-              user_id: row.user_id,
-              nickname: (profile as { nickname?: string } | null)?.nickname ?? "Unknown",
-              avatar_url: (profile as { avatar_url?: string | null } | null)?.avatar_url ?? null,
-              total_tokens: row.total_tokens,
+              user_id: row.user_id as string,
+              nickname: (profile as Record<string, unknown> | null)?.nickname as string ?? "Unknown",
+              avatar_url: (profile as Record<string, unknown> | null)?.avatar_url as string | null ?? null,
+              total_tokens: row.total_tokens as number,
               cost_usd: Number(row.cost_usd),
-              messages: row.messages,
-              sessions: row.sessions,
+              messages: row.messages as number,
+              sessions: row.sessions as number,
             };
           });
           setLeaderboard(entries);
@@ -109,23 +110,25 @@ export function useLeaderboardSync({ stats, user, optedIn }: UseLeaderboardSyncP
 
         if (data) {
           const userMap = new Map<string, LeaderboardEntry>();
-          for (const row of data) {
-            const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-            const existing = userMap.get(row.user_id);
+          for (const row of (data as Record<string, unknown>[])) {
+            const profiles = row.profiles;
+            const profile = Array.isArray(profiles) ? profiles[0] : profiles;
+            const userId = row.user_id as string;
+            const existing = userMap.get(userId);
             if (existing) {
-              existing.total_tokens += row.total_tokens;
+              existing.total_tokens += row.total_tokens as number;
               existing.cost_usd += Number(row.cost_usd);
-              existing.messages += row.messages;
-              existing.sessions += row.sessions;
+              existing.messages += row.messages as number;
+              existing.sessions += row.sessions as number;
             } else {
-              userMap.set(row.user_id, {
-                user_id: row.user_id,
-                nickname: (profile as { nickname?: string } | null)?.nickname ?? "Unknown",
-                avatar_url: (profile as { avatar_url?: string | null } | null)?.avatar_url ?? null,
-                total_tokens: row.total_tokens,
+              userMap.set(userId, {
+                user_id: userId,
+                nickname: (profile as Record<string, unknown> | null)?.nickname as string ?? "Unknown",
+                avatar_url: (profile as Record<string, unknown> | null)?.avatar_url as string | null ?? null,
+                total_tokens: row.total_tokens as number,
                 cost_usd: Number(row.cost_usd),
-                messages: row.messages,
-                sessions: row.sessions,
+                messages: row.messages as number,
+                sessions: row.sessions as number,
               });
             }
           }
