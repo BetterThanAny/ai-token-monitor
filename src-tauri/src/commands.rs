@@ -16,12 +16,16 @@ fn prefs_path() -> PathBuf {
 }
 
 #[tauri::command]
-pub fn get_all_stats() -> Result<AllStats, String> {
-    let provider = ClaudeCodeProvider::new();
-    if !provider.is_available() {
-        return Err("Claude Code stats not available".to_string());
-    }
-    provider.fetch_stats()
+pub async fn get_all_stats() -> Result<AllStats, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let provider = ClaudeCodeProvider::new();
+        if !provider.is_available() {
+            return Err("Claude Code stats not available".to_string());
+        }
+        provider.fetch_stats()
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
