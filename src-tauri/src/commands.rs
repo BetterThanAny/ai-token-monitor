@@ -153,15 +153,14 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
-    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Gdi::{
         BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-        ReleaseDC, SelectObject, SRCCOPY,
+        GetWindowDC, ReleaseDC, SelectObject, SRCCOPY,
     };
     use windows::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, PrintWindow, PW_RENDERFULLCONTENT};
 
     let window = app
         .get_webview_window("main")
@@ -173,38 +172,36 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
     let hwnd = HWND(hwnd.0);
 
     unsafe {
-        let mut rect = RECT::default();
-        GetWindowRect(hwnd, &mut rect).map_err(|e| format!("GetWindowRect: {}", e))?;
+        // Get window dimensions via GetWindowDC + bitmap size
+        let hdc_window = GetWindowDC(Some(hwnd));
+        let mut rect = windows::Win32::Foundation::RECT::default();
+        windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect)
+            .map_err(|e| format!("GetWindowRect: {}", e))?;
         let width = rect.right - rect.left;
         let height = rect.bottom - rect.top;
 
-        let hdc_window = GetDC(hwnd);
-        let hdc_mem = CreateCompatibleDC(hdc_window);
+        let hdc_mem = CreateCompatibleDC(Some(hdc_window));
         let hbm = CreateCompatibleBitmap(hdc_window, width, height);
-        let old_obj = SelectObject(hdc_mem, hbm);
+        let old_obj = SelectObject(hdc_mem, hbm.into());
 
-        // Try PrintWindow with PW_RENDERFULLCONTENT for WebView content
-        let print_result = PrintWindow(hwnd, hdc_mem, PW_RENDERFULLCONTENT);
-        if !print_result.as_bool() {
-            // Fallback to BitBlt
-            let _ = BitBlt(hdc_mem, 0, 0, width, height, hdc_window, 0, 0, SRCCOPY);
-        }
+        // Capture window content via BitBlt
+        let _ = BitBlt(hdc_mem, 0, 0, width, height, Some(hdc_window), 0, 0, SRCCOPY);
 
         // Deselect bitmap from DC before clipboard operations
         SelectObject(hdc_mem, old_obj);
 
-        // Clean up GDI objects before clipboard (ensures cleanup on any clipboard error)
+        // Clean up GDI objects before clipboard
         DeleteDC(hdc_mem);
-        ReleaseDC(hwnd, hdc_window);
+        ReleaseDC(Some(hwnd), hdc_window);
 
         // Copy to clipboard
-        if OpenClipboard(hwnd).is_err() {
-            DeleteObject(hbm);
+        if OpenClipboard(Some(hwnd)).is_err() {
+            DeleteObject(hbm.into());
             return Err("Failed to open clipboard".to_string());
         }
         let _ = EmptyClipboard();
         // CF_BITMAP = 2
-        let result = SetClipboardData(2, windows::Win32::Foundation::HANDLE(hbm.0));
+        let result = SetClipboardData(2, Some(windows::Win32::Foundation::HANDLE(hbm.0)));
         let _ = CloseClipboard();
         // Do NOT delete hbm — clipboard owns it after SetClipboardData
 
