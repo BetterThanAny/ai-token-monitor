@@ -5,7 +5,7 @@
 
 > **[English](../README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [繁體中文](README.zh-TW.md)**
 
-一款 macOS 菜单栏应用，实时追踪 Claude Code 的 Token 使用量和费用。
+一款适用于 macOS 和 Windows 的系统托盘应用，实时追踪 Claude Code 的 Token 使用量和费用。
 
 | Overview | Analytics | Leaderboard |
 |:---:|:---:|:---:|
@@ -14,9 +14,12 @@
 
 ## 下载
 
-**[下载最新版本 (.dmg)](https://github.com/soulduse/ai-token-monitor/releases/latest)**
+**[下载最新版本](https://github.com/soulduse/ai-token-monitor/releases/latest)**
 
-> 仅支持 macOS (Apple Silicon)。Intel Mac 支持即将推出。
+| 平台 | 文件 | 备注 |
+|------|------|------|
+| **macOS** (Apple Silicon) | `.dmg` | Intel Mac 支持即将推出 |
+| **Windows** | `.exe` 安装程序 | Windows 10+（需要 WebView2，自动安装） |
 
 ## 主要功能
 
@@ -27,7 +30,7 @@
 - **周期导航** — 通过 `< >` 箭头浏览每周/每月汇总
 - **模型分析** — Input/Output/Cache 比例可视化
 - **缓存效率** — 缓存命中率环形图
-- **菜单栏费用** — 在托盘图标旁显示今日费用 ($45)
+- **托盘费用显示** — 在系统托盘显示今日费用（macOS: 菜单栏标题，Windows: 工具提示）
 - **4 种主题** — GitHub（绿色）、Purple、Ocean、Sunset — 支持深色模式
 - **截图** — 将应用窗口截图复制到剪贴板
 - **剪贴板导出** — 将使用量摘要以 Markdown 格式复制
@@ -57,7 +60,7 @@ npm run tauri build   # 生产构建
 
 ### 基本使用
 
-1. 启动应用后，macOS 菜单栏会出现图标
+1. 启动应用后，系统托盘（macOS 菜单栏 / Windows 任务栏）会出现图标
 2. 点击图标打开使用量仪表板
 3. 在 **Overview**、**Analytics** 和 **Leaderboard** 标签页之间切换
 
@@ -74,7 +77,7 @@ npm run tauri build   # 生产构建
 点击右上角齿轮图标进行配置：
 - **Theme**：GitHub / Purple / Ocean / Sunset 主题切换
 - **Number Format**：紧凑格式 (377.0K) 与完整格式 (377,000) 切换
-- **Menu Bar Cost**：在菜单栏显示/隐藏今日费用
+- **Tray Cost**：在系统托盘显示/隐藏今日费用
 - **Leaderboard**：选择是否共享使用数据 + GitHub 登录
 
 ### 排行榜
@@ -124,8 +127,8 @@ npm run tauri build   # 生产构建
 
 | 平台 | 状态 | 备注 |
 |------|------|------|
-| **macOS** | 已支持 | 菜单栏集成、Dock 隐藏、托盘费用显示 |
-| **Windows** | 计划中 | 核心逻辑跨平台。macOS 专用代码通过 `#[cfg(target_os)]` 隔离 |
+| **macOS** | 已支持 | 菜单栏集成、Dock 隐藏、托盘费用标题 |
+| **Windows** | 已支持 | 系统托盘集成、NSIS 安装程序、工具提示费用显示 |
 | **Linux** | 未测试 | Tauri 支持 Linux，基本功能可能可用 |
 
 ## 赞助

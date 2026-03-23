@@ -5,7 +5,7 @@
 
 > **[English](../README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md)**
 
-一款 macOS 選單列應用程式，即時追蹤 Claude Code 的 Token 使用量和費用。
+一款適用於 macOS 和 Windows 的系統匣應用程式，即時追蹤 Claude Code 的 Token 使用量和費用。
 
 | Overview | Analytics | Leaderboard |
 |:---:|:---:|:---:|
@@ -14,9 +14,12 @@
 
 ## 下載
 
-**[下載最新版本 (.dmg)](https://github.com/soulduse/ai-token-monitor/releases/latest)**
+**[下載最新版本](https://github.com/soulduse/ai-token-monitor/releases/latest)**
 
-> 僅支援 macOS (Apple Silicon)。Intel Mac 支援即將推出。
+| 平台 | 檔案 | 備註 |
+|------|------|------|
+| **macOS** (Apple Silicon) | `.dmg` | Intel Mac 支援即將推出 |
+| **Windows** | `.exe` 安裝程式 | Windows 10+（需要 WebView2，自動安裝） |
 
 ## 主要功能
 
@@ -27,7 +30,7 @@
 - **週期導覽** — 透過 `< >` 箭頭瀏覽每週/每月彙總
 - **模型分析** — Input/Output/Cache 比例視覺化
 - **快取效率** — 快取命中率環形圖
-- **選單列費用** — 在系統匣圖示旁顯示今日費用 ($45)
+- **系統匣費用顯示** — 在系統匣顯示今日費用（macOS: 選單列標題，Windows: 工具提示）
 - **4 種主題** — GitHub（綠色）、Purple、Ocean、Sunset — 支援深色模式
 - **螢幕截圖** — 將應用程式視窗截圖複製到剪貼簿
 - **剪貼簿匯出** — 將使用量摘要以 Markdown 格式複製
@@ -57,7 +60,7 @@ npm run tauri build   # 正式建置
 
 ### 基本使用
 
-1. 啟動應用程式後，macOS 選單列會出現圖示
+1. 啟動應用程式後，系統匣（macOS 選單列 / Windows 工作列）會出現圖示
 2. 點選圖示開啟使用量儀表板
 3. 在 **Overview**、**Analytics** 和 **Leaderboard** 分頁之間切換
 
@@ -74,7 +77,7 @@ npm run tauri build   # 正式建置
 點選右上角齒輪圖示進行設定：
 - **Theme**：GitHub / Purple / Ocean / Sunset 主題切換
 - **Number Format**：精簡格式 (377.0K) 與完整格式 (377,000) 切換
-- **Menu Bar Cost**：在選單列顯示/隱藏今日費用
+- **Tray Cost**：在系統匣顯示/隱藏今日費用
 - **Leaderboard**：選擇是否分享使用資料 + GitHub 登入
 
 ### 排行榜
@@ -124,8 +127,8 @@ npm run tauri build   # 正式建置
 
 | 平台 | 狀態 | 備註 |
 |------|------|------|
-| **macOS** | 已支援 | 選單列整合、Dock 隱藏、系統匣費用顯示 |
-| **Windows** | 規劃中 | 核心邏輯跨平台。macOS 專用程式碼透過 `#[cfg(target_os)]` 隔離 |
+| **macOS** | 已支援 | 選單列整合、Dock 隱藏、系統匣費用標題 |
+| **Windows** | 已支援 | 系統匣整合、NSIS 安裝程式、工具提示費用顯示 |
 | **Linux** | 未測試 | Tauri 支援 Linux，基本功能可能可用 |
 
 ## 贊助

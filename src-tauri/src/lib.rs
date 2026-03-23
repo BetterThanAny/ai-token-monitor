@@ -28,7 +28,9 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
 
     if !prefs.show_tray_cost {
         if let Some(tray) = app_handle.tray_by_id("main-tray") {
+            #[cfg(target_os = "macos")]
             let _ = tray.set_title(Some(""));
+            let _ = tray.set_tooltip(Some("AI Token Monitor"));
         }
         return;
     }
@@ -49,7 +51,9 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
             } else {
                 format!("${:.2}", today_cost)
             };
+            #[cfg(target_os = "macos")]
             let _ = tray.set_title(Some(&title));
+            let _ = tray.set_tooltip(Some(&format!("AI Token Monitor - Today: {}", title)));
         }
     }
 }
@@ -327,7 +331,6 @@ fn position_window_near_tray(
     let tray_size = tray_rect.size.to_logical::<f64>(scale);
 
     let tray_center_x = tray_pos.x + (tray_size.width / 2.0);
-    let y = tray_pos.y + tray_size.height;
 
     // Get the monitor where the tray is located
     if let Some(monitor) = window.available_monitors()?.into_iter().find(|m| {
@@ -337,26 +340,61 @@ fn position_window_near_tray(
     }) {
         let monitor_pos = monitor.position().to_logical::<f64>(scale);
         let monitor_size = monitor.size().to_logical::<f64>(scale);
-        let screen_bottom = monitor_pos.y + monitor_size.height;
+        let screen_mid_y = monitor_pos.y + (monitor_size.height / 2.0);
 
-        // Use available space below tray, with padding
+        // Detect if tray is at the bottom or top of the screen
+        let tray_at_bottom = tray_pos.y > screen_mid_y;
         let padding = 12.0;
-        let max_height = (screen_bottom - y - padding).max(400.0);
-        let desired_height = max_height.min(900.0);
 
-        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-            width: 400.0,
-            height: desired_height,
-        }));
+        if tray_at_bottom {
+            // Windows-style: taskbar at bottom, show popup above tray
+            let available_height = (tray_pos.y - monitor_pos.y - padding).max(400.0);
+            let desired_height = available_height.min(900.0);
+
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: 400.0,
+                height: desired_height,
+            }));
+
+            let window_size = window.outer_size()?.to_logical::<f64>(scale);
+            let x = tray_center_x - (window_size.width / 2.0);
+            let y = tray_pos.y - window_size.height - padding;
+
+            window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                x,
+                y,
+            }))?;
+        } else {
+            // macOS-style: menu bar at top, show popup below tray
+            let y = tray_pos.y + tray_size.height;
+            let screen_bottom = monitor_pos.y + monitor_size.height;
+            let max_height = (screen_bottom - y - padding).max(400.0);
+            let desired_height = max_height.min(900.0);
+
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: 400.0,
+                height: desired_height,
+            }));
+
+            let window_size = window.outer_size()?.to_logical::<f64>(scale);
+            let x = tray_center_x - (window_size.width / 2.0);
+
+            window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                x,
+                y,
+            }))?;
+        }
+    } else {
+        // Fallback: no monitor found, just position below tray
+        let y = tray_pos.y + tray_size.height;
+        let window_size = window.outer_size()?.to_logical::<f64>(scale);
+        let x = tray_center_x - (window_size.width / 2.0);
+
+        window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+            x,
+            y,
+        }))?;
     }
-
-    let window_size = window.outer_size()?.to_logical::<f64>(scale);
-    let x = tray_center_x - (window_size.width / 2.0);
-
-    window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
-        x,
-        y,
-    }))?;
 
     Ok(())
 }
