@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import type { UserPreferences } from "../lib/types";
 
 interface SettingsContextType {
@@ -16,6 +17,7 @@ const defaultPrefs: UserPreferences = {
   theme: "github",
   color_mode: "system",
   language: "en",
+  config_dirs: ["~/.claude"],
 };
 
 const SettingsContext = createContext<SettingsContextType>({
@@ -69,13 +71,22 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [prefs.color_mode]);
 
   // Persist to disk when prefs change
+  const prevConfigDirsRef = useRef<string>(JSON.stringify(defaultPrefs.config_dirs));
   useEffect(() => {
     if (skipNextPersist.current) {
       skipNextPersist.current = false;
+      prevConfigDirsRef.current = JSON.stringify(prefs.config_dirs);
       return;
     }
     if (!ready) return;
     invoke("set_preferences", { prefs }).catch(() => {});
+
+    // If config_dirs changed, trigger stats refresh
+    const newDirsJson = JSON.stringify(prefs.config_dirs);
+    if (newDirsJson !== prevConfigDirsRef.current) {
+      prevConfigDirsRef.current = newDirsJson;
+      emit("stats-updated").catch(() => {});
+    }
   }, [prefs, ready]);
 
   const updatePrefs = useCallback((partial: Partial<UserPreferences>) => {

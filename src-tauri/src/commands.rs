@@ -18,7 +18,8 @@ fn prefs_path() -> PathBuf {
 #[tauri::command]
 pub async fn get_all_stats() -> Result<AllStats, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let provider = ClaudeCodeProvider::new();
+        let prefs = get_preferences();
+        let provider = ClaudeCodeProvider::new(prefs.config_dirs);
         if !provider.is_available() {
             return Err("Claude Code stats not available".to_string());
         }
@@ -26,6 +27,59 @@ pub async fn get_all_stats() -> Result<AllStats, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn detect_claude_dirs() -> Vec<String> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let mut found: Vec<String> = Vec::new();
+
+    // Scan ~/.claude-* directories
+    if let Ok(entries) = std::fs::read_dir(&home) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(".claude-") && entry.path().join("projects").is_dir() {
+                found.push(format!("~/{}", name));
+            }
+        }
+    }
+
+    // Check CLAUDE_CONFIG_DIR env var
+    if let Ok(env_dir) = std::env::var("CLAUDE_CONFIG_DIR") {
+        let path = PathBuf::from(&env_dir);
+        if path.join("projects").is_dir() {
+            let display = if let Ok(stripped) = path.strip_prefix(&home) {
+                format!("~/{}", stripped.display())
+            } else {
+                env_dir
+            };
+            if !found.contains(&display) && display != "~/.claude" {
+                found.push(display);
+            }
+        }
+    }
+
+    found.sort();
+    found
+}
+
+#[tauri::command]
+pub fn validate_claude_dir(path: String) -> bool {
+    let home = dirs::home_dir().unwrap_or_default();
+    let expanded = if path.starts_with("~/") {
+        home.join(path.strip_prefix("~/").unwrap_or(&path))
+    } else {
+        PathBuf::from(&path)
+    };
+    // Guard against path traversal outside home directory
+    let canonical = match expanded.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    if !canonical.starts_with(&home) {
+        return false;
+    }
+    canonical.join("projects").is_dir()
 }
 
 #[tauri::command]
