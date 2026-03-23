@@ -14,6 +14,29 @@ export interface LeaderboardEntry {
   sessions: number;
 }
 
+interface SnapshotRow {
+  user_id: string;
+  total_tokens: number;
+  cost_usd: number;
+  messages: number;
+  sessions: number;
+  profiles: { nickname: string; avatar_url: string | null }
+    | { nickname: string; avatar_url: string | null }[];
+}
+
+function toLeaderboardEntry(row: SnapshotRow): LeaderboardEntry {
+  const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+  return {
+    user_id: row.user_id,
+    nickname: profile?.nickname ?? "Unknown",
+    avatar_url: profile?.avatar_url ?? null,
+    total_tokens: row.total_tokens,
+    cost_usd: Number(row.cost_usd),
+    messages: row.messages,
+    sessions: row.sessions,
+  };
+}
+
 interface UseLeaderboardSyncProps {
   stats: AllStats | null;
   user: User | null;
@@ -76,19 +99,7 @@ export function useLeaderboardSync({ stats, user, optedIn }: UseLeaderboardSyncP
           .limit(100);
 
         if (data) {
-          const entries = (data as Record<string, unknown>[]).map((row) => {
-            const profiles = row.profiles;
-            const profile = Array.isArray(profiles) ? profiles[0] : profiles;
-            return {
-              user_id: row.user_id as string,
-              nickname: (profile as Record<string, unknown> | null)?.nickname as string ?? "Unknown",
-              avatar_url: (profile as Record<string, unknown> | null)?.avatar_url as string | null ?? null,
-              total_tokens: row.total_tokens as number,
-              cost_usd: Number(row.cost_usd),
-              messages: row.messages as number,
-              sessions: row.sessions as number,
-            };
-          });
+          const entries = (data as SnapshotRow[]).map(toLeaderboardEntry);
           setLeaderboard(entries);
           cacheRef.current = { data: entries, fetchedAt: Date.now(), period };
         }
@@ -110,26 +121,15 @@ export function useLeaderboardSync({ stats, user, optedIn }: UseLeaderboardSyncP
 
         if (data) {
           const userMap = new Map<string, LeaderboardEntry>();
-          for (const row of (data as Record<string, unknown>[])) {
-            const profiles = row.profiles;
-            const profile = Array.isArray(profiles) ? profiles[0] : profiles;
-            const userId = row.user_id as string;
-            const existing = userMap.get(userId);
+          for (const row of (data as SnapshotRow[])) {
+            const existing = userMap.get(row.user_id);
             if (existing) {
-              existing.total_tokens += row.total_tokens as number;
+              existing.total_tokens += row.total_tokens;
               existing.cost_usd += Number(row.cost_usd);
-              existing.messages += row.messages as number;
-              existing.sessions += row.sessions as number;
+              existing.messages += row.messages;
+              existing.sessions += row.sessions;
             } else {
-              userMap.set(userId, {
-                user_id: userId,
-                nickname: (profile as Record<string, unknown> | null)?.nickname as string ?? "Unknown",
-                avatar_url: (profile as Record<string, unknown> | null)?.avatar_url as string | null ?? null,
-                total_tokens: row.total_tokens as number,
-                cost_usd: Number(row.cost_usd),
-                messages: row.messages as number,
-                sessions: row.sessions as number,
-              });
+              userMap.set(row.user_id, toLeaderboardEntry(row));
             }
           }
           const sorted = Array.from(userMap.values()).sort((a, b) => b.total_tokens - a.total_tokens);
