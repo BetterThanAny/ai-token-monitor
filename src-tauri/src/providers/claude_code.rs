@@ -6,6 +6,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+
 use super::traits::TokenProvider;
 use super::types::{AllStats, DailyUsage, ModelUsage};
 
@@ -55,6 +57,47 @@ fn calculate_cost(pricing: &ModelPricing, input: u64, output: u64, cache_read: u
         + (cache_write as f64 / 1_000_000.0) * pricing.cache_write
 }
 
+// --- Persistent disk cache for historical month data ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DiskCache {
+    months: HashMap<String, MonthData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MonthData {
+    daily: Vec<DailyUsage>,
+    model_usage: HashMap<String, ModelUsage>,
+    total_messages: u32,
+}
+
+fn disk_cache_path(claude_dir: &PathBuf) -> PathBuf {
+    claude_dir.join("ai-token-monitor-cache.json")
+}
+
+fn load_disk_cache(claude_dir: &PathBuf) -> Option<DiskCache> {
+    let path = disk_cache_path(claude_dir);
+    let content = fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+fn save_disk_cache(claude_dir: &PathBuf, cache: &DiskCache) {
+    let path = disk_cache_path(claude_dir);
+    if let Ok(content) = serde_json::to_string(cache) {
+        let _ = fs::write(&path, content);
+    }
+}
+
+fn current_month_str() -> String {
+    chrono::Local::now().format("%Y-%m").to_string()
+}
+
+fn date_to_month(date: &str) -> String {
+    date.get(..7).unwrap_or(date).to_string()
+}
+
+// ---
+
 pub struct ClaudeCodeProvider {
     claude_dir: PathBuf,
 }
@@ -67,10 +110,8 @@ impl ClaudeCodeProvider {
         }
     }
 
-    /// Parse all session JSONL files from ~/.claude/projects/**/*.jsonl
-    fn parse_session_files(&self) -> Vec<SessionEntry> {
-        // Use HashMap to keep the LAST occurrence per message — streaming chunks
-        // accumulate output tokens, so the final chunk has the complete count.
+    /// Parse JSONL files, optionally filtering to only current month
+    fn parse_session_files(&self, only_current_month: bool) -> Vec<SessionEntry> {
         let mut dedup: HashMap<String, SessionEntry> = HashMap::new();
 
         let projects_dir = self.claude_dir.join("projects");
@@ -78,13 +119,36 @@ impl ClaudeCodeProvider {
 
         let files = glob::glob(&pattern).unwrap_or_else(|_| glob::glob("").unwrap());
 
+        let current_month = if only_current_month {
+            Some(current_month_str())
+        } else {
+            None
+        };
+
         for path in files.flatten() {
+            if let Some(ref month) = current_month {
+                if let Ok(metadata) = fs::metadata(&path) {
+                    if let Ok(modified) = metadata.modified() {
+                        let modified_date: chrono::DateTime<chrono::Local> = modified.into();
+                        let file_month = modified_date.format("%Y-%m").to_string();
+                        if &file_month < month {
+                            continue;
+                        }
+                    }
+                }
+            }
+
             if let Ok(file) = fs::File::open(&path) {
                 let reader = BufReader::new(file);
                 for line in reader.lines().map_while(Result::ok) {
                     if let Some(entry) = parse_session_line(&line) {
+                        if let Some(ref month) = current_month {
+                            if &date_to_month(&entry.date) < month {
+                                continue;
+                            }
+                        }
                         let key = format!("{}:{}", entry.message_id, entry.request_id);
-                        dedup.insert(key, entry); // always overwrite → keeps last
+                        dedup.insert(key, entry);
                     }
                 }
             }
@@ -156,20 +220,96 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
     })
 }
 
+/// Aggregate session entries into daily and model maps
+fn aggregate_entries(
+    entries: &[SessionEntry],
+) -> (HashMap<String, DailyUsage>, HashMap<String, ModelUsage>, u32, Option<String>) {
+    let mut daily_map: HashMap<String, DailyUsage> = HashMap::new();
+    let mut model_usage_map: HashMap<String, ModelUsage> = HashMap::new();
+    let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut total_messages: u32 = 0;
+    let mut first_date: Option<String> = None;
+
+    for entry in entries {
+        total_messages += 1;
+
+        if first_date.as_ref().map_or(true, |d| entry.date < *d) {
+            first_date = Some(entry.date.clone());
+        }
+
+        let pricing = get_pricing(&entry.model);
+        let cost = calculate_cost(
+            &pricing,
+            entry.input_tokens,
+            entry.output_tokens,
+            entry.cache_read_input_tokens,
+            entry.cache_creation_input_tokens,
+        );
+
+        let total_tokens = entry.input_tokens + entry.output_tokens;
+
+        let daily = daily_map.entry(entry.date.clone()).or_insert_with(|| DailyUsage {
+            date: entry.date.clone(),
+            tokens: HashMap::new(),
+            cost_usd: 0.0,
+            messages: 0,
+            sessions: 0,
+            tool_calls: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        });
+        *daily.tokens.entry(entry.model.clone()).or_insert(0) += total_tokens;
+        daily.cost_usd += cost;
+        daily.messages += 1;
+        daily.input_tokens += entry.input_tokens;
+        daily.output_tokens += entry.output_tokens;
+        daily.cache_read_tokens += entry.cache_read_input_tokens;
+        daily.cache_write_tokens += entry.cache_creation_input_tokens;
+
+        if !entry.session_id.is_empty() {
+            daily_session_ids
+                .entry(entry.date.clone())
+                .or_default()
+                .insert(entry.session_id.clone());
+        }
+
+        let mu = model_usage_map.entry(entry.model.clone()).or_insert_with(|| ModelUsage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read: 0,
+            cache_write: 0,
+            cost_usd: 0.0,
+        });
+        mu.input_tokens += entry.input_tokens;
+        mu.output_tokens += entry.output_tokens;
+        mu.cache_read += entry.cache_read_input_tokens;
+        mu.cache_write += entry.cache_creation_input_tokens;
+        mu.cost_usd += cost;
+    }
+
+    for (date, session_ids) in &daily_session_ids {
+        if let Some(daily) = daily_map.get_mut(date) {
+            daily.sessions = session_ids.len() as u32;
+        }
+    }
+
+    (daily_map, model_usage_map, total_messages, first_date)
+}
+
 impl TokenProvider for ClaudeCodeProvider {
     fn name(&self) -> &str {
         "Claude Code"
     }
 
     fn fetch_stats(&self) -> Result<AllStats, String> {
-        // Clear cache if invalidated by file watcher
         if CACHE_INVALIDATED.swap(false, Ordering::Relaxed) {
             if let Ok(mut cache) = STATS_CACHE.lock() {
                 *cache = None;
             }
         }
 
-        // Return cached stats if still fresh
         if let Ok(cache) = STATS_CACHE.lock() {
             if let Some(ref cached) = *cache {
                 if cached.computed_at.elapsed() < CACHE_TTL {
@@ -178,88 +318,119 @@ impl TokenProvider for ClaudeCodeProvider {
             }
         }
 
-        let entries = self.parse_session_files();
+        let current_month = current_month_str();
 
-        let mut daily_map: HashMap<String, DailyUsage> = HashMap::new();
-        let mut model_usage_map: HashMap<String, ModelUsage> = HashMap::new();
-        let mut total_messages: u32 = 0;
-        let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
-        let mut first_date: Option<String> = None;
+        // Load disk cache for completed months
+        let mut disk_cache = load_disk_cache(&self.claude_dir).unwrap_or(DiskCache {
+            months: HashMap::new(),
+        });
+        let has_historical = !disk_cache.months.is_empty();
 
-        for entry in &entries {
-            total_messages += 1;
+        // Only parse current month files if we have historical cache
+        let entries = if has_historical {
+            self.parse_session_files(true)
+        } else {
+            self.parse_session_files(false)
+        };
 
-            // Track first date
-            if first_date.as_ref().map_or(true, |d| entry.date < *d) {
-                first_date = Some(entry.date.clone());
+        // If no historical cache, split entries into current vs historical months
+        if !has_historical {
+            let mut current_entries: Vec<&SessionEntry> = Vec::new();
+            let mut month_entries: HashMap<String, Vec<&SessionEntry>> = HashMap::new();
+
+            for entry in &entries {
+                let month = date_to_month(&entry.date);
+                if month >= current_month {
+                    current_entries.push(entry);
+                } else {
+                    month_entries.entry(month).or_default().push(entry);
+                }
             }
 
-            let pricing = get_pricing(&entry.model);
-            let cost = calculate_cost(
-                &pricing,
-                entry.input_tokens,
-                entry.output_tokens,
-                entry.cache_read_input_tokens,
-                entry.cache_creation_input_tokens,
+            // Save completed months to disk cache
+            let mut new_cache = DiskCache { months: HashMap::new() };
+            for (month, month_data) in &month_entries {
+                let owned: Vec<SessionEntry> = month_data.iter().map(|e| SessionEntry {
+                    date: e.date.clone(), model: e.model.clone(), session_id: e.session_id.clone(),
+                    message_id: e.message_id.clone(), request_id: e.request_id.clone(),
+                    input_tokens: e.input_tokens, output_tokens: e.output_tokens,
+                    cache_read_input_tokens: e.cache_read_input_tokens,
+                    cache_creation_input_tokens: e.cache_creation_input_tokens,
+                }).collect();
+                let (daily_map, model_map, messages, _) = aggregate_entries(&owned);
+                new_cache.months.insert(month.clone(), MonthData {
+                    daily: daily_map.into_values().collect(),
+                    model_usage: model_map,
+                    total_messages: messages,
+                });
+            }
+            if !new_cache.months.is_empty() {
+                save_disk_cache(&self.claude_dir, &new_cache);
+                disk_cache = new_cache;
+            }
+
+            // Aggregate only current month entries
+            let current_owned: Vec<SessionEntry> = current_entries.iter().map(|e| SessionEntry {
+                date: e.date.clone(), model: e.model.clone(), session_id: e.session_id.clone(),
+                message_id: e.message_id.clone(), request_id: e.request_id.clone(),
+                input_tokens: e.input_tokens, output_tokens: e.output_tokens,
+                cache_read_input_tokens: e.cache_read_input_tokens,
+                cache_creation_input_tokens: e.cache_creation_input_tokens,
+            }).collect();
+            let (current_daily_map, current_model_map, current_messages, current_first_date) =
+                aggregate_entries(&current_owned);
+
+            return self.merge_and_finalize(
+                current_daily_map, current_model_map, current_messages, current_first_date, &disk_cache,
             );
-
-            let total_tokens = entry.input_tokens + entry.output_tokens;
-
-            // Daily aggregation
-            let daily = daily_map.entry(entry.date.clone()).or_insert_with(|| DailyUsage {
-                date: entry.date.clone(),
-                tokens: HashMap::new(),
-                cost_usd: 0.0,
-                messages: 0,
-                sessions: 0,
-                tool_calls: 0,
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
-            });
-            *daily.tokens.entry(entry.model.clone()).or_insert(0) += total_tokens;
-            daily.cost_usd += cost;
-            daily.messages += 1;
-            daily.input_tokens += entry.input_tokens;
-            daily.output_tokens += entry.output_tokens;
-            daily.cache_read_tokens += entry.cache_read_input_tokens;
-            daily.cache_write_tokens += entry.cache_creation_input_tokens;
-
-            // Track unique session IDs per day
-            if !entry.session_id.is_empty() {
-                daily_session_ids
-                    .entry(entry.date.clone())
-                    .or_default()
-                    .insert(entry.session_id.clone());
-            }
-
-            // Model aggregation
-            let mu = model_usage_map.entry(entry.model.clone()).or_insert_with(|| ModelUsage {
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read: 0,
-                cache_write: 0,
-                cost_usd: 0.0,
-            });
-            mu.input_tokens += entry.input_tokens;
-            mu.output_tokens += entry.output_tokens;
-            mu.cache_read += entry.cache_read_input_tokens;
-            mu.cache_write += entry.cache_creation_input_tokens;
-            mu.cost_usd += cost;
         }
 
-        // Count sessions from unique sessionId values per day
-        for (date, session_ids) in &daily_session_ids {
-            if let Some(daily) = daily_map.get_mut(date) {
-                daily.sessions = session_ids.len() as u32;
+        // Has historical cache: only current month was parsed
+        let (current_daily_map, current_model_map, current_messages, current_first_date) =
+            aggregate_entries(&entries);
+
+        self.merge_and_finalize(
+            current_daily_map, current_model_map, current_messages, current_first_date, &disk_cache,
+        )
+    }
+
+    fn is_available(&self) -> bool {
+        self.claude_dir.join("projects").exists()
+    }
+}
+
+impl ClaudeCodeProvider {
+    fn merge_and_finalize(
+        &self,
+        mut daily_map: HashMap<String, DailyUsage>,
+        mut model_usage_map: HashMap<String, ModelUsage>,
+        mut total_messages: u32,
+        mut first_date: Option<String>,
+        disk_cache: &DiskCache,
+    ) -> Result<AllStats, String> {
+        for (_month, month_data) in &disk_cache.months {
+            total_messages += month_data.total_messages;
+            for d in &month_data.daily {
+                if first_date.as_ref().map_or(true, |fd| d.date < *fd) {
+                    first_date = Some(d.date.clone());
+                }
+                daily_map.insert(d.date.clone(), d.clone());
+            }
+            for (model, mu) in &month_data.model_usage {
+                let existing = model_usage_map.entry(model.clone()).or_insert_with(|| ModelUsage {
+                    input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0, cost_usd: 0.0,
+                });
+                existing.input_tokens += mu.input_tokens;
+                existing.output_tokens += mu.output_tokens;
+                existing.cache_read += mu.cache_read;
+                existing.cache_write += mu.cache_write;
+                existing.cost_usd += mu.cost_usd;
             }
         }
 
         let mut daily: Vec<DailyUsage> = daily_map.into_values().collect();
         daily.sort_by(|a, b| a.date.cmp(&b.date));
 
-        // Estimate total sessions
         let total_sessions = daily.iter().map(|d| d.sessions as u32).sum::<u32>();
 
         let stats = AllStats {
@@ -270,7 +441,6 @@ impl TokenProvider for ClaudeCodeProvider {
             first_session_date: first_date,
         };
 
-        // Update cache
         if let Ok(mut cache) = STATS_CACHE.lock() {
             *cache = Some(CachedStats {
                 stats: stats.clone(),
@@ -279,10 +449,6 @@ impl TokenProvider for ClaudeCodeProvider {
         }
 
         Ok(stats)
-    }
-
-    fn is_available(&self) -> bool {
-        self.claude_dir.join("projects").exists()
     }
 }
 
