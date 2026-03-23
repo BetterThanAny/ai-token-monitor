@@ -5,7 +5,7 @@ use crate::providers::claude_code::ClaudeCodeProvider;
 use crate::providers::traits::TokenProvider;
 use crate::providers::types::{AllStats, UserPreferences};
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use tauri::Manager;
 
 fn prefs_path() -> PathBuf {
@@ -150,7 +150,71 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
+    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::Graphics::Gdi::{
+        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
+        ReleaseDC, SelectObject, SRCCOPY,
+    };
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, PrintWindow, PW_RENDERFULLCONTENT};
+
+    let window = app
+        .get_webview_window("main")
+        .ok_or("Window not found")?;
+
+    let hwnd = window
+        .hwnd()
+        .map_err(|e| format!("Failed to get HWND: {}", e))?;
+    let hwnd = HWND(hwnd.0);
+
+    unsafe {
+        let mut rect = RECT::default();
+        GetWindowRect(hwnd, &mut rect).map_err(|e| format!("GetWindowRect: {}", e))?;
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+
+        let hdc_window = GetDC(Some(hwnd));
+        let hdc_mem = CreateCompatibleDC(Some(hdc_window));
+        let hbm = CreateCompatibleBitmap(hdc_window, width, height);
+        let old_obj = SelectObject(hdc_mem, hbm);
+
+        // Try PrintWindow with PW_RENDERFULLCONTENT for WebView content
+        let print_result = PrintWindow(hwnd, Some(hdc_mem), PW_RENDERFULLCONTENT);
+        if !print_result.as_bool() {
+            // Fallback to BitBlt
+            let _ = BitBlt(hdc_mem, 0, 0, width, height, Some(hdc_window), 0, 0, SRCCOPY);
+        }
+
+        // Deselect bitmap from DC before clipboard operations
+        SelectObject(hdc_mem, old_obj);
+
+        // Clean up GDI objects before clipboard (ensures cleanup on any clipboard error)
+        DeleteDC(hdc_mem);
+        ReleaseDC(Some(hwnd), hdc_window);
+
+        // Copy to clipboard
+        if OpenClipboard(Some(hwnd)).is_err() {
+            DeleteObject(hbm);
+            return Err("Failed to open clipboard".to_string());
+        }
+        let _ = EmptyClipboard();
+        // CF_BITMAP = 2
+        let result = SetClipboardData(2, windows::Win32::Foundation::HANDLE(hbm.0 as isize));
+        let _ = CloseClipboard();
+        // Do NOT delete hbm — clipboard owns it after SetClipboardData
+
+        result
+            .map(|_| ())
+            .map_err(|_| "Failed to copy to clipboard".to_string())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[tauri::command]
 pub fn capture_window(_app: tauri::AppHandle) -> Result<(), String> {
     Err("Screenshot not supported on this platform".to_string())

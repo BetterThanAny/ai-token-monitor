@@ -45,6 +45,15 @@
       "exceptionDomain": "",
       "signingIdentity": "-",
       "entitlements": null
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English", "Korean"]
+      }
     }
   },
   "plugins": {}
