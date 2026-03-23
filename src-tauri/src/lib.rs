@@ -8,8 +8,6 @@ use notify::{Event, EventKind, RecursiveMode, Watcher};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 
-use providers::claude_code::ClaudeCodeProvider;
-use providers::traits::TokenProvider;
 use providers::types::UserPreferences;
 
 fn get_claude_dir() -> PathBuf {
@@ -35,8 +33,8 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
         return;
     }
 
-    let provider = ClaudeCodeProvider::new();
-    if let Ok(stats) = provider.fetch_stats() {
+    // Use cached stats only — never trigger a full re-parse from tray update
+    if let Some(stats) = providers::claude_code::get_cached_stats() {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let today_cost = stats
             .daily
@@ -69,7 +67,6 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                     event.kind,
                     EventKind::Modify(_) | EventKind::Create(_)
                 ) {
-                    // Only trigger for JSONL and JSON files
                     let dominated = event.paths.iter().any(|p| {
                         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
                         ext == "jsonl" || ext == "json"
@@ -84,29 +81,43 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
             Err(_) => return,
         };
 
-        // Watch projects directory recursively for JSONL changes
         if projects_dir.exists() {
             let _ = watcher.watch(&projects_dir, RecursiveMode::Recursive);
         }
 
+        // Adaptive debounce: escalate during burst activity
+        let mut recent_triggers: Vec<std::time::Instant> = Vec::new();
+        let base_debounce = std::time::Duration::from_secs(2);
+        let burst_debounce = std::time::Duration::from_secs(10);
+
         loop {
             match rx.recv_timeout(std::time::Duration::from_secs(60)) {
                 Ok(()) => {
-                    // Debounce: wait 2s for events to settle before processing
+                    // Detect burst: count triggers in last 10 seconds
+                    let now = std::time::Instant::now();
+                    recent_triggers.retain(|t| now.duration_since(*t) < std::time::Duration::from_secs(10));
+                    recent_triggers.push(now);
+
+                    let debounce = if recent_triggers.len() >= 3 {
+                        burst_debounce
+                    } else {
+                        base_debounce
+                    };
+
+                    // Debounce: drain events for the debounce duration
                     loop {
-                        match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                        match rx.recv_timeout(debounce) {
                             Ok(()) => continue,
                             Err(mpsc::RecvTimeoutError::Timeout) => break,
                             Err(mpsc::RecvTimeoutError::Disconnected) => return,
                         }
                     }
-                    eprintln!("[WATCH] file changed (debounced), invalidating cache");
+                    eprintln!("[WATCH] file changed (debounce={}s), invalidating cache", debounce.as_secs());
                     providers::claude_code::invalidate_stats_cache();
                     let _ = app_handle.emit("stats-updated", ());
                     update_tray_title(&app_handle);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    // Periodic tray refresh
                     update_tray_title(&app_handle);
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
