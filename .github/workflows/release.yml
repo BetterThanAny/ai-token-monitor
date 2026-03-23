@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - 'package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   check-version:
@@ -24,6 +28,11 @@ jobs:
       - name: Check if version changed
         id: check
         run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Manual dispatch — skipping version check"
+            exit 0
+          fi
           CURRENT=$(node -p 'require("./package.json").version')
           PREVIOUS=$(git show HEAD~1:package.json | node -p 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).version')
           if [ "$CURRENT" != "$PREVIOUS" ]; then
@@ -38,9 +47,6 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
     runs-on: macos-latest
-    permissions:
-      contents: write
-
     steps:
       - uses: actions/checkout@v4
 
@@ -106,9 +112,6 @@ jobs:
     needs: [check-version, build-macos]
     if: needs.check-version.outputs.changed == 'true'
     runs-on: windows-latest
-    permissions:
-      contents: write
-
     steps:
       - uses: actions/checkout@v4
 
