@@ -200,6 +200,8 @@ pub fn run() {
                                 let _ = window.hide();
                                 eprintln!("[TRAY] Window hidden");
                             } else {
+                                // Pre-fetch stats before showing window so data is ready
+                                let _ = app.emit("stats-updated", ());
                                 let _ = position_window_near_tray(&window, tray);
                                 let _ = window.show();
                                 eprintln!("[TRAY] Window shown");
