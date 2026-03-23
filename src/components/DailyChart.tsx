@@ -137,7 +137,7 @@ export function DailyChart({ daily, days = 7 }: Props) {
                 fontSize={8}
                 fontWeight={600}
                 fill="var(--text-secondary)"
-                opacity={0.7}
+                opacity={0.9}
               >
                 {formatYTick(tick)}
               </text>
@@ -153,7 +153,7 @@ export function DailyChart({ daily, days = 7 }: Props) {
             stroke="var(--text-secondary)"
             strokeWidth={0.5}
             strokeDasharray="4 3"
-            opacity={0.5}
+            opacity={0.7}
           />
 
           {/* Bars */}
