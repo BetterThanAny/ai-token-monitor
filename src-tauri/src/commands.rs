@@ -182,7 +182,7 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
 
         let hdc_mem = CreateCompatibleDC(Some(hdc_window));
         let hbm = CreateCompatibleBitmap(hdc_window, width, height);
-        let old_obj = SelectObject(hdc_mem, hbm);
+        let old_obj = SelectObject(hdc_mem, hbm.into());
 
         // Capture window content via BitBlt
         let _ = BitBlt(hdc_mem, 0, 0, width, height, Some(hdc_window), 0, 0, SRCCOPY);
