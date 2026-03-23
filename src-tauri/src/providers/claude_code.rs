@@ -202,7 +202,8 @@ impl TokenProvider for ClaudeCodeProvider {
                 entry.cache_creation_input_tokens,
             );
 
-            let total_tokens = entry.input_tokens + entry.output_tokens;
+            let total_tokens = entry.input_tokens + entry.output_tokens
+                + entry.cache_read_input_tokens + entry.cache_creation_input_tokens;
 
             // Daily aggregation
             let daily = daily_map.entry(entry.date.clone()).or_insert_with(|| DailyUsage {
