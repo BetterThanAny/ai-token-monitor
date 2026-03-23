@@ -178,16 +178,16 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         let width = rect.right - rect.left;
         let height = rect.bottom - rect.top;
 
-        let hdc_window = GetDC(Some(hwnd));
-        let hdc_mem = CreateCompatibleDC(Some(hdc_window));
+        let hdc_window = GetDC(hwnd);
+        let hdc_mem = CreateCompatibleDC(hdc_window);
         let hbm = CreateCompatibleBitmap(hdc_window, width, height);
         let old_obj = SelectObject(hdc_mem, hbm);
 
         // Try PrintWindow with PW_RENDERFULLCONTENT for WebView content
-        let print_result = PrintWindow(hwnd, Some(hdc_mem), PW_RENDERFULLCONTENT);
+        let print_result = PrintWindow(hwnd, hdc_mem, PW_RENDERFULLCONTENT);
         if !print_result.as_bool() {
             // Fallback to BitBlt
-            let _ = BitBlt(hdc_mem, 0, 0, width, height, Some(hdc_window), 0, 0, SRCCOPY);
+            let _ = BitBlt(hdc_mem, 0, 0, width, height, hdc_window, 0, 0, SRCCOPY);
         }
 
         // Deselect bitmap from DC before clipboard operations
@@ -195,16 +195,16 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
 
         // Clean up GDI objects before clipboard (ensures cleanup on any clipboard error)
         DeleteDC(hdc_mem);
-        ReleaseDC(Some(hwnd), hdc_window);
+        ReleaseDC(hwnd, hdc_window);
 
         // Copy to clipboard
-        if OpenClipboard(Some(hwnd)).is_err() {
+        if OpenClipboard(hwnd).is_err() {
             DeleteObject(hbm);
             return Err("Failed to open clipboard".to_string());
         }
         let _ = EmptyClipboard();
         // CF_BITMAP = 2
-        let result = SetClipboardData(2, windows::Win32::Foundation::HANDLE(hbm.0 as isize));
+        let result = SetClipboardData(2, windows::Win32::Foundation::HANDLE(hbm.0));
         let _ = CloseClipboard();
         // Do NOT delete hbm — clipboard owns it after SetClipboardData
 
