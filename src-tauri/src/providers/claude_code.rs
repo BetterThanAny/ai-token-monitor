@@ -4,6 +4,8 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -32,6 +34,7 @@ struct IncrementalState {
 static STATS_CACHE: Mutex<Option<CachedStats>> = Mutex::new(None);
 static INCREMENTAL_STATE: Mutex<Option<IncrementalState>> = Mutex::new(None);
 static CACHE_INVALIDATED: AtomicBool = AtomicBool::new(false);
+static CONFIG_DIRS_HASH: Mutex<u64> = Mutex::new(0);
 const CACHE_TTL: Duration = Duration::from_secs(300); // 5min fallback — primary invalidation is event-driven
 
 /// Invalidate the stats cache so the next fetch re-parses JSONL files.
@@ -118,15 +121,42 @@ fn date_to_month(date: &str) -> String {
 // ---
 
 pub struct ClaudeCodeProvider {
-    claude_dir: PathBuf,
+    primary_dir: PathBuf,
+    all_dirs: Vec<PathBuf>,
+}
+
+fn expand_tilde(path: &str) -> PathBuf {
+    if path.starts_with("~/") || path == "~" {
+        let home = dirs::home_dir().unwrap_or_default();
+        home.join(path.strip_prefix("~/").unwrap_or(""))
+    } else {
+        PathBuf::from(path)
+    }
 }
 
 impl ClaudeCodeProvider {
-    pub fn new() -> Self {
+    pub fn new(config_dirs: Vec<String>) -> Self {
         let home = dirs::home_dir().unwrap_or_default();
-        Self {
-            claude_dir: home.join(".claude"),
+        let primary = home.join(".claude");
+        let mut all_dirs: Vec<PathBuf> = Vec::new();
+        let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+
+        for d in &config_dirs {
+            let expanded = expand_tilde(d);
+            // Canonicalize to prevent duplicate symlinked paths
+            let canonical = expanded.canonicalize().unwrap_or_else(|_| expanded.clone());
+            if seen.insert(canonical) {
+                all_dirs.push(expanded);
+            }
         }
+
+        // Ensure primary is always included at position 0
+        let primary_canonical = primary.canonicalize().unwrap_or_else(|_| primary.clone());
+        if !seen.contains(&primary_canonical) {
+            all_dirs.insert(0, primary.clone());
+        }
+
+        Self { primary_dir: primary, all_dirs }
     }
 
     /// Parse JSONL files into a dedup map, optionally resuming from known file offsets.
@@ -139,57 +169,55 @@ impl ClaudeCodeProvider {
     ) -> HashMap<PathBuf, u64> {
         let mut new_offsets: HashMap<PathBuf, u64> = HashMap::new();
 
-        let projects_dir = self.claude_dir.join("projects");
-        let pattern = projects_dir.join("**").join("*.jsonl").to_string_lossy().to_string();
-
-        let files = glob::glob(&pattern).unwrap_or_else(|_| glob::glob("").unwrap());
-
         let current_month = if only_current_month {
             Some(current_month_str())
         } else {
             None
         };
 
-        for path in files.flatten() {
-            if let Some(ref month) = current_month {
-                if let Ok(metadata) = fs::metadata(&path) {
-                    if let Ok(modified) = metadata.modified() {
-                        let modified_date: chrono::DateTime<chrono::Local> = modified.into();
-                        let file_month = modified_date.format("%Y-%m").to_string();
-                        if &file_month < month {
-                            continue;
-                        }
-                    }
-                }
-            }
+        for claude_dir in &self.all_dirs {
+            let projects_dir = claude_dir.join("projects");
+            let pattern = projects_dir.join("**").join("*.jsonl").to_string_lossy().to_string();
 
-            if let Ok(mut file) = fs::File::open(&path) {
-                // Resume from previous offset if available
-                let prev_offset = prev_offsets.get(&path).copied().unwrap_or(0);
-                let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+            let files = glob::glob(&pattern).unwrap_or_else(|_| glob::glob("").unwrap());
 
-                // If file was truncated/replaced, read from start
-                let start_offset = if prev_offset > file_len { 0 } else { prev_offset };
-
-                if start_offset > 0 {
-                    let _ = file.seek(SeekFrom::Start(start_offset));
-                }
-
-                let reader = BufReader::new(&file);
-                for line in reader.lines().map_while(Result::ok) {
-                    if let Some(entry) = parse_session_line(&line) {
-                        if let Some(ref month) = current_month {
-                            if &date_to_month(&entry.date) < month {
+            for path in files.flatten() {
+                if let Some(ref month) = current_month {
+                    if let Ok(metadata) = fs::metadata(&path) {
+                        if let Ok(modified) = metadata.modified() {
+                            let modified_date: chrono::DateTime<chrono::Local> = modified.into();
+                            let file_month = modified_date.format("%Y-%m").to_string();
+                            if &file_month < month {
                                 continue;
                             }
                         }
-                        let key = format!("{}:{}", entry.message_id, entry.request_id);
-                        dedup.insert(key, entry);
                     }
                 }
 
-                // Record current file position for incremental reads
-                new_offsets.insert(path, file_len);
+                if let Ok(mut file) = fs::File::open(&path) {
+                    let prev_offset = prev_offsets.get(&path).copied().unwrap_or(0);
+                    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+                    let start_offset = if prev_offset > file_len { 0 } else { prev_offset };
+
+                    if start_offset > 0 {
+                        let _ = file.seek(SeekFrom::Start(start_offset));
+                    }
+
+                    let reader = BufReader::new(&file);
+                    for line in reader.lines().map_while(Result::ok) {
+                        if let Some(entry) = parse_session_line(&line) {
+                            if let Some(ref month) = current_month {
+                                if &date_to_month(&entry.date) < month {
+                                    continue;
+                                }
+                            }
+                            let key = format!("{}:{}", entry.message_id, entry.request_id);
+                            dedup.insert(key, entry);
+                        }
+                    }
+
+                    new_offsets.insert(path, file_len);
+                }
             }
         }
 
@@ -409,7 +437,29 @@ impl TokenProvider for ClaudeCodeProvider {
     }
 
     fn fetch_stats(&self) -> Result<AllStats, String> {
-        let was_invalidated = CACHE_INVALIDATED.swap(false, Ordering::Relaxed);
+        // Check if config dirs changed — if so, force full reset
+        let dirs_hash = {
+            let mut hasher = DefaultHasher::new();
+            self.all_dirs.hash(&mut hasher);
+            hasher.finish()
+        };
+        let dirs_changed = {
+            let mut prev = CONFIG_DIRS_HASH.lock().unwrap_or_else(|e| e.into_inner());
+            let changed = *prev != dirs_hash;
+            if changed {
+                *prev = dirs_hash;
+                // Reset all caches for fresh parse with new dirs
+                if let Ok(mut inc) = INCREMENTAL_STATE.lock() {
+                    *inc = None;
+                }
+                if let Ok(mut cache) = STATS_CACHE.lock() {
+                    *cache = None;
+                }
+            }
+            changed
+        };
+
+        let was_invalidated = dirs_changed || CACHE_INVALIDATED.swap(false, Ordering::Relaxed);
 
         // If not invalidated, return cached stats if fresh
         if !was_invalidated {
@@ -423,18 +473,18 @@ impl TokenProvider for ClaudeCodeProvider {
         }
 
         // Try incremental update: read only new lines from JSONL files
-        if was_invalidated {
+        if was_invalidated && !dirs_changed {
             if let Some(stats) = self.try_incremental_update() {
                 return Ok(stats);
             }
         }
 
-        // Full parse path (first launch or TTL expiry)
+        // Full parse path (first launch, dirs changed, or TTL expiry)
         self.full_parse()
     }
 
     fn is_available(&self) -> bool {
-        self.claude_dir.join("projects").exists()
+        self.all_dirs.iter().any(|d| d.join("projects").exists())
     }
 }
 
@@ -514,7 +564,7 @@ impl ClaudeCodeProvider {
         }
 
         // Merge with disk cache
-        let disk_cache = load_disk_cache(&self.claude_dir).unwrap_or(DiskCache { months: HashMap::new() });
+        let disk_cache = load_disk_cache(&self.primary_dir).unwrap_or(DiskCache { months: HashMap::new() });
         let result = self.merge_and_finalize(
             state.daily_map.clone(),
             state.model_usage_map.clone(),
@@ -530,7 +580,7 @@ impl ClaudeCodeProvider {
     fn full_parse(&self) -> Result<AllStats, String> {
         let current_month = current_month_str();
 
-        let mut disk_cache = load_disk_cache(&self.claude_dir).unwrap_or(DiskCache {
+        let mut disk_cache = load_disk_cache(&self.primary_dir).unwrap_or(DiskCache {
             months: HashMap::new(),
         });
         let has_historical = !disk_cache.months.is_empty();
@@ -563,7 +613,7 @@ impl ClaudeCodeProvider {
                 });
             }
             if !new_cache.months.is_empty() {
-                save_disk_cache(&self.claude_dir, &new_cache);
+                save_disk_cache(&self.primary_dir, &new_cache);
                 disk_cache = new_cache;
             }
 
