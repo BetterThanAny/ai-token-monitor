@@ -1,6 +1,7 @@
 import type { DailyUsage } from "../lib/types";
 import { formatTokens, formatCost, getTotalTokens } from "../lib/format";
 import { useSettings } from "../contexts/SettingsContext";
+import { InfoTooltip } from "./InfoTooltip";
 
 interface Props {
   today: DailyUsage | null;
@@ -69,7 +70,20 @@ export function TodaySummary({ today, weekAvg }: Props) {
         gap: 16,
         marginTop: 8,
       }}>
-        <StatChip label="Cost" value={formatCost(cost)} color="var(--accent-orange)" />
+        <StatChip
+          label="Cost"
+          value={formatCost(cost)}
+          color="var(--accent-orange)"
+          tooltip={
+            <InfoTooltip>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>API per-token pricing</div>
+              <div>input + output + cache_read (10%) + cache_write (125%)</div>
+              <div style={{ marginTop: 4, opacity: 0.8 }}>
+                Pro/Max plan users pay their subscription fee, not per-token costs.
+              </div>
+            </InfoTooltip>
+          }
+        />
         <StatChip label="Messages" value={String(messages)} color="var(--accent-purple)" />
         <StatChip label="Sessions" value={String(sessions)} color="var(--accent-mint)" />
       </div>
@@ -77,12 +91,15 @@ export function TodaySummary({ today, weekAvg }: Props) {
   );
 }
 
-function StatChip({ label, value, color }: { label: string; value: string; color: string }) {
+function StatChip({ label, value, color, tooltip }: { label: string; value: string; color: string; tooltip?: React.ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <span style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 600 }}>
-        {label}
-      </span>
+      <div style={{ display: "flex", alignItems: "center" }}>
+        <span style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 600 }}>
+          {label}
+        </span>
+        {tooltip}
+      </div>
       <span style={{ fontSize: 15, fontWeight: 700, color }}>
         {value}
       </span>
