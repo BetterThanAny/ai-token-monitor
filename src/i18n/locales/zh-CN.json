@@ -104,6 +104,14 @@
   "settings.auto": "自动",
   "settings.light": "浅色",
   "settings.dark": "深色",
+  "settings.configDirs": "配置目录",
+  "settings.configDirsPrimary": "主要",
+  "settings.configDirsAutoDetect": "自动检测",
+  "settings.configDirsAdd": "添加",
+  "settings.configDirsAddPlaceholder": "路径（例如 ~/.claude-work）",
+  "settings.configDirsNotFound": "未发现新目录",
+  "settings.configDirsFound": "发现 {{count}} 个新目录",
+  "settings.configDirsInvalid": "路径无效或缺少 projects 文件夹",
 
   "support.buyMeCoffee": "请我喝杯咖啡",
 

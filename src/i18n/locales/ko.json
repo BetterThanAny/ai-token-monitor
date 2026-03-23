@@ -104,6 +104,14 @@
   "settings.auto": "자동",
   "settings.light": "라이트",
   "settings.dark": "다크",
+  "settings.configDirs": "설정 디렉토리",
+  "settings.configDirsPrimary": "기본",
+  "settings.configDirsAutoDetect": "자동 탐지",
+  "settings.configDirsAdd": "추가",
+  "settings.configDirsAddPlaceholder": "경로 (예: ~/.claude-work)",
+  "settings.configDirsNotFound": "새 디렉토리를 찾지 못했습니다",
+  "settings.configDirsFound": "{{count}}개의 새 디렉토리를 찾았습니다",
+  "settings.configDirsInvalid": "잘못된 경로이거나 projects 폴더가 없습니다",
 
   "support.buyMeCoffee": "커피 한 잔 사주기",
 

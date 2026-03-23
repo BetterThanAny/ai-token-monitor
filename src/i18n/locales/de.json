@@ -104,6 +104,14 @@
   "settings.auto": "Auto",
   "settings.light": "Hell",
   "settings.dark": "Dunkel",
+  "settings.configDirs": "Konfigurationsverz.",
+  "settings.configDirsPrimary": "Primär",
+  "settings.configDirsAutoDetect": "Auto-Erkennung",
+  "settings.configDirsAdd": "Hinzufügen",
+  "settings.configDirsAddPlaceholder": "Pfad (z.B. ~/.claude-work)",
+  "settings.configDirsNotFound": "Keine neuen Verzeichnisse gefunden",
+  "settings.configDirsFound": "{{count}} neue(s) Verzeichnis(se) gefunden",
+  "settings.configDirsInvalid": "Ungültiger Pfad oder projects-Ordner fehlt",
 
   "support.buyMeCoffee": "Kaffee spendieren",
 

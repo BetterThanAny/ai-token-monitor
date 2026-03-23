@@ -104,6 +104,14 @@
   "settings.auto": "Auto",
   "settings.light": "Claro",
   "settings.dark": "Oscuro",
+  "settings.configDirs": "Directorios de config",
+  "settings.configDirsPrimary": "principal",
+  "settings.configDirsAutoDetect": "Detectar auto",
+  "settings.configDirsAdd": "Añadir",
+  "settings.configDirsAddPlaceholder": "Ruta (ej. ~/.claude-work)",
+  "settings.configDirsNotFound": "No se encontraron nuevos directorios",
+  "settings.configDirsFound": "{{count}} directorio(s) nuevo(s) encontrado(s)",
+  "settings.configDirsInvalid": "Ruta inválida o carpeta projects no encontrada",
 
   "support.buyMeCoffee": "Invítame un café",
 
