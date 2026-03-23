@@ -132,6 +132,32 @@ fn activate_app() {
     }
 }
 
+/// Set NSWindow level and collection behavior so the window appears over fullscreen apps
+#[cfg(target_os = "macos")]
+fn configure_window_for_fullscreen(window: &tauri::WebviewWindow) {
+    #[allow(deprecated)]
+    use cocoa::appkit::NSWindow;
+    #[allow(deprecated)]
+    use cocoa::appkit::NSWindowCollectionBehavior;
+
+    if let Ok(ns_win) = window.ns_window() {
+        unsafe {
+            #[allow(deprecated)]
+            let ns_win = ns_win as cocoa::base::id;
+            // NSStatusWindowLevel (25) is above fullscreen spaces
+            #[allow(deprecated)]
+            ns_win.setLevel_(25);
+            // Allow the window to join any space including fullscreen
+            #[allow(deprecated)]
+            ns_win.setCollectionBehavior_(
+                NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary
+                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle,
+            );
+        }
+    }
+}
+
 #[tauri::command]
 fn hide_window(window: tauri::WebviewWindow) {
     eprintln!("[CMD] hide_window called");
@@ -208,6 +234,11 @@ pub fn run() {
                                 // Pre-fetch stats before showing window (uses cache if fresh)
                                 let _ = app.emit("stats-updated", ());
                                 let _ = position_window_near_tray(&window, tray);
+
+                                // Ensure window appears over fullscreen apps
+                                #[cfg(target_os = "macos")]
+                                configure_window_for_fullscreen(&window);
+
                                 let _ = window.show();
                                 eprintln!("[TRAY] Window shown");
 
@@ -237,8 +268,17 @@ pub fn run() {
                     tauri::WindowEvent::Focused(focused) => {
                         eprintln!("[WINDOW] Focused({})", focused);
                         if !focused {
-                            let _ = win_clone.hide();
-                            eprintln!("[WINDOW] Hidden on focus lost");
+                            // Delay hide to prevent race condition with fullscreen spaces
+                            // where macOS fires focus-lost immediately after show
+                            let win = win_clone.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                                // Only hide if still unfocused after delay
+                                if !win.is_focused().unwrap_or(true) {
+                                    let _ = win.hide();
+                                    eprintln!("[WINDOW] Hidden on focus lost (delayed)");
+                                }
+                            });
                         }
                     }
                     tauri::WindowEvent::CloseRequested { .. } => {
