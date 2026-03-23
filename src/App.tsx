@@ -98,25 +98,23 @@ function AppContent() {
       <Header stats={stats} />
       <TabBar activeTab={activeTab} onChange={setActiveTab} />
 
-      {activeTab === "overview" && (
-        <>
-          <TodaySummary today={today} weekAvg={weekAvg} />
-          <DailyChart daily={stats.daily} days={7} />
-          <PeriodTotals daily={stats.daily} />
-          <Heatmap daily={stats.daily} weeks={8} />
-        </>
-      )}
+      {/* Keep mounted tabs alive to avoid remount/recalculation on switch */}
+      <div style={{ display: activeTab === "overview" ? "contents" : "none" }}>
+        <TodaySummary today={today} weekAvg={weekAvg} />
+        <DailyChart daily={stats.daily} days={7} />
+        <PeriodTotals daily={stats.daily} />
+        <Heatmap daily={stats.daily} weeks={8} />
+      </div>
 
-      {activeTab === "analytics" && (
-        <>
-          <ActivityGraph daily={stats.daily} />
-          <DailyChart daily={stats.daily} days={30} />
-          <PeriodTotals daily={stats.daily} />
-          <ModelBreakdown modelUsage={stats.model_usage} />
-          <CacheEfficiency stats={stats} />
-        </>
-      )}
+      <div style={{ display: activeTab === "analytics" ? "contents" : "none" }}>
+        <ActivityGraph daily={stats.daily} />
+        <DailyChart daily={stats.daily} days={30} />
+        <PeriodTotals daily={stats.daily} />
+        <ModelBreakdown modelUsage={stats.model_usage} />
+        <CacheEfficiency stats={stats} />
+      </div>
 
+      {/* Leaderboard lazy-loads (network requests), keep conditional */}
       {activeTab === "leaderboard" && (
         <Leaderboard stats={stats} />
       )}
