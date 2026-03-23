@@ -452,3 +452,67 @@ impl ClaudeCodeProvider {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_jsonl_line() -> &'static str {
+        r#"{"sessionId":"abc-123","type":"assistant","timestamp":"2026-03-23T10:00:00Z","requestId":"req-1","message":{"id":"msg-1","model":"claude-sonnet-4-6-20260320","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":50000,"cache_creation_input_tokens":2000}}}"#
+    }
+
+    #[test]
+    fn parse_session_line_extracts_fields() {
+        let entry = parse_session_line(sample_jsonl_line()).expect("should parse");
+        assert_eq!(entry.date, "2026-03-23");
+        assert!(entry.model.contains("sonnet"));
+        assert_eq!(entry.session_id, "abc-123");
+        assert_eq!(entry.message_id, "msg-1");
+        assert_eq!(entry.request_id, "req-1");
+        assert_eq!(entry.input_tokens, 1000);
+        assert_eq!(entry.output_tokens, 500);
+        assert_eq!(entry.cache_read_input_tokens, 50000);
+        assert_eq!(entry.cache_creation_input_tokens, 2000);
+    }
+
+    #[test]
+    fn parse_session_line_rejects_non_assistant() {
+        let line = r#"{"type":"human","timestamp":"2026-03-23T10:00:00Z","message":{"content":"hello"}}"#;
+        assert!(parse_session_line(line).is_none());
+    }
+
+    #[test]
+    fn parse_session_line_rejects_synthetic_model() {
+        let line = r#"{"type":"assistant","timestamp":"2026-03-23T10:00:00Z","message":{"id":"m1","model":"<synthetic>","usage":{"input_tokens":1}},"requestId":"r1"}"#;
+        assert!(parse_session_line(line).is_none());
+    }
+
+    #[test]
+    fn cost_calculation_sonnet() {
+        let pricing = get_pricing("claude-sonnet-4-6-20260320");
+        let cost = calculate_cost(&pricing, 1_000_000, 1_000_000, 1_000_000, 1_000_000);
+        let expected = 3.0 + 15.0 + 0.30 + 3.75;
+        assert!((cost - expected).abs() < 0.001, "cost={cost}, expected={expected}");
+    }
+
+    #[test]
+    fn cost_calculation_opus() {
+        let pricing = get_pricing("claude-opus-4-6-20260320");
+        let cost = calculate_cost(&pricing, 1_000_000, 0, 0, 0);
+        assert!((cost - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn cost_calculation_haiku() {
+        let pricing = get_pricing("claude-haiku-4-5-20251001");
+        let cost = calculate_cost(&pricing, 1_000_000, 1_000_000, 0, 0);
+        assert!((cost - 6.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn unknown_model_defaults_to_sonnet_pricing() {
+        let pricing = get_pricing("claude-unknown-model");
+        assert!((pricing.input - 3.0).abs() < 0.001);
+        assert!((pricing.output - 15.0).abs() < 0.001);
+    }
+}
+
