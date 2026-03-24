@@ -1,54 +1,117 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'package.json'
   workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: true
+
 jobs:
-  check-version:
+  bump-version:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      changed: ${{ steps.check.outputs.changed }}
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Get current version
-        id: version
-        run: echo "version=v$(node -p 'require("./package.json").version')" >> $GITHUB_OUTPUT
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-      - name: Check if version changed
-        id: check
+      - name: Bump version
+        id: bump
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Manual dispatch — skipping version check"
-            exit 0
-          fi
           CURRENT=$(node -p 'require("./package.json").version')
-          PREVIOUS=$(git show HEAD~1:package.json | node -p 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).version')
-          if [ "$CURRENT" != "$PREVIOUS" ]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Version changed: $PREVIOUS -> $CURRENT"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          case "${{ inputs.bump }}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=v${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=v${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: $CURRENT -> $NEW_VERSION"
+
+          node -e "
+            const pkg = require('./package.json');
+            pkg.version = '${NEW_VERSION}';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+          node scripts/sync-version.mjs
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
           else
-            echo "changed=false" >> $GITHUB_OUTPUT
-            echo "Version unchanged: $CURRENT"
+            RANGE="${PREV_TAG}..HEAD"
           fi
+
+          FEATURES=$(git log --oneline $RANGE --format="- %s (%h)" | grep -E "^- feat" || true)
+          FIXES=$(git log --oneline $RANGE --format="- %s (%h)" | grep -E "^- fix" || true)
+          PERFS=$(git log --oneline $RANGE --format="- %s (%h)" | grep -E "^- perf" || true)
+          OTHERS=$(git log --oneline $RANGE --format="- %s (%h)" | grep -vE "^- (feat|fix|perf|chore: release)" || true)
+
+          BODY=""
+          [ -n "$FEATURES" ] && BODY="${BODY}### Features\n${FEATURES}\n\n"
+          [ -n "$FIXES" ] && BODY="${BODY}### Bug Fixes\n${FIXES}\n\n"
+          [ -n "$PERFS" ] && BODY="${BODY}### Performance\n${PERFS}\n\n"
+          [ -n "$OTHERS" ] && BODY="${BODY}### Other Changes\n${OTHERS}\n\n"
+
+          if [ -z "$BODY" ]; then
+            BODY="No notable changes."
+          fi
+
+          CHANGELOG="## AI Token Monitor ${{ steps.bump.outputs.version }}\n\n${BODY}### Download\n- macOS (Apple Silicon): \`.dmg\` 파일을 다운로드하세요.\n- Windows: \`.exe\` 인스톨러를 다운로드하세요."
+
+          {
+            echo "changelog<<CHANGELOG_EOF"
+            echo -e "$CHANGELOG"
+            echo "CHANGELOG_EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
+          git tag "${{ steps.bump.outputs.tag }}"
+          git push origin main --follow-tags
 
   build-macos:
-    needs: check-version
-    if: needs.check-version.outputs.changed == 'true'
+    needs: bump-version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.tag }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -94,26 +157,19 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ needs.check-version.outputs.version }}
-          releaseName: ${{ needs.check-version.outputs.version }}
-          releaseBody: |
-            ## AI Token Monitor ${{ needs.check-version.outputs.version }}
-
-            ### Download
-            - macOS (Apple Silicon): `.dmg` 파일을 다운로드하세요.
-            - Windows: `.exe` 인스톨러를 다운로드하세요.
-
-            ### Changes
-            See [commit history](https://github.com/${{ github.repository }}/commits/main) for details.
+          tagName: ${{ needs.bump-version.outputs.tag }}
+          releaseName: ${{ needs.bump-version.outputs.tag }}
+          releaseBody: ${{ needs.bump-version.outputs.changelog }}
           releaseDraft: false
           prerelease: false
 
   build-windows:
-    needs: [check-version, build-macos]
-    if: needs.check-version.outputs.changed == 'true'
+    needs: [bump-version, build-macos]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.tag }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -137,16 +193,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ needs.check-version.outputs.version }}
-          releaseName: ${{ needs.check-version.outputs.version }}
-          releaseBody: |
-            ## AI Token Monitor ${{ needs.check-version.outputs.version }}
-
-            ### Download
-            - macOS (Apple Silicon): `.dmg` 파일을 다운로드하세요.
-            - Windows: `.exe` 인스톨러를 다운로드하세요.
-
-            ### Changes
-            See [commit history](https://github.com/${{ github.repository }}/commits/main) for details.
+          tagName: ${{ needs.bump-version.outputs.tag }}
+          releaseName: ${{ needs.bump-version.outputs.tag }}
+          releaseBody: ${{ needs.bump-version.outputs.changelog }}
           releaseDraft: false
           prerelease: false
