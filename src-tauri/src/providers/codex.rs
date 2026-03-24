@@ -297,6 +297,7 @@ impl CodexProvider {
             });
             *daily.tokens.entry(entry.model.clone()).or_insert(0) += entry.total_tokens;
             daily.cost_usd += cost;
+            daily.messages += 1;
             daily.input_tokens += entry.input_tokens;
             daily.output_tokens += entry.output_tokens;
             daily.cache_read_tokens += entry.cached_tokens;
@@ -612,5 +613,40 @@ mod tests {
         let cost = calculate_cost(&pricing, 1_000_000, 500_000, 200_000);
         let expected = 1.0 + 2.5 + 0.1;
         assert!((cost - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_build_stats_tracks_daily_messages() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-03-24".to_string(),
+                model: "o4-mini".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: 100,
+                output_tokens: 50,
+                cached_tokens: 25,
+                total_tokens: 150,
+            },
+        );
+        entries.insert(
+            "session-a:2".to_string(),
+            CodexEntry {
+                date: "2026-03-24".to_string(),
+                model: "o4-mini".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: 200,
+                output_tokens: 25,
+                cached_tokens: 10,
+                total_tokens: 225,
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        assert_eq!(stats.total_messages, 2);
+        assert_eq!(stats.daily.len(), 1);
+        assert_eq!(stats.daily[0].messages, 2);
+        assert_eq!(stats.daily[0].sessions, 1);
     }
 }
