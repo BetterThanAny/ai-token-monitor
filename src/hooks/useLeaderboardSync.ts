@@ -178,6 +178,44 @@ async function uploadSnapshot(
   monday.setDate(now.getDate() - mondayOffset);
   const weekStart = toLocalDateStr(monday);
 
+  // Build full list of dates in the week window
+  const allDatesInWeek: string[] = [];
+  const cursor = new Date(monday);
+  while (toLocalDateStr(cursor) <= today) {
+    allDatesInWeek.push(toLocalDateStr(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  // Dates that have local data within this week
+  const localDatesInWeek = new Set(
+    stats.daily
+      .filter((d) => d.date >= weekStart && d.date <= today)
+      .map((d) => d.date)
+  );
+
+  // Delete stale rows (dates in week window with no local data)
+  const cleanKey = (date: string) => `${provider}:clean:${date}`;
+  const staleDates = allDatesInWeek.filter((d) => !localDatesInWeek.has(d));
+  const toClean = staleDates.filter((d) => !syncedPastDates.has(cleanKey(d)));
+
+  if (toClean.length > 0) {
+    const { error: delError } = await supabase
+      .from("daily_snapshots")
+      .delete()
+      .eq("user_id", userId)
+      .eq("provider", provider)
+      .in("date", toClean);
+
+    if (!delError) {
+      toClean.forEach((d) => syncedPastDates.add(cleanKey(d)));
+    }
+  }
+
+  // If today gains local data mid-session, clear the clean cache so upsert takes over
+  if (localDatesInWeek.has(today)) {
+    syncedPastDates.delete(cleanKey(today));
+  }
+
   // Always upload today; upload past days of this week only once per session
   const syncKey = (date: string) => `${provider}:${date}`;
   const toSync = stats.daily.filter(
