@@ -19,6 +19,8 @@ import { Leaderboard } from "./components/Leaderboard";
 import { ActivityGraph } from "./components/ActivityGraph";
 import { SupportBanner } from "./components/SupportBanner";
 import { SourceSelector } from "./components/SourceSelector";
+import { SalaryComparator } from "./components/SalaryComparator";
+import { useUpdater } from "./hooks/useUpdater";
 
 function AppContent() {
   const { prefs } = useSettings();
@@ -27,6 +29,7 @@ function AppContent() {
     includeCodex: prefs.include_codex,
   });
   const t = useI18n();
+  const updater = useUpdater();
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const todayStr = useToday();
 
@@ -52,7 +55,7 @@ function AppContent() {
   if (loading && !stats) {
     return (
       <PopoverShell>
-        <Header />
+        <Header updater={updater} />
         <div style={{
           display: "flex",
           alignItems: "center",
@@ -71,7 +74,7 @@ function AppContent() {
   if (error || !stats) {
     return (
       <PopoverShell>
-        <Header />
+        <Header updater={updater} />
         <div style={{
           display: "flex",
           flexDirection: "column",
@@ -102,13 +105,14 @@ function AppContent() {
 
   return (
     <PopoverShell>
-      <Header stats={stats} />
+      <Header stats={stats} updater={updater} />
       <SourceSelector />
       <TabBar activeTab={activeTab} onChange={setActiveTab} />
 
       {/* Keep mounted tabs alive to avoid remount/recalculation on switch */}
       <div style={{ display: activeTab === "overview" ? "contents" : "none" }}>
         <TodaySummary today={today} weekAvg={weekAvg} />
+        <SalaryComparator stats={stats} />
         <DailyChart daily={stats.daily} days={7} />
         <PeriodTotals daily={stats.daily} />
         <Heatmap daily={stats.daily} weeks={8} />

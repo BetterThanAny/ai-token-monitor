@@ -97,6 +97,36 @@ export function SettingsOverlay({ visible, onClose }: Props) {
           />
         </SettingRow>
 
+        {/* Salary section */}
+        <SettingRow
+          label={t("settings.monthlySalary")}
+          description="USD"
+        >
+          <input
+            type="number"
+            min={0}
+            step={100}
+            value={prefs.monthly_salary ?? ""}
+            placeholder="—"
+            onChange={(e) => {
+              const val = e.target.value;
+              updatePrefs({ monthly_salary: val ? Number(val) : undefined });
+            }}
+            style={{
+              width: 80,
+              fontSize: 11,
+              fontWeight: 600,
+              padding: "3px 6px",
+              borderRadius: 4,
+              border: "1px solid var(--heat-1)",
+              background: "var(--heat-0)",
+              color: "var(--text-primary)",
+              outline: "none",
+              textAlign: "right",
+            }}
+          />
+        </SettingRow>
+
         {/* Config Directories section */}
         <div style={{
           height: 1,
