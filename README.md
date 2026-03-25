@@ -5,7 +5,7 @@
 
 > **[한국어](docs/README.ko.md) | [日本語](docs/README.ja.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md)**
 
-A system tray app for macOS and Windows that tracks Claude Code token usage and costs in real time.
+A system tray app for macOS and Windows that tracks Claude Code and Codex token usage and costs in real time.
 
 <table>
   <tr>
@@ -36,8 +36,9 @@ A system tray app for macOS and Windows that tracks Claude Code token usage and 
 
 ## Features
 
-- **Real-time Token Tracking** — Parses Claude Code session JSONL files for accurate usage stats
-- **Cost Calculation** — Automatic cost estimation based on model pricing (Opus, Sonnet, Haiku)
+- **Real-time Token Tracking** — Parses Claude Code and Codex session JSONL files for accurate usage stats
+- **Multi-provider Support** — Switch between Claude and Codex sources with a single toggle
+- **Cost Calculation** — Automatic cost estimation based on model pricing
 - **Daily Chart** — 7/30 day token or cost bar chart with Y-axis labels
 - **Activity Graph** — GitHub-style contribution heatmap with 2D/3D toggle and year navigation
 - **Period Navigation** — Browse weekly/monthly totals with `< >` arrows
@@ -57,7 +58,7 @@ A system tray app for macOS and Windows that tracks Claude Code token usage and 
 - [Node.js](https://nodejs.org/) 18+
 - [Rust](https://rustup.rs/) toolchain
 - [Tauri CLI v2](https://v2.tauri.app/start/prerequisites/)
-- [Claude Code](https://claude.ai/claude-code) installed and used at least once
+- [Claude Code](https://claude.ai/claude-code) and/or [Codex](https://openai.com/index/introducing-codex/) installed and used at least once
 
 ### Build
 
@@ -103,8 +104,8 @@ Shared data: daily token count, cost, messages/sessions (no code or conversation
 
 ## Data Source
 
-The app reads `~/.claude/projects/**/*.jsonl` files directly to aggregate token usage.
-Supplementary session/tool call counts come from `~/.claude/stats-cache.json`.
+- **Claude Code**: Reads `~/.claude/projects/**/*.jsonl` files. Supplementary session/tool call counts come from `~/.claude/stats-cache.json`.
+- **Codex**: Reads `~/.codex/sessions/**/*.jsonl` files.
 
 **Network requests**: Only when leaderboard is opted-in (sends aggregated data to Supabase).
 Without leaderboard, the app runs completely offline.
@@ -130,8 +131,10 @@ Without leaderboard, the app runs completely offline.
 │  ├── Tray Icon + Cost Display │
 │  └── Preferences (JSON)      │
 ├──────────────────────────────┤
-│  Data Source                  │
-│  └── ~/.claude/projects/     │
+│  Data Sources                 │
+│  ├── ~/.claude/projects/     │
+│  │   └── **/*.jsonl           │
+│  └── ~/.codex/sessions/      │
 │      └── **/*.jsonl           │
 └──────────────────────────────┘
 ```
