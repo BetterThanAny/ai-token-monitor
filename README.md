@@ -7,10 +7,23 @@
 
 A system tray app for macOS and Windows that tracks Claude Code token usage and costs in real time.
 
-| Overview | Analytics | Leaderboard |
-|:---:|:---:|:---:|
-| <img src="docs/screenshots/overview.png" width="280" /> | <img src="docs/screenshots/analytics.png" width="280" /> | <img src="docs/screenshots/leaderboard.png" width="280" /> |
-| Today's usage, 7-day chart, weekly/monthly totals | Activity graph, 30-day trends, model breakdown | Compare usage with others |
+<table>
+  <tr>
+    <th width="33%">Overview</th>
+    <th width="33%">Analytics</th>
+    <th width="33%">Leaderboard</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/overview.png" width="280" /></td>
+    <td><img src="docs/screenshots/analytics.png" width="280" /></td>
+    <td><img src="docs/screenshots/leaderboard.png" width="280" /></td>
+  </tr>
+  <tr>
+    <td align="center">Today's usage, 7-day chart, weekly/monthly totals</td>
+    <td align="center">Activity graph, 30-day trends, model breakdown</td>
+    <td align="center">Compare usage with others</td>
+  </tr>
+</table>
 
 ## Download
 
