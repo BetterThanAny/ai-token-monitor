@@ -1,7 +1,17 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import type { ReactNode } from "react";
 import { supabase } from "../lib/supabase";
+import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { User } from "@supabase/supabase-js";
+
+const DEEP_LINK_CALLBACK = "ai-token-monitor://auth/callback";
+const AUTH_TIMEOUT_MS = 120_000;
+
+function isWindowsProduction(): boolean {
+  if (window.location.protocol === "http:") return false;
+  return /windows/i.test(navigator.userAgent);
+}
 
 interface AuthContextType {
   user: User | null;
@@ -26,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<{ nickname: string; avatar_url: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const available = supabase !== null;
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -53,6 +64,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Windows production: listen for deep link OAuth callback
+  useEffect(() => {
+    if (!isWindowsProduction() || !supabase) return;
+
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    onOpenUrl(async (urls: string[]) => {
+      for (const url of urls) {
+        if (!url.startsWith(DEEP_LINK_CALLBACK)) continue;
+        const code = new URL(url).searchParams.get("code");
+        if (code) {
+          try {
+            await supabase.auth.exchangeCodeForSession(code);
+          } catch (err) {
+            console.error("Session exchange failed:", err);
+          } finally {
+            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+            setLoading(false);
+          }
+        }
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Cleanup auth timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
   const upsertProfile = useCallback(async (u: User) => {
     if (!supabase) return;
 
@@ -73,11 +124,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async () => {
     if (!supabase) return;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
     setLoading(true);
-    await supabase.auth.signInWithOAuth({
+
+    if (!isWindowsProduction()) {
+      // macOS production + dev mode: existing implicit flow
+      await supabase.auth.signInWithOAuth({
+        provider: "github",
+        options: { redirectTo: window.location.origin },
+      });
+      return;
+    }
+
+    // Windows production: PKCE + deep link
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "github",
-      options: { redirectTo: window.location.origin },
+      options: {
+        skipBrowserRedirect: true,
+        redirectTo: DEEP_LINK_CALLBACK,
+      },
     });
+
+    if (error || !data.url) {
+      console.error("OAuth error:", error);
+      setLoading(false);
+      return;
+    }
+
+    await openUrl(data.url);
+
+    // Timeout: reset loading if no callback received
+    timeoutRef.current = setTimeout(() => setLoading(false), AUTH_TIMEOUT_MS);
   }, []);
 
   const signOut = useCallback(async () => {
