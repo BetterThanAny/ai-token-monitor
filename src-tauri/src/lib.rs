@@ -284,7 +284,8 @@ pub fn run() {
             set_dialog_open,
             hide_window,
             quit_app,
-            commands::capture_window
+            commands::capture_window,
+            commands::copy_png_to_clipboard
         ])
         .setup(|app| {
             // Build tray icon
