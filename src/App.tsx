@@ -19,6 +19,7 @@ import { Leaderboard } from "./components/Leaderboard";
 import { ActivityGraph } from "./components/ActivityGraph";
 import { SupportBanner } from "./components/SupportBanner";
 import { SourceSelector } from "./components/SourceSelector";
+import { SalaryComparator } from "./components/SalaryComparator";
 
 function AppContent() {
   const { prefs } = useSettings();
@@ -109,6 +110,7 @@ function AppContent() {
       {/* Keep mounted tabs alive to avoid remount/recalculation on switch */}
       <div style={{ display: activeTab === "overview" ? "contents" : "none" }}>
         <TodaySummary today={today} weekAvg={weekAvg} />
+        <SalaryComparator stats={stats} />
         <DailyChart daily={stats.daily} days={7} />
         <PeriodTotals daily={stats.daily} />
         <Heatmap daily={stats.daily} weeks={8} />

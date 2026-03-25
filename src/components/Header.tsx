@@ -2,6 +2,8 @@ import { useState, useCallback } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { invoke } from "@tauri-apps/api/core";
 import { SettingsOverlay } from "./SettingsOverlay";
+import { WrappedOverlay } from "./wrapped/WrappedOverlay";
+import { ReceiptOverlay } from "./receipt/ReceiptOverlay";
 import type { AllStats } from "../lib/types";
 import { formatTokens, formatCost, getTotalTokens, toLocalDateStr } from "../lib/format";
 import { useI18n } from "../i18n/I18nContext";
@@ -12,6 +14,8 @@ interface Props {
 
 export function Header({ stats }: Props) {
   const [showSettings, setShowSettings] = useState(false);
+  const [showWrapped, setShowWrapped] = useState(false);
+  const [showReceipt, setShowReceipt] = useState(false);
   const [copied, setCopied] = useState(false);
   const [captured, setCaptured] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -119,6 +123,54 @@ export function Header({ stats }: Props) {
         </div>
       </div>
 
+      {/* Wrapped button */}
+      <button
+        onClick={() => setShowWrapped(true)}
+        title={t("wrapped.title")}
+        style={{
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          padding: 4,
+          borderRadius: 6,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--text-secondary)",
+          transition: "color 0.2s ease",
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3l1.5 4.5H18l-3.5 2.5L16 14.5 12 11.5 8 14.5l1.5-4.5L6 7.5h4.5z"/>
+          <circle cx="12" cy="12" r="10"/>
+        </svg>
+      </button>
+
+      {/* Receipt button */}
+      <button
+        onClick={() => setShowReceipt(true)}
+        title={t("receipt.title")}
+        style={{
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          padding: 4,
+          borderRadius: 6,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--text-secondary)",
+          transition: "color 0.2s ease",
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 2v20l3-2 3 2 3-2 3 2 3-2 3 2V2l-3 2-3-2-3 2-3-2-3 2-3-2z"/>
+          <line x1="8" y1="8" x2="16" y2="8"/>
+          <line x1="8" y1="12" x2="16" y2="12"/>
+          <line x1="8" y1="16" x2="12" y2="16"/>
+        </svg>
+      </button>
+
       {/* Share button */}
       <button
         onClick={handleExport}
@@ -204,6 +256,21 @@ export function Header({ stats }: Props) {
         visible={showSettings}
         onClose={() => setShowSettings(false)}
       />
+
+      {stats && (
+        <>
+          <WrappedOverlay
+            visible={showWrapped}
+            onClose={() => setShowWrapped(false)}
+            stats={stats}
+          />
+          <ReceiptOverlay
+            visible={showReceipt}
+            onClose={() => setShowReceipt(false)}
+            stats={stats}
+          />
+        </>
+      )}
 
       {/* Toast */}
       {toast && (
