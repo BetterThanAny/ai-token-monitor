@@ -50,6 +50,8 @@ pub struct UserPreferences {
     pub include_claude: bool,
     #[serde(default)]
     pub include_codex: bool,
+    #[serde(default)]
+    pub monthly_salary: Option<f64>,
 }
 
 fn default_theme() -> String {
@@ -84,6 +86,7 @@ impl Default for UserPreferences {
             config_dirs: default_config_dirs(),
             include_claude: true,
             include_codex: false,
+            monthly_salary: None,
         }
     }
 }

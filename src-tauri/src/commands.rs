@@ -128,6 +128,47 @@ pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
+pub fn copy_png_to_clipboard(png_data: Vec<u8>) -> Result<(), String> {
+    #[allow(deprecated)]
+    use cocoa::base::{id, nil};
+    use objc::{msg_send, sel, sel_impl, class};
+
+    unsafe {
+        let ns_data: id = msg_send![class!(NSData), dataWithBytes:png_data.as_ptr() length:png_data.len()];
+        if ns_data == nil {
+            return Err("Failed to create NSData".to_string());
+        }
+
+        let pasteboard: id = msg_send![class!(NSPasteboard), generalPasteboard];
+        let _: () = msg_send![pasteboard, clearContents];
+        let png_type: id = msg_send![class!(NSString), stringWithUTF8String: b"public.png\0".as_ptr()];
+        let success: bool = msg_send![pasteboard, setData: ns_data forType: png_type];
+
+        if success {
+            Ok(())
+        } else {
+            Err("Failed to copy to clipboard".to_string())
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn copy_png_to_clipboard(png_data: Vec<u8>) -> Result<(), String> {
+    // On Windows, decode PNG to bitmap and use CF_DIB
+    // For simplicity, write PNG to temp file and use GDI+
+    // Fallback: just return error, user can use native capture
+    Err("Image clipboard not yet supported on Windows — use screenshot instead".to_string())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[tauri::command]
+pub fn copy_png_to_clipboard(_png_data: Vec<u8>) -> Result<(), String> {
+    Err("Image clipboard not supported on this platform".to_string())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
 #[allow(deprecated)]
 pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
     #[allow(deprecated)]
