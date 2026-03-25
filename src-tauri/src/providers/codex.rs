@@ -576,7 +576,7 @@ mod tests {
         assert!((gpt52codex.input - 1.25).abs() < 0.001);
 
         let unknown = pricing::get_codex_pricing("some-future-model");
-        assert!((unknown.input - 1.10).abs() < 0.001);
+        assert!((unknown.input - 2.50).abs() < 0.001);
     }
 
     #[test]

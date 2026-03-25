@@ -221,8 +221,8 @@ mod tests {
     }
 
     #[test]
-    fn codex_unknown_defaults_to_o4_mini() {
+    fn codex_unknown_defaults_to_gpt54() {
         let p = get_codex_pricing("some-future-model");
-        assert!((p.input - 1.10).abs() < 0.001);
+        assert!((p.input - 2.50).abs() < 0.001);
     }
 }
