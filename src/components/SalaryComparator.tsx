@@ -1,17 +1,18 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { AllStats } from "../lib/types";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../i18n/I18nContext";
 import { formatCost } from "../lib/format";
 import { filterByPeriod, computeTotalCost } from "../lib/statsHelpers";
 import { useShareImage } from "../hooks/useShareImage";
+import { SettingsOverlay } from "./SettingsOverlay";
 
 interface Props {
   stats: AllStats;
-  onOpenSettings?: () => void;
 }
 
-export function SalaryComparator({ stats, onOpenSettings }: Props) {
+export function SalaryComparator({ stats }: Props) {
+  const [showSettings, setShowSettings] = useState(false);
   const { prefs } = useSettings();
   const t = useI18n();
   const cardRef = useRef<HTMLDivElement>(null);
@@ -47,7 +48,7 @@ export function SalaryComparator({ stats, onOpenSettings }: Props) {
           </div>
         </div>
         <button
-          onClick={onOpenSettings}
+          onClick={() => setShowSettings(true)}
           style={{
             fontSize: 10,
             fontWeight: 700,
@@ -62,6 +63,7 @@ export function SalaryComparator({ stats, onOpenSettings }: Props) {
         >
           {t("salary.setupButton")}
         </button>
+        <SettingsOverlay visible={showSettings} onClose={() => setShowSettings(false)} />
       </div>
     );
   }
