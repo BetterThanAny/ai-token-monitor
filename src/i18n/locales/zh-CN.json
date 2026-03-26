@@ -187,5 +187,15 @@
   "update.downloading": "下载中... {{progress}}%",
   "update.restart": "更新已就绪",
   "update.restartBtn": "重启",
-  "update.error": "更新失败"
+  "update.error": "更新失败",
+
+  "settings.usageAlerts": "用量提醒",
+
+  "usageAlert.title": "用量",
+  "usageAlert.session": "会话 (5小时)",
+  "usageAlert.weekly": "每周",
+  "usageAlert.extraUsage": "额外用量",
+  "usageAlert.stale": "更新中...",
+  "usageAlert.resetsIn": "{{time}}后重置",
+  "usageAlert.resetsNow": "重置中..."
 }

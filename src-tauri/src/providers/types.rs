@@ -52,6 +52,8 @@ pub struct UserPreferences {
     pub include_codex: bool,
     #[serde(default)]
     pub monthly_salary: Option<f64>,
+    #[serde(default = "default_true")]
+    pub usage_alerts_enabled: bool,
 }
 
 fn default_theme() -> String {
@@ -87,6 +89,7 @@ impl Default for UserPreferences {
             include_claude: true,
             include_codex: false,
             monthly_salary: None,
+            usage_alerts_enabled: true,
         }
     }
 }

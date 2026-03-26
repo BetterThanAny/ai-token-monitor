@@ -20,6 +20,7 @@ const defaultPrefs: UserPreferences = {
   color_mode: "system",
   language: "en",
   config_dirs: ["~/.claude"],
+  usage_alerts_enabled: true,
 };
 
 const SettingsContext = createContext<SettingsContextType>({

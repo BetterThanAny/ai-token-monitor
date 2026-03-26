@@ -350,6 +350,7 @@ impl ClaudeCodeProvider {
 #[derive(Clone)]
 struct SessionEntry {
     date: String,
+    timestamp: String,
     model: String,
     session_id: String,
     message_id: String,
@@ -407,7 +408,7 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
     let cache_creation_input_tokens = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
 
     Some(SessionEntry {
-        date, model, session_id, message_id, request_id,
+        date, timestamp: timestamp.to_string(), model, session_id, message_id, request_id,
         input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens,
     })
 }

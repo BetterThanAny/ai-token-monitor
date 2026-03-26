@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useLeaderboardSync } from "../hooks/useLeaderboardSync";
 import { useTokenStats } from "../hooks/useTokenStats";
@@ -187,6 +187,8 @@ function LeaderboardContent({ user }: { user: User }) {
   );
 }
 
+const PAGE_SIZE = 20;
+
 function ProviderLeaderboard({
   provider,
   user,
@@ -203,7 +205,26 @@ function ProviderLeaderboard({
     provider,
   });
 
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(leaderboard.length / PAGE_SIZE));
   const myRank = leaderboard.findIndex((e) => e.user_id === user.id) + 1;
+
+  // Reset to page 0 when period or provider changes
+  useEffect(() => { setPage(0); }, [period, provider]);
+
+  // Clamp page if data shrinks
+  useEffect(() => {
+    if (page >= totalPages) setPage(Math.max(0, totalPages - 1));
+  }, [totalPages, page]);
+
+  const pageEntries = useMemo(
+    () => leaderboard.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [leaderboard, page],
+  );
+
+  const goToMyPage = () => {
+    if (myRank > 0) setPage(Math.floor((myRank - 1) / PAGE_SIZE));
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -238,16 +259,20 @@ function ProviderLeaderboard({
 
       {/* My rank card */}
       {myRank > 0 && (
-        <div style={{
-          background: "linear-gradient(135deg, rgba(124,92,252,0.08), rgba(255,143,164,0.08))",
-          borderRadius: "var(--radius-lg)",
-          padding: "12px 16px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 6,
-          border: "1px solid rgba(124, 92, 252, 0.1)",
-        }}>
+        <div
+          onClick={goToMyPage}
+          style={{
+            background: "linear-gradient(135deg, rgba(124,92,252,0.08), rgba(255,143,164,0.08))",
+            borderRadius: "var(--radius-lg)",
+            padding: "12px 16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            border: "1px solid rgba(124, 92, 252, 0.1)",
+            cursor: "pointer",
+          }}
+        >
           <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>
             {t("leaderboard.yourRank")}
           </span>
@@ -288,16 +313,101 @@ function ProviderLeaderboard({
             {t("leaderboard.noData")}
           </div>
         ) : (
-          leaderboard.map((entry, i) => (
+          pageEntries.map((entry, i) => (
             <LeaderboardRow
               key={entry.user_id}
               entry={entry}
-              rank={i + 1}
+              rank={page * PAGE_SIZE + i + 1}
               isMe={entry.user_id === user.id}
             />
           ))
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+      )}
+    </div>
+  );
+}
+
+function Pagination({
+  page,
+  totalPages,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  onPageChange: (p: number) => void;
+}) {
+  const pages = useMemo(() => {
+    const items: (number | "...")[] = [];
+    if (totalPages <= 7) {
+      for (let i = 0; i < totalPages; i++) items.push(i);
+    } else {
+      items.push(0);
+      if (page > 2) items.push("...");
+      for (let i = Math.max(1, page - 1); i <= Math.min(totalPages - 2, page + 1); i++) {
+        items.push(i);
+      }
+      if (page < totalPages - 3) items.push("...");
+      items.push(totalPages - 1);
+    }
+    return items;
+  }, [page, totalPages]);
+
+  const btnBase: React.CSSProperties = {
+    fontSize: 11,
+    fontWeight: 600,
+    border: "none",
+    borderRadius: 4,
+    cursor: "pointer",
+    background: "transparent",
+    color: "var(--text-secondary)",
+    padding: "4px 8px",
+    minWidth: 28,
+    transition: "all 0.15s ease",
+  };
+
+  return (
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 2,
+    }}>
+      <button
+        onClick={() => onPageChange(Math.max(0, page - 1))}
+        disabled={page === 0}
+        style={{ ...btnBase, opacity: page === 0 ? 0.3 : 1, cursor: page === 0 ? "default" : "pointer" }}
+      >
+        ‹
+      </button>
+      {pages.map((p, i) =>
+        p === "..." ? (
+          <span key={`dots-${i}`} style={{ ...btnBase, cursor: "default" }}>…</span>
+        ) : (
+          <button
+            key={p}
+            onClick={() => onPageChange(p)}
+            style={{
+              ...btnBase,
+              background: p === page ? "var(--accent-purple)" : "transparent",
+              color: p === page ? "#fff" : "var(--text-secondary)",
+            }}
+          >
+            {p + 1}
+          </button>
+        ),
+      )}
+      <button
+        onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
+        disabled={page === totalPages - 1}
+        style={{ ...btnBase, opacity: page === totalPages - 1 ? 0.3 : 1, cursor: page === totalPages - 1 ? "default" : "pointer" }}
+      >
+        ›
+      </button>
     </div>
   );
 }
