@@ -40,4 +40,27 @@ export interface UserPreferences {
   language: "en" | "ko" | "ja" | "zh-CN" | "zh-TW" | "fr" | "es" | "de";
   config_dirs: string[];
   monthly_salary?: number;
+  usage_alerts_enabled: boolean;
+}
+
+export interface UsageWindow {
+  utilization: number;
+  resets_at: string;
+}
+
+export interface ExtraUsage {
+  is_enabled: boolean;
+  monthly_limit: number;
+  used_credits: number;
+  utilization: number;
+}
+
+export interface OAuthUsage {
+  five_hour: UsageWindow | null;
+  seven_day: UsageWindow | null;
+  seven_day_sonnet: UsageWindow | null;
+  seven_day_opus: UsageWindow | null;
+  extra_usage: ExtraUsage | null;
+  fetched_at: string;
+  is_stale: boolean;
 }

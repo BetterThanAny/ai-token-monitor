@@ -16,10 +16,12 @@ import { ModelBreakdown } from "./components/ModelBreakdown";
 import { PeriodTotals } from "./components/PeriodTotals";
 import { CacheEfficiency } from "./components/CacheEfficiency";
 import { Leaderboard } from "./components/Leaderboard";
+import { ChatRoom } from "./components/ChatRoom";
 import { ActivityGraph } from "./components/ActivityGraph";
 import { SupportBanner } from "./components/SupportBanner";
 import { SourceSelector } from "./components/SourceSelector";
 import { SalaryComparator } from "./components/SalaryComparator";
+import { UsageAlertBar } from "./components/UsageAlertBar";
 import { useUpdater } from "./hooks/useUpdater";
 
 function AppContent() {
@@ -112,6 +114,7 @@ function AppContent() {
       {/* Keep mounted tabs alive to avoid remount/recalculation on switch */}
       <div style={{ display: activeTab === "overview" ? "contents" : "none" }}>
         <TodaySummary today={today} weekAvg={weekAvg} />
+        <UsageAlertBar />
         <SalaryComparator stats={stats} />
         <DailyChart daily={stats.daily} days={7} />
         <PeriodTotals daily={stats.daily} />
@@ -129,6 +132,11 @@ function AppContent() {
       {/* Leaderboard lazy-loads (network requests), keep conditional */}
       {activeTab === "leaderboard" && (
         <Leaderboard />
+      )}
+
+      {/* Chat lazy-loads (realtime subscription), keep conditional */}
+      {activeTab === "chat" && (
+        <ChatRoom />
       )}
 
       <SupportBanner />

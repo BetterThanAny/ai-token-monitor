@@ -343,6 +343,11 @@ pub fn capture_window(_app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn get_oauth_usage() -> Option<crate::oauth_usage::OAuthUsage> {
+    crate::oauth_usage::get_cached_usage()
+}
+
+#[tauri::command]
 pub fn get_pricing_table() -> pricing::PricingTable {
     pricing::get_pricing_table()
 }
