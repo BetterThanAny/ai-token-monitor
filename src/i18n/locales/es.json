@@ -187,5 +187,15 @@
   "update.downloading": "Descargando... {{progress}}%",
   "update.restart": "Listo para actualizar",
   "update.restartBtn": "Reiniciar",
-  "update.error": "Error de actualización"
+  "update.error": "Error de actualización",
+
+  "settings.usageAlerts": "Alertas de uso",
+
+  "usageAlert.title": "Uso",
+  "usageAlert.session": "Sesión (5h)",
+  "usageAlert.weekly": "Semanal",
+  "usageAlert.extraUsage": "Uso adicional",
+  "usageAlert.stale": "Actualizando...",
+  "usageAlert.resetsIn": "Se reinicia en {{time}}",
+  "usageAlert.resetsNow": "Reiniciando..."
 }

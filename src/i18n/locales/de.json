@@ -187,5 +187,15 @@
   "update.downloading": "Herunterladen... {{progress}}%",
   "update.restart": "Update bereit",
   "update.restartBtn": "Neustarten",
-  "update.error": "Update fehlgeschlagen"
+  "update.error": "Update fehlgeschlagen",
+
+  "settings.usageAlerts": "Nutzungswarnungen",
+
+  "usageAlert.title": "Nutzung",
+  "usageAlert.session": "Sitzung (5h)",
+  "usageAlert.weekly": "Wöchentlich",
+  "usageAlert.extraUsage": "Zusätzliche Nutzung",
+  "usageAlert.stale": "Aktualisierung...",
+  "usageAlert.resetsIn": "Zurücksetzen in {{time}}",
+  "usageAlert.resetsNow": "Wird zurückgesetzt..."
 }

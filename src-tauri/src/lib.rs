@@ -1,10 +1,13 @@
 mod commands;
+mod oauth_usage;
 mod providers;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Mutex;
 use std::thread;
+use std::time::Instant;
 
 /// When true, the window will not auto-hide on focus loss (e.g. during dialog).
 static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
@@ -13,6 +16,99 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 
 use providers::types::UserPreferences;
+
+struct AlertState {
+    window_id: String,
+    fired_thresholds: Vec<u32>,
+    last_notification_at: Option<Instant>,
+}
+
+static ALERT_STATE: Mutex<Option<AlertState>> = Mutex::new(None);
+
+/// Check OAuth usage thresholds and fire OS notifications for newly crossed thresholds.
+fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
+    let prefs = commands::get_preferences();
+    if !prefs.usage_alerts_enabled {
+        return;
+    }
+
+    let usage = match oauth_usage::get_cached_usage() {
+        Some(u) => u,
+        None => return,
+    };
+
+    // Use five_hour utilization for threshold alerts
+    let utilization = match &usage.five_hour {
+        Some(w) => w.utilization,
+        None => return,
+    };
+
+    // Use resets_at as window_id (stable identifier from API)
+    let window_id = usage.five_hour.as_ref().map(|w| w.resets_at.clone()).unwrap_or_default();
+
+    let thresholds: Vec<u32> = [50, 80, 90]
+        .iter()
+        .filter(|&&t| utilization >= t as f64)
+        .copied()
+        .collect();
+
+    let mut state_guard = match ALERT_STATE.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+
+    let state = state_guard.get_or_insert_with(|| AlertState {
+        window_id: window_id.clone(),
+        fired_thresholds: Vec::new(),
+        last_notification_at: None,
+    });
+
+    // Reset if window changed
+    if state.window_id != window_id {
+        state.window_id = window_id;
+        state.fired_thresholds.clear();
+    }
+
+    let new_thresholds: Vec<u32> = thresholds
+        .iter()
+        .filter(|t| !state.fired_thresholds.contains(t))
+        .copied()
+        .collect();
+
+    if new_thresholds.is_empty() {
+        return;
+    }
+
+    // Cooldown: at least 60 seconds between notifications
+    if let Some(last) = state.last_notification_at {
+        if last.elapsed().as_secs() < 60 {
+            return;
+        }
+    }
+
+    // Record thresholds only after cooldown check passes
+    for t in &new_thresholds {
+        if !state.fired_thresholds.contains(t) {
+            state.fired_thresholds.push(*t);
+        }
+    }
+
+    let highest = new_thresholds.iter().copied().max().unwrap_or(50);
+    let title = "AI Token Monitor";
+    let body = match highest {
+        90 => format!("Session usage at {:.0}% — may be throttled soon", utilization),
+        80 => format!("Session usage at {:.0}%", utilization),
+        _ => format!("Session usage at {:.0}%", utilization),
+    };
+
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app_handle.notification().builder()
+        .title(title)
+        .body(&body)
+        .show();
+
+    state.last_notification_at = Some(Instant::now());
+}
 
 fn get_config_dirs_from_prefs() -> Vec<PathBuf> {
     let prefs_path = dirs::home_dir()
@@ -289,7 +385,8 @@ pub fn run() {
             quit_app,
             commands::capture_window,
             commands::copy_png_to_clipboard,
-            commands::get_pricing_table
+            commands::get_pricing_table,
+            commands::get_oauth_usage
         ])
         .setup(|app| {
             // Build tray icon
@@ -408,6 +505,26 @@ pub fn run() {
 
             // Start file watcher
             start_file_watcher(app.handle().clone());
+
+            // Start OAuth usage polling (5-minute interval)
+            {
+                let handle = app.handle().clone();
+                thread::spawn(move || {
+                    let rt = tauri::async_runtime::handle();
+                    loop {
+                        // Always fetch to keep cache fresh for UI
+                        if let Some(_) = rt.block_on(oauth_usage::fetch_and_cache_usage()) {
+                            let _ = handle.emit("usage-updated", ());
+                            // Only fire OS notifications if alerts are enabled
+                            let prefs = commands::get_preferences();
+                            if prefs.usage_alerts_enabled {
+                                check_and_fire_alerts(&handle);
+                            }
+                        }
+                        thread::sleep(std::time::Duration::from_secs(300));
+                    }
+                });
+            }
 
             Ok(())
         })

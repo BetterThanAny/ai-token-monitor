@@ -187,5 +187,15 @@
   "update.downloading": "ダウンロード中... {{progress}}%",
   "update.restart": "更新の準備完了",
   "update.restartBtn": "再起動",
-  "update.error": "更新に失敗しました"
+  "update.error": "更新に失敗しました",
+
+  "settings.usageAlerts": "使用量アラート",
+
+  "usageAlert.title": "使用量",
+  "usageAlert.session": "セッション (5時間)",
+  "usageAlert.weekly": "週間",
+  "usageAlert.extraUsage": "追加使用量",
+  "usageAlert.stale": "更新中...",
+  "usageAlert.resetsIn": "{{time}}後にリセット",
+  "usageAlert.resetsNow": "リセット中..."
 }

@@ -187,5 +187,15 @@
   "update.downloading": "Downloading... {{progress}}%",
   "update.restart": "Ready to update",
   "update.restartBtn": "Restart",
-  "update.error": "Update failed"
+  "update.error": "Update failed",
+
+  "settings.usageAlerts": "Usage Alerts",
+
+  "usageAlert.title": "Usage",
+  "usageAlert.session": "Session (5h)",
+  "usageAlert.weekly": "Weekly",
+  "usageAlert.extraUsage": "Extra Usage",
+  "usageAlert.stale": "Updating...",
+  "usageAlert.resetsIn": "Resets in {{time}}",
+  "usageAlert.resetsNow": "Resetting..."
 }
