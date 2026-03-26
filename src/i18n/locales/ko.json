@@ -187,5 +187,15 @@
   "update.downloading": "다운로드 중... {{progress}}%",
   "update.restart": "업데이트 준비 완료",
   "update.restartBtn": "재시작",
-  "update.error": "업데이트 실패"
+  "update.error": "업데이트 실패",
+
+  "settings.usageAlerts": "사용량 알림",
+
+  "usageAlert.title": "사용량",
+  "usageAlert.session": "세션 (5시간)",
+  "usageAlert.weekly": "주간",
+  "usageAlert.extraUsage": "추가 사용량",
+  "usageAlert.stale": "업데이트 중...",
+  "usageAlert.resetsIn": "{{time}} 후 리셋",
+  "usageAlert.resetsNow": "리셋 중..."
 }
