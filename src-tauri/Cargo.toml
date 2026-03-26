@@ -22,7 +22,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 notify = "7"
 tauri-plugin-clipboard-manager = "2.3.2"
-tauri-plugin-single-instance = "2.4.0"
+tauri-plugin-single-instance = { version = "2.4.0", features = ["deep-link"] }
 tauri-plugin-dialog = "2.6.0"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
