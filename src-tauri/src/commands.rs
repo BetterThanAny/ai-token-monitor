@@ -1,11 +1,16 @@
 use std::fs;
 use std::path::PathBuf;
 
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Nonce};
+use base64::Engine;
+use sha2::{Digest, Sha256};
+
 use crate::providers::claude_code::ClaudeCodeProvider;
 use crate::providers::codex::CodexProvider;
 use crate::providers::pricing;
 use crate::providers::traits::TokenProvider;
-use crate::providers::types::{AllStats, UserPreferences};
+use crate::providers::types::{AiKeys, AllStats, UserPreferences};
 
 use tauri::Emitter;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -113,20 +118,191 @@ pub fn validate_claude_dir(path: String) -> bool {
     canonical.join("projects").is_dir()
 }
 
-#[tauri::command]
-pub fn get_preferences() -> UserPreferences {
-    let path = prefs_path();
-    if let Ok(content) = fs::read_to_string(&path) {
-        serde_json::from_str(&content).unwrap_or_default()
+const APP_SALT: &[u8] = b"ai-token-monitor-v1";
+
+/// Cached AI keys to avoid repeated file reads.
+static AI_KEYS_CACHE: std::sync::Mutex<Option<Option<AiKeys>>> = std::sync::Mutex::new(None);
+
+fn encrypted_keys_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude")
+        .join(".ai-token-monitor-keys.enc")
+}
+
+fn get_machine_id() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("ioreg")
+            .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("IOPlatformUUID") {
+                    if let Some(start) = line.find('"') {
+                        let rest = &line[start + 1..];
+                        if let Some(mid) = rest.find("\" = \"") {
+                            let uuid_start = mid + 5;
+                            if let Some(end) = rest[uuid_start..].find('"') {
+                                return rest[uuid_start..uuid_start + end].to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = std::process::Command::new("reg")
+            .args([
+                "query",
+                r"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography",
+                "/v",
+                "MachineGuid",
+            ])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("MachineGuid") {
+                    if let Some(guid) = line.split_whitespace().last() {
+                        return guid.to_string();
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: hostname + username
+    format!("{}-{}", whoami::hostname(), whoami::username())
+}
+
+fn derive_encryption_key() -> [u8; 32] {
+    let machine_id = get_machine_id();
+    let mut hasher = Sha256::new();
+    hasher.update(machine_id.as_bytes());
+    hasher.update(APP_SALT);
+    hasher.finalize().into()
+}
+
+fn encrypt_data(plaintext: &[u8]) -> Option<String> {
+    let key = derive_encryption_key();
+    let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
+    let mut nonce_bytes = [0u8; 12];
+    use rand::RngCore;
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher.encrypt(nonce, plaintext).ok()?;
+    // Format: base64(nonce + ciphertext)
+    let mut combined = Vec::with_capacity(12 + ciphertext.len());
+    combined.extend_from_slice(&nonce_bytes);
+    combined.extend_from_slice(&ciphertext);
+    Some(base64::engine::general_purpose::STANDARD.encode(&combined))
+}
+
+fn decrypt_data(encoded: &str) -> Option<Vec<u8>> {
+    let key = derive_encryption_key();
+    let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
+    let combined = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
+    if combined.len() < 12 {
+        return None;
+    }
+    let (nonce_bytes, ciphertext) = combined.split_at(12);
+    let nonce = Nonce::from_slice(nonce_bytes);
+    cipher.decrypt(nonce, ciphertext).ok()
+}
+
+fn load_ai_keys() -> Option<AiKeys> {
+    // Return cached value if available
+    if let Ok(cache) = AI_KEYS_CACHE.lock() {
+        if let Some(ref cached) = *cache {
+            return cached.clone();
+        }
+    }
+
+    let result = load_ai_keys_from_file();
+
+    // Cache the result
+    if let Ok(mut cache) = AI_KEYS_CACHE.lock() {
+        *cache = Some(result.clone());
+    }
+
+    result
+}
+
+fn load_ai_keys_from_file() -> Option<AiKeys> {
+    let path = encrypted_keys_path();
+    let encoded = fs::read_to_string(&path).ok()?;
+    let decrypted = decrypt_data(encoded.trim())?;
+    let json_str = String::from_utf8(decrypted).ok()?;
+    let keys: AiKeys = serde_json::from_str(&json_str).ok()?;
+    if keys.gemini.is_none() && keys.openai.is_none() && keys.anthropic.is_none() {
+        None
     } else {
-        UserPreferences::default()
+        Some(keys)
+    }
+}
+
+fn save_ai_keys(keys: &Option<AiKeys>) {
+    let path = encrypted_keys_path();
+    match keys {
+        Some(k) if k.gemini.is_some() || k.openai.is_some() || k.anthropic.is_some() => {
+            if let Ok(json) = serde_json::to_string(k) {
+                if let Some(encrypted) = encrypt_data(json.as_bytes()) {
+                    let _ = fs::write(&path, &encrypted);
+                }
+            }
+        }
+        _ => {
+            // No keys — remove file
+            let _ = fs::remove_file(&path);
+        }
+    }
+    // Invalidate cache so next load picks up new values
+    if let Ok(mut cache) = AI_KEYS_CACHE.lock() {
+        *cache = None;
     }
 }
 
 #[tauri::command]
-pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<(), String> {
+pub fn get_preferences() -> UserPreferences {
     let path = prefs_path();
-    let json = serde_json::to_string_pretty(&prefs)
+    let mut prefs: UserPreferences = if let Ok(content) = fs::read_to_string(&path) {
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        UserPreferences::default()
+    };
+
+    // Migrate: if ai_keys exist in JSON file, move them to encrypted file
+    if prefs.ai_keys.is_some() {
+        save_ai_keys(&prefs.ai_keys);
+        prefs.ai_keys = None;
+        if let Ok(json) = serde_json::to_string_pretty(&prefs) {
+            let _ = fs::write(&path, &json);
+        }
+    }
+
+    // ai_keys are loaded separately via get_ai_keys command
+    prefs
+}
+
+/// Load AI keys from encrypted local file on-demand.
+#[tauri::command]
+pub fn get_ai_keys() -> Option<AiKeys> {
+    load_ai_keys()
+}
+
+#[tauri::command]
+pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<(), String> {
+    // Save ai_keys to encrypted file, not to JSON file
+    save_ai_keys(&prefs.ai_keys);
+
+    let mut file_prefs = prefs.clone();
+    file_prefs.ai_keys = None; // Never write keys to disk
+
+    let path = prefs_path();
+    let json = serde_json::to_string_pretty(&file_prefs)
         .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
     fs::write(&path, json)
         .map_err(|e| format!("Failed to write preferences: {}", e))?;

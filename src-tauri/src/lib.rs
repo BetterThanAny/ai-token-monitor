@@ -1,3 +1,4 @@
+mod ai_translate;
 mod commands;
 mod oauth_usage;
 mod providers;
@@ -402,7 +403,10 @@ pub fn run() {
             commands::copy_png_to_clipboard,
             commands::get_pricing_table,
             commands::get_oauth_usage,
-            commands::enable_usage_tracking
+            commands::enable_usage_tracking,
+            commands::get_ai_keys,
+            ai_translate::translate_text,
+            ai_translate::translate_reply
         ])
         .setup(|app| {
             // Build tray icon
@@ -544,10 +548,13 @@ pub fn run() {
                     loop {
                         let prefs = commands::get_preferences();
                         if prefs.usage_tracking_enabled {
-                            if let Some(_) = rt.block_on(oauth_usage::fetch_and_cache_usage()) {
-                                let _ = handle.emit("usage-updated", ());
-                                if prefs.usage_alerts_enabled {
-                                    check_and_fire_alerts(&handle);
+                            // Skip if cache was recently populated (e.g. by enable_usage_tracking)
+                            if !oauth_usage::is_cache_fresh(30) {
+                                if let Some(_) = rt.block_on(oauth_usage::fetch_and_cache_usage()) {
+                                    let _ = handle.emit("usage-updated", ());
+                                    if prefs.usage_alerts_enabled {
+                                        check_and_fire_alerts(&handle);
+                                    }
                                 }
                             }
                             thread::sleep(std::time::Duration::from_secs(300));
