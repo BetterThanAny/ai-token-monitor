@@ -97,6 +97,13 @@ export function SettingsOverlay({ visible, onClose }: Props) {
           />
         </SettingRow>
 
+        <SettingRow label={t("settings.usageTracking")}>
+          <ToggleSwitch
+            checked={prefs.usage_tracking_enabled}
+            onChange={(v) => updatePrefs({ usage_tracking_enabled: v })}
+          />
+        </SettingRow>
+
         {/* Salary section */}
         <SettingRow
           label={t("settings.monthlySalary")}

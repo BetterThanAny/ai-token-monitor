@@ -191,6 +191,7 @@
   "update.error": "更新に失敗しました",
 
   "settings.usageAlerts": "使用量アラート",
+  "settings.usageTracking": "使用量トラッキング",
 
   "usageAlert.title": "使用量",
   "usageAlert.session": "セッション (5時間)",
@@ -199,6 +200,11 @@
   "usageAlert.stale": "更新中...",
   "usageAlert.resetsIn": "{{time}}後にリセット",
   "usageAlert.resetsNow": "リセット中...",
+
+  "usageTracking.title": "Claude 使用量トラッキング",
+  "usageTracking.description": "Claude Codeのセッションおよび週間使用制限をリアルタイムで監視します。Claude Codeのログイン認証情報へのアクセスが必要です。",
+  "usageTracking.enable": "有効にする",
+  "usageTracking.enabling": "有効化中...",
 
   "chat.join": "チャットに参加",
   "chat.description": "リーダーボードの他の開発者とチャットしましょう。ログインしてリーダーボードを有効にすると参加できます。",

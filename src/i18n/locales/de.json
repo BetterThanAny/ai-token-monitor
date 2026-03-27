@@ -191,6 +191,7 @@
   "update.error": "Update fehlgeschlagen",
 
   "settings.usageAlerts": "Nutzungswarnungen",
+  "settings.usageTracking": "Nutzungsverfolgung",
 
   "usageAlert.title": "Nutzung",
   "usageAlert.session": "Sitzung (5h)",
@@ -199,6 +200,11 @@
   "usageAlert.stale": "Aktualisierung...",
   "usageAlert.resetsIn": "Zurücksetzen in {{time}}",
   "usageAlert.resetsNow": "Wird zurückgesetzt...",
+
+  "usageTracking.title": "Claude Nutzungsverfolgung",
+  "usageTracking.description": "Überwachen Sie Ihre Claude Code Sitzungs- und Wochenlimits in Echtzeit. Dies erfordert Zugriff auf Ihre Claude Code Anmeldedaten.",
+  "usageTracking.enable": "Aktivieren",
+  "usageTracking.enabling": "Wird aktiviert...",
 
   "chat.join": "Chat beitreten",
   "chat.description": "Chatten Sie mit anderen Entwicklern in der Rangliste. Melden Sie sich an und aktivieren Sie die Rangliste, um teilzunehmen.",

@@ -401,7 +401,8 @@ pub fn run() {
             commands::capture_window,
             commands::copy_png_to_clipboard,
             commands::get_pricing_table,
-            commands::get_oauth_usage
+            commands::get_oauth_usage,
+            commands::enable_usage_tracking
         ])
         .setup(|app| {
             // Build tray icon
@@ -521,22 +522,39 @@ pub fn run() {
             // Start file watcher
             start_file_watcher(app.handle().clone());
 
-            // Start OAuth usage polling (5-minute interval)
+            // Migrate existing users: auto-enable usage tracking if prefs file exists
+            {
+                let prefs_file = commands::prefs_path();
+                if prefs_file.exists() {
+                    let mut prefs = commands::get_preferences();
+                    if !prefs.usage_tracking_migrated {
+                        prefs.usage_tracking_enabled = true;
+                        prefs.usage_tracking_migrated = true;
+                        if let Ok(json) = serde_json::to_string_pretty(&prefs) {
+                            let _ = std::fs::write(&prefs_file, json);
+                        }
+                    }
+                }
+            }
+
+            // Start OAuth usage polling (5-minute interval, only when tracking enabled)
             {
                 let handle = app.handle().clone();
                 thread::spawn(move || {
                     let rt = tauri::async_runtime::handle();
                     loop {
-                        // Always fetch to keep cache fresh for UI
-                        if let Some(_) = rt.block_on(oauth_usage::fetch_and_cache_usage()) {
-                            let _ = handle.emit("usage-updated", ());
-                            // Only fire OS notifications if alerts are enabled
-                            let prefs = commands::get_preferences();
-                            if prefs.usage_alerts_enabled {
-                                check_and_fire_alerts(&handle);
+                        let prefs = commands::get_preferences();
+                        if prefs.usage_tracking_enabled {
+                            if let Some(_) = rt.block_on(oauth_usage::fetch_and_cache_usage()) {
+                                let _ = handle.emit("usage-updated", ());
+                                if prefs.usage_alerts_enabled {
+                                    check_and_fire_alerts(&handle);
+                                }
                             }
+                            thread::sleep(std::time::Duration::from_secs(300));
+                        } else {
+                            thread::sleep(std::time::Duration::from_secs(5));
                         }
-                        thread::sleep(std::time::Duration::from_secs(300));
                     }
                 });
             }

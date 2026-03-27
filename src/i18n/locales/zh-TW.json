@@ -191,6 +191,7 @@
   "update.error": "更新失敗",
 
   "settings.usageAlerts": "用量提醒",
+  "settings.usageTracking": "用量追蹤",
 
   "usageAlert.title": "用量",
   "usageAlert.session": "工作階段 (5小時)",
@@ -199,6 +200,11 @@
   "usageAlert.stale": "更新中...",
   "usageAlert.resetsIn": "{{time}}後重置",
   "usageAlert.resetsNow": "重置中...",
+
+  "usageTracking.title": "Claude 用量追蹤",
+  "usageTracking.description": "即時監控 Claude Code 工作階段和每週使用限額。需要存取 Claude Code 登入憑證。",
+  "usageTracking.enable": "啟用",
+  "usageTracking.enabling": "啟用中...",
 
   "chat.join": "加入聊天",
   "chat.description": "與排行榜上的其他開發者聊天。登入並啟用排行榜即可參與。",
