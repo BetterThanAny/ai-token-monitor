@@ -14,40 +14,28 @@ export interface LeaderboardEntry {
   sessions: number;
 }
 
-interface SnapshotRow {
-  user_id: string;
-  total_tokens: number;
-  cost_usd: number;
-  messages: number;
-  sessions: number;
-  profiles: { nickname: string; avatar_url: string | null }
-    | { nickname: string; avatar_url: string | null }[];
-}
-
-function toLeaderboardEntry(row: SnapshotRow): LeaderboardEntry {
-  const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-  return {
-    user_id: row.user_id,
-    nickname: profile?.nickname ?? "Unknown",
-    avatar_url: profile?.avatar_url ?? null,
-    total_tokens: row.total_tokens,
-    cost_usd: Number(row.cost_usd),
-    messages: row.messages,
-    sessions: row.sessions,
-  };
-}
-
 interface UseLeaderboardSyncProps {
   stats: AllStats | null;
   user: User | null;
   optedIn: boolean;
   provider: LeaderboardProvider;
+  deviceId: string | null;
+}
+
+interface RpcLeaderboardRow {
+  user_id: string;
+  nickname: string;
+  avatar_url: string | null;
+  total_tokens: number | string;
+  cost_usd: number | string;
+  messages: number | string;
+  sessions: number | string;
 }
 
 const LEADERBOARD_CACHE_TTL = 180_000; // 3 minutes
 const LEADERBOARD_POLL_INTERVAL = 180_000; // 3 minutes
 
-export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeaderboardSyncProps) {
+export function useLeaderboardSync({ stats, user, optedIn, provider, deviceId }: UseLeaderboardSyncProps) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [period, setPeriod] = useState<"today" | "week">("today");
   const [loading, setLoading] = useState(false);
@@ -82,56 +70,32 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
     try {
       const today = toLocalDateStr(new Date());
 
-      if (period === "today") {
-        const query = supabase
-          .from("daily_snapshots")
-          .select("user_id, total_tokens, cost_usd, messages, sessions, profiles(nickname, avatar_url)")
-          .eq("date", today)
-          .eq("provider", provider)
-          .order("total_tokens", { ascending: false })
-          .limit(100);
+      const now = new Date();
+      const dow = now.getDay();
+      const mondayOffset = dow === 0 ? 6 : dow - 1;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - mondayOffset);
+      const weekStart = toLocalDateStr(monday);
+      const dateFrom = period === "today" ? today : weekStart;
 
-        const { data } = await query;
+      const { data } = await supabase.rpc("get_leaderboard_entries", {
+        p_provider: provider,
+        p_date_from: dateFrom,
+        p_date_to: today,
+      });
 
-        if (data) {
-          const entries = (data as SnapshotRow[]).map(toLeaderboardEntry);
-          setLeaderboard(entries);
-          cacheRef.current = { data: entries, fetchedAt: Date.now(), period, provider };
-        }
-      } else {
-        // Weekly: aggregate snapshots from monday to today
-        const now = new Date();
-        const dow = now.getDay();
-        const mondayOffset = dow === 0 ? 6 : dow - 1;
-        const monday = new Date(now);
-        monday.setDate(now.getDate() - mondayOffset);
-        const weekStart = toLocalDateStr(monday);
-
-        const { data } = await supabase
-          .from("daily_snapshots")
-          .select("user_id, total_tokens, cost_usd, messages, sessions, profiles(nickname, avatar_url)")
-          .gte("date", weekStart)
-          .lte("date", today)
-          .eq("provider", provider)
-          .limit(5000);
-
-        if (data) {
-          const userMap = new Map<string, LeaderboardEntry>();
-          for (const row of (data as SnapshotRow[])) {
-            const existing = userMap.get(row.user_id);
-            if (existing) {
-              existing.total_tokens += row.total_tokens;
-              existing.cost_usd += Number(row.cost_usd);
-              existing.messages += row.messages;
-              existing.sessions += row.sessions;
-            } else {
-              userMap.set(row.user_id, toLeaderboardEntry(row));
-            }
-          }
-          const sorted = Array.from(userMap.values()).sort((a, b) => b.total_tokens - a.total_tokens);
-          setLeaderboard(sorted);
-          cacheRef.current = { data: sorted, fetchedAt: Date.now(), period, provider };
-        }
+      if (data) {
+        const entries = (data as RpcLeaderboardRow[]).map((row) => ({
+          user_id: row.user_id,
+          nickname: row.nickname ?? "Unknown",
+          avatar_url: row.avatar_url,
+          total_tokens: Number(row.total_tokens),
+          cost_usd: Number(row.cost_usd),
+          messages: Number(row.messages),
+          sessions: Number(row.sessions),
+        }));
+        setLeaderboard(entries);
+        cacheRef.current = { data: entries, fetchedAt: Date.now(), period, provider };
       }
     } finally {
       setLoading(false);
@@ -140,18 +104,18 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
 
   // Upload snapshot (debounced), then immediately refresh leaderboard
   useEffect(() => {
-    if (!supabase || !user || !optedIn || !stats) return;
+    if (!supabase || !user || !optedIn || !stats || !deviceId) return;
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
-      await uploadSnapshot(user.id, stats, provider, syncedPastDatesRef.current);
+      await uploadSnapshot(user.id, stats, provider, deviceId, syncedPastDatesRef.current);
       fetchLeaderboard(true);
     }, 500);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [stats, user, optedIn, provider, fetchLeaderboard]);
+  }, [stats, user, optedIn, provider, deviceId, fetchLeaderboard]);
 
   // Auto-refresh with visibility-aware polling
   useEffect(() => {
@@ -186,9 +150,10 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
 }
 
 async function uploadSnapshot(
-  userId: string,
+  _userId: string,
   stats: AllStats,
   provider: LeaderboardProvider,
+  deviceId: string,
   syncedPastDates: Set<string>,
 ) {
   if (!supabase) return;
@@ -221,48 +186,31 @@ async function uploadSnapshot(
   const staleDates = allDatesInWeek.filter((d) => !localDatesInWeek.has(d));
   const toClean = staleDates.filter((d) => !syncedPastDates.has(cleanKey(d)));
 
-  if (toClean.length > 0) {
-    const { error: delError } = await supabase
-      .from("daily_snapshots")
-      .delete()
-      .eq("user_id", userId)
-      .eq("provider", provider)
-      .in("date", toClean);
-
-    if (!delError) {
-      toClean.forEach((d) => syncedPastDates.add(cleanKey(d)));
-    }
-  }
-
-  // If today gains local data mid-session, clear the clean cache so upsert takes over
-  if (localDatesInWeek.has(today)) {
-    syncedPastDates.delete(cleanKey(today));
-  }
-
   // Always upload today; upload past days of this week only once per session
   const syncKey = (date: string) => `${provider}:${date}`;
   const toSync = stats.daily.filter(
     (d) => d.date >= weekStart && d.date <= today &&
       (d.date === today || !syncedPastDates.has(syncKey(d.date)))
   );
-  if (toSync.length === 0) return;
+  if (toSync.length === 0 && toClean.length === 0) return;
 
   const rows = toSync.map((d) => ({
-    user_id: userId,
     date: d.date,
-    provider,
     total_tokens: getTotalTokens(d.tokens),
     cost_usd: d.cost_usd,
     messages: d.messages,
     sessions: d.sessions,
   }));
 
-  const { error } = await supabase.from("daily_snapshots").upsert(rows, {
-    onConflict: "user_id,date,provider",
+  const { error } = await supabase.rpc("sync_device_snapshots", {
+    p_provider: provider,
+    p_device_id: deviceId,
+    p_rows: rows,
+    p_stale_dates: toClean,
   });
 
-  // Mark past days as synced so they won't be re-uploaded until next session
   if (!error) {
+    toClean.forEach((d) => syncedPastDates.add(cleanKey(d)));
     toSync.forEach((d) => { if (d.date !== today) syncedPastDates.add(syncKey(d.date)); });
   }
 }

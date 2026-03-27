@@ -15,6 +15,7 @@ const defaultPrefs: UserPreferences = {
   number_format: "compact",
   show_tray_cost: true,
   leaderboard_opted_in: false,
+  device_id: undefined,
   include_claude: true,
   include_codex: false,
   theme: "github",
@@ -32,6 +33,13 @@ const SettingsContext = createContext<SettingsContextType>({
   ready: false,
 });
 
+function generateDeviceId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefs] = useState<UserPreferences>(defaultPrefs);
   const [ready, setReady] = useState(false);
@@ -39,9 +47,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     invoke<UserPreferences>("get_preferences").then((p) => {
-      setPrefs(p);
+      const nextPrefs = p.device_id ? p : { ...p, device_id: generateDeviceId() };
+      setPrefs(nextPrefs);
       // Skip the persist effect triggered by this setPrefs
-      skipNextPersist.current = true;
+      skipNextPersist.current = !!p.device_id;
+      prevConfigDirsRef.current = JSON.stringify(nextPrefs.config_dirs);
       setReady(true);
     }).catch(() => {
       setReady(true);
