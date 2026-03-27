@@ -1,4 +1,7 @@
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useOAuthUsage } from "../hooks/useOAuthUsage";
+import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../i18n/I18nContext";
 
 function getBarColor(percent: number): string {
@@ -72,8 +75,66 @@ function UsageRow({
 }
 
 export function UsageAlertBar() {
+  const { prefs, refreshPrefs } = useSettings();
   const { usage } = useOAuthUsage();
   const t = useI18n();
+  const [enabling, setEnabling] = useState(false);
+
+  if (!prefs.usage_tracking_enabled) {
+    return (
+      <div style={{
+        background: "var(--bg-card)",
+        borderRadius: "var(--radius-lg)",
+        padding: "12px 16px",
+      }}>
+        <div style={{
+          fontSize: 11,
+          fontWeight: 700,
+          color: "var(--text-primary)",
+          marginBottom: 4,
+        }}>
+          {t("usageTracking.title")}
+        </div>
+        <div style={{
+          fontSize: 10,
+          color: "var(--text-secondary)",
+          marginBottom: 10,
+          lineHeight: 1.4,
+        }}>
+          {t("usageTracking.description")}
+        </div>
+        <button
+          onClick={async () => {
+            setEnabling(true);
+            try {
+              await invoke("enable_usage_tracking");
+              await refreshPrefs();
+            } catch {
+              // silently ignore
+            } finally {
+              setEnabling(false);
+            }
+          }}
+          disabled={enabling}
+          style={{
+            width: "100%",
+            padding: "6px 0",
+            fontSize: 11,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+            background: "var(--bg-hover)",
+            border: "1px solid var(--border-secondary)",
+            borderRadius: "var(--radius-md)",
+            cursor: enabling ? "default" : "pointer",
+            opacity: enabling ? 0.6 : 1,
+            transition: "opacity 0.2s ease",
+          }}
+        >
+          {enabling ? t("usageTracking.enabling") : t("usageTracking.enable")}
+        </button>
+      </div>
+    );
+  }
 
   if (!usage) return null;
 

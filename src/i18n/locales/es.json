@@ -191,6 +191,7 @@
   "update.error": "Error de actualización",
 
   "settings.usageAlerts": "Alertas de uso",
+  "settings.usageTracking": "Seguimiento de uso",
 
   "usageAlert.title": "Uso",
   "usageAlert.session": "Sesión (5h)",
@@ -199,6 +200,11 @@
   "usageAlert.stale": "Actualizando...",
   "usageAlert.resetsIn": "Se reinicia en {{time}}",
   "usageAlert.resetsNow": "Reiniciando...",
+
+  "usageTracking.title": "Seguimiento de uso de Claude",
+  "usageTracking.description": "Monitorea tus límites de sesión y semanales de Claude Code en tiempo real. Requiere acceso a tus credenciales de inicio de sesión de Claude Code.",
+  "usageTracking.enable": "Activar",
+  "usageTracking.enabling": "Activando...",
 
   "chat.join": "Unirse al chat",
   "chat.description": "Chatea con otros desarrolladores de la clasificación. Inicia sesión y activa la clasificación para participar.",

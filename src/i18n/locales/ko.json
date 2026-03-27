@@ -191,6 +191,7 @@
   "update.error": "업데이트 실패",
 
   "settings.usageAlerts": "사용량 알림",
+  "settings.usageTracking": "사용량 추적",
 
   "usageAlert.title": "사용량",
   "usageAlert.session": "세션 (5시간)",
@@ -199,6 +200,11 @@
   "usageAlert.stale": "업데이트 중...",
   "usageAlert.resetsIn": "{{time}} 후 리셋",
   "usageAlert.resetsNow": "리셋 중...",
+
+  "usageTracking.title": "Claude 사용량 추적",
+  "usageTracking.description": "Claude Code 세션 및 주간 사용 한도를 실시간으로 모니터링합니다. Claude Code 로그인 자격 증명에 대한 접근이 필요합니다.",
+  "usageTracking.enable": "활성화",
+  "usageTracking.enabling": "활성화 중...",
 
   "chat.join": "채팅 참여하기",
   "chat.description": "리더보드에 참여 중인 다른 개발자들과 대화하세요. 로그인 후 리더보드를 활성화하면 참여할 수 있습니다.",
