@@ -7,10 +7,11 @@ use crate::providers::pricing;
 use crate::providers::traits::TokenProvider;
 use crate::providers::types::{AllStats, UserPreferences};
 
+use tauri::Emitter;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use tauri::Manager;
 
-fn prefs_path() -> PathBuf {
+pub(crate) fn prefs_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_default()
         .join(".claude")
@@ -350,4 +351,17 @@ pub fn get_oauth_usage() -> Option<crate::oauth_usage::OAuthUsage> {
 #[tauri::command]
 pub fn get_pricing_table() -> pricing::PricingTable {
     pricing::get_pricing_table()
+}
+
+#[tauri::command]
+pub async fn enable_usage_tracking(app: tauri::AppHandle) -> Result<(), String> {
+    let mut prefs = get_preferences();
+    prefs.usage_tracking_enabled = true;
+    set_preferences(app.clone(), prefs)?;
+
+    // Immediately fetch so user sees data right away
+    if let Some(_) = crate::oauth_usage::fetch_and_cache_usage().await {
+        let _ = app.emit("usage-updated", ());
+    }
+    Ok(())
 }

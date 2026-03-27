@@ -41,6 +41,7 @@ export interface UserPreferences {
   config_dirs: string[];
   monthly_salary?: number;
   usage_alerts_enabled: boolean;
+  usage_tracking_enabled: boolean;
 }
 
 export interface UsageWindow {

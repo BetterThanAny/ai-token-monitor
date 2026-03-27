@@ -7,6 +7,7 @@ import type { UserPreferences } from "../lib/types";
 interface SettingsContextType {
   prefs: UserPreferences;
   updatePrefs: (partial: Partial<UserPreferences>) => void;
+  refreshPrefs: () => Promise<void>;
   ready: boolean;
 }
 
@@ -21,11 +22,13 @@ const defaultPrefs: UserPreferences = {
   language: "en",
   config_dirs: ["~/.claude"],
   usage_alerts_enabled: true,
+  usage_tracking_enabled: false,
 };
 
 const SettingsContext = createContext<SettingsContextType>({
   prefs: defaultPrefs,
   updatePrefs: () => {},
+  refreshPrefs: async () => {},
   ready: false,
 });
 
@@ -97,8 +100,18 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setPrefs((prev) => ({ ...prev, ...partial }));
   }, [ready]);
 
+  const refreshPrefs = useCallback(async () => {
+    try {
+      const p = await invoke<UserPreferences>("get_preferences");
+      skipNextPersist.current = true;
+      setPrefs(p);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   return (
-    <SettingsContext.Provider value={{ prefs, updatePrefs, ready }}>
+    <SettingsContext.Provider value={{ prefs, updatePrefs, refreshPrefs, ready }}>
       {children}
     </SettingsContext.Provider>
   );

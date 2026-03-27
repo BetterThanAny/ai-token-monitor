@@ -191,6 +191,7 @@
   "update.error": "Update failed",
 
   "settings.usageAlerts": "Usage Alerts",
+  "settings.usageTracking": "Usage Tracking",
 
   "usageAlert.title": "Usage",
   "usageAlert.session": "Session (5h)",
@@ -199,6 +200,11 @@
   "usageAlert.stale": "Updating...",
   "usageAlert.resetsIn": "Resets in {{time}}",
   "usageAlert.resetsNow": "Resetting...",
+
+  "usageTracking.title": "Claude Usage Tracking",
+  "usageTracking.description": "Monitor your Claude Code session and weekly usage limits in real-time. This requires access to your Claude Code login credentials.",
+  "usageTracking.enable": "Enable",
+  "usageTracking.enabling": "Enabling...",
 
   "chat.join": "Join the Chat",
   "chat.description": "Chat with other developers on the leaderboard. Sign in and enable the leaderboard to participate.",
