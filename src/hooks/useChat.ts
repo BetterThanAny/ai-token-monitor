@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
+export type ReactionType = "like" | "heart" | "dislike";
+
 export interface ChatMessage {
   id: string;
   user_id: string;
@@ -9,6 +11,14 @@ export interface ChatMessage {
   created_at: string;
   nickname: string;
   avatar_url: string | null;
+  reply_to: string | null;
+  replied_message: { nickname: string; content: string } | null;
+}
+
+export interface ReactionMap {
+  like: string[];
+  heart: string[];
+  dislike: string[];
 }
 
 interface ProfileCache {
@@ -19,12 +29,17 @@ interface ProfileCache {
 const PAGE_SIZE = 50;
 const COOLDOWN_MS = 2000;
 
+const emptyReactions = (): ReactionMap => ({ like: [], heart: [], dislike: [] });
+
 export function useChat(userId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [reactions, setReactions] = useState<Map<string, ReactionMap>>(new Map());
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const profileCache = useRef<Map<string, ProfileCache>>(new Map());
+  const reactionsRef = useRef(reactions);
+  reactionsRef.current = reactions;
   const channelRef = useRef<RealtimeChannel | null>(null);
   const lastSendRef = useRef(0);
   const loadingMoreRef = useRef(false);
@@ -66,6 +81,7 @@ export function useChat(userId: string | null) {
     user_id: string;
     content: string;
     created_at: string;
+    reply_to?: string | null;
     profiles?: { nickname: string; avatar_url: string | null } | { nickname: string; avatar_url: string | null }[];
   }): ChatMessage => {
     const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
@@ -74,9 +90,75 @@ export function useChat(userId: string | null) {
       user_id: row.user_id,
       content: row.content,
       created_at: row.created_at,
+      reply_to: row.reply_to ?? null,
+      replied_message: null,
       nickname: profile?.nickname ?? "Unknown",
       avatar_url: profile?.avatar_url ?? null,
     };
+  }, []);
+
+  // Fetch reactions for a set of message IDs and merge into state
+  const fetchReactions = useCallback(async (messageIds: string[]) => {
+    if (!supabase || messageIds.length === 0) return;
+
+    const { data } = await supabase
+      .from("chat_reactions")
+      .select("message_id, user_id, reaction_type")
+      .in("message_id", messageIds);
+
+    if (!data) return;
+
+    const map = new Map<string, ReactionMap>();
+    for (const row of data) {
+      const type = row.reaction_type as ReactionType;
+      if (!map.has(row.message_id)) {
+        map.set(row.message_id, emptyReactions());
+      }
+      const entry = map.get(row.message_id)!;
+      if (!entry[type].includes(row.user_id)) {
+        entry[type].push(row.user_id);
+      }
+    }
+
+    setReactions((prev) => {
+      const next = new Map(prev);
+      for (const [mid, r] of map) {
+        next.set(mid, r);
+      }
+      return next;
+    });
+  }, []);
+
+  // Fetch replied message info for messages with reply_to
+  const enrichReplies = useCallback(async (msgs: ChatMessage[]) => {
+    if (!supabase) return msgs;
+
+    const replyIds = msgs.filter((m) => m.reply_to).map((m) => m.reply_to!);
+    if (replyIds.length === 0) return msgs;
+
+    const uniqueIds = [...new Set(replyIds)];
+    const { data } = await supabase
+      .from("chat_messages")
+      .select("id, content, profiles(nickname)")
+      .in("id", uniqueIds);
+
+    if (!data) return msgs;
+
+    const replyMap = new Map<string, { nickname: string; content: string }>();
+    for (const row of data as { id: string; content: string; profiles?: { nickname: string } | { nickname: string }[] }[]) {
+      const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+      replyMap.set(row.id, {
+        nickname: profile?.nickname ?? "Unknown",
+        content: row.content,
+      });
+    }
+
+    return msgs.map((m) => {
+      if (m.reply_to && replyMap.has(m.reply_to)) {
+        return { ...m, replied_message: replyMap.get(m.reply_to)! };
+      }
+      return m;
+    });
   }, []);
 
   // Initial fetch
@@ -88,44 +170,53 @@ export function useChat(userId: string | null) {
       setLoading(true);
       const { data } = await supabase
         .from("chat_messages")
-        .select("id, user_id, content, created_at, profiles(nickname, avatar_url)")
+        .select("id, user_id, content, created_at, reply_to, profiles(nickname, avatar_url)")
         .order("created_at", { ascending: false })
         .limit(PAGE_SIZE);
 
       if (cancelled) return;
 
       if (data) {
-        const msgs = (data as typeof data).map(parseRow).reverse();
+        let msgs = (data as typeof data).map(parseRow).reverse();
         msgs.forEach(cacheProfile);
-        setMessages(msgs);
+        const ids = msgs.map((m) => m.id);
+        const [enriched] = await Promise.all([enrichReplies(msgs), fetchReactions(ids)]);
+        if (cancelled) return;
+        setMessages(enriched);
         setHasMore(data.length === PAGE_SIZE);
       }
       setLoading(false);
     })();
 
     return () => { cancelled = true; };
-  }, [userId, parseRow, cacheProfile]);
+  }, [userId, parseRow, cacheProfile, enrichReplies, fetchReactions]);
 
-  // Realtime subscription
+  // Realtime subscription for messages + reactions
   useEffect(() => {
     if (!supabase || !userId) return;
 
     const channel = supabase
-      .channel("chat_messages_realtime")
+      .channel("chat_realtime")
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
         table: "chat_messages",
       }, async (payload) => {
-        const row = payload.new as { id: string; user_id: string; content: string; created_at: string };
+        const row = payload.new as { id: string; user_id: string; content: string; created_at: string; reply_to?: string | null };
         const profile = await fetchProfile(row.user_id);
-        const msg: ChatMessage = {
+        let msg: ChatMessage = {
           ...row,
+          reply_to: row.reply_to ?? null,
+          replied_message: null,
           nickname: profile.nickname,
           avatar_url: profile.avatar_url,
         };
+        // Enrich reply
+        if (msg.reply_to) {
+          const enriched = await enrichReplies([msg]);
+          msg = enriched[0];
+        }
         setMessages((prev) => {
-          // Avoid duplicates
           if (prev.some((m) => m.id === msg.id)) return prev;
           return [...prev, msg];
         });
@@ -137,6 +228,50 @@ export function useChat(userId: string | null) {
       }, (payload) => {
         const deletedId = (payload.old as { id: string }).id;
         setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+        setReactions((prev) => {
+          const next = new Map(prev);
+          next.delete(deletedId);
+          return next;
+        });
+      })
+      // Reactions realtime
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "chat_reactions",
+      }, (payload) => {
+        const row = payload.new as { message_id: string; user_id: string; reaction_type: string };
+        const type = row.reaction_type as ReactionType;
+        setReactions((prev) => {
+          const next = new Map(prev);
+          const entry = next.get(row.message_id) ?? emptyReactions();
+          if (!entry[type].includes(row.user_id)) {
+            next.set(row.message_id, {
+              ...entry,
+              [type]: [...entry[type], row.user_id],
+            });
+          }
+          return next;
+        });
+      })
+      .on("postgres_changes", {
+        event: "DELETE",
+        schema: "public",
+        table: "chat_reactions",
+      }, (payload) => {
+        const row = payload.old as { message_id: string; user_id: string; reaction_type: string };
+        const type = row.reaction_type as ReactionType;
+        setReactions((prev) => {
+          const next = new Map(prev);
+          const entry = next.get(row.message_id);
+          if (entry) {
+            next.set(row.message_id, {
+              ...entry,
+              [type]: entry[type].filter((uid) => uid !== row.user_id),
+            });
+          }
+          return next;
+        });
       })
       .subscribe();
 
@@ -146,10 +281,31 @@ export function useChat(userId: string | null) {
       channel.unsubscribe();
       channelRef.current = null;
     };
-  }, [userId, fetchProfile]);
+  }, [userId, fetchProfile, enrichReplies]);
 
-  // Send message
-  const sendMessage = useCallback(async (content: string): Promise<{ error?: string }> => {
+  // Toggle reaction (uses ref to avoid stale closure)
+  const toggleReaction = useCallback(async (messageId: string, type: ReactionType) => {
+    if (!supabase || !userId) return;
+
+    const entry = reactionsRef.current.get(messageId) ?? emptyReactions();
+    const hasReacted = entry[type].includes(userId);
+
+    if (hasReacted) {
+      await supabase
+        .from("chat_reactions")
+        .delete()
+        .eq("message_id", messageId)
+        .eq("user_id", userId)
+        .eq("reaction_type", type);
+    } else {
+      await supabase
+        .from("chat_reactions")
+        .insert({ message_id: messageId, user_id: userId, reaction_type: type });
+    }
+  }, [userId]);
+
+  // Send message (with optional reply)
+  const sendMessage = useCallback(async (content: string, replyTo?: string): Promise<{ error?: string }> => {
     if (!supabase || !userId) return { error: "Not authenticated" };
 
     const trimmed = content.trim();
@@ -163,15 +319,17 @@ export function useChat(userId: string | null) {
 
     setSending(true);
 
-    const { error } = await supabase.from("chat_messages").insert({
+    const insertData: { user_id: string; content: string; reply_to?: string } = {
       user_id: userId,
       content: trimmed,
-    });
+    };
+    if (replyTo) insertData.reply_to = replyTo;
+
+    const { error } = await supabase.from("chat_messages").insert(insertData);
 
     setSending(false);
 
     if (error) {
-      // DB trigger raises 'Rate limit exceeded' — PostgREST wraps it in details/hint/message
       const errStr = `${error.message} ${error.details ?? ""} ${error.hint ?? ""}`;
       if (error.code === "P0001" || errStr.includes("Rate limit")) return { error: "rate_limited" };
       return { error: error.message };
@@ -198,21 +356,23 @@ export function useChat(userId: string | null) {
       const oldest = messages[0];
       const { data } = await supabase
         .from("chat_messages")
-        .select("id, user_id, content, created_at, profiles(nickname, avatar_url)")
+        .select("id, user_id, content, created_at, reply_to, profiles(nickname, avatar_url)")
         .lt("created_at", oldest.created_at)
         .order("created_at", { ascending: false })
         .limit(PAGE_SIZE);
 
       if (data) {
-        const older = (data as typeof data).map(parseRow).reverse();
+        let older = (data as typeof data).map(parseRow).reverse();
         older.forEach(cacheProfile);
-        setMessages((prev) => [...older, ...prev]);
+        const ids = older.map((m) => m.id);
+        const [enriched] = await Promise.all([enrichReplies(older), fetchReactions(ids)]);
+        setMessages((prev) => [...enriched, ...prev]);
         setHasMore(data.length === PAGE_SIZE);
       }
     } finally {
       loadingMoreRef.current = false;
     }
-  }, [hasMore, messages, parseRow, cacheProfile]);
+  }, [hasMore, messages, parseRow, cacheProfile, enrichReplies, fetchReactions]);
 
-  return { messages, loading, sending, hasMore, sendMessage, deleteMessage, loadMore };
+  return { messages, reactions, loading, sending, hasMore, sendMessage, deleteMessage, loadMore, toggleReaction };
 }

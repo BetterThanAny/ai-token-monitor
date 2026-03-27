@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useSettings } from "../contexts/SettingsContext";
 import { useChat } from "../hooks/useChat";
-import { ChatMessageRow, DateSeparator, formatDateSeparator } from "./ChatMessage";
-import { useI18n } from "../i18n/I18nContext";
+import { useTranslate } from "../hooks/useTranslate";
+import { ChatMessageRow, DateSeparator, formatDateSeparator, TranslateIcon } from "./ChatMessage";
+import { useI18n, LANGUAGE_NAMES } from "../i18n/I18nContext";
 import type { ChatMessage } from "../hooks/useChat";
 
 export function ChatRoom() {
@@ -124,9 +125,18 @@ function ChatCTA({
 function ChatContent({ userId }: { userId: string }) {
   const t = useI18n();
   const { prefs } = useSettings();
-  const { messages, loading, sending, hasMore, sendMessage, deleteMessage, loadMore } = useChat(userId);
+  const {
+    messages, reactions, loading, sending, hasMore,
+    sendMessage, deleteMessage, loadMore, toggleReaction,
+  } = useChat(userId);
+  const langName = LANGUAGE_NAMES[prefs.language] ?? prefs.language;
+  const { translations, translating, translate, translateReply: invokeTranslateReply } = useTranslate(langName);
+  const hasAiKey = !!(prefs.ai_keys?.gemini || prefs.ai_keys?.openai || prefs.ai_keys?.anthropic);
+  const hasAiModel = !!prefs.ai_model;
   const [input, setInput] = useState("");
   const [rateLimited, setRateLimited] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [translatingReply, setTranslatingReply] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const prevMessagesLenRef = useRef(0);
@@ -152,10 +162,24 @@ function ChatContent({ userId }: { userId: string }) {
     isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   }, []);
 
-  const handleSend = useCallback(async () => {
-    if (!input.trim() || sending) return;
+  // Translate reply: replaces input with translated text for user to review before sending
+  const handleTranslateReply = useCallback(async () => {
+    if (!input.trim() || !replyingTo || translatingReply) return;
+    setTranslatingReply(true);
+    try {
+      const translated = await invokeTranslateReply(input, replyingTo.content);
+      if (translated) {
+        setInput(translated);
+      }
+    } finally {
+      setTranslatingReply(false);
+    }
+  }, [input, replyingTo, translatingReply, invokeTranslateReply]);
 
-    const result = await sendMessage(input);
+  const handleSend = useCallback(async () => {
+    if (!input.trim() || sending || translatingReply) return;
+
+    const result = await sendMessage(input, replyingTo?.id);
     if (result.error === "rate_limited") {
       setRateLimited(true);
       setTimeout(() => setRateLimited(false), 3000);
@@ -163,22 +187,33 @@ function ChatContent({ userId }: { userId: string }) {
     }
     if (!result.error) {
       setInput("");
-      // Scroll to bottom after sending
+      setReplyingTo(null);
       setTimeout(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
       }, 100);
     }
-  }, [input, sending, sendMessage]);
+  }, [input, sending, sendMessage, replyingTo, translatingReply]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  }, [handleSend]);
+    if (e.key === "Escape" && replyingTo) {
+      setReplyingTo(null);
+    }
+  }, [handleSend, replyingTo]);
 
-  // Group messages for KakaoTalk-style rendering
-  const grouped = groupMessages(messages, prefs.language ?? "en");
+  const handleReply = useCallback((message: ChatMessage) => {
+    setReplyingTo(message);
+  }, []);
+
+  const handleTranslate = useCallback((message: ChatMessage) => {
+    if (!hasAiKey || !hasAiModel) return;
+    translate(message.id, message.content);
+  }, [hasAiKey, hasAiModel, translate]);
+
+  const grouped = useMemo(() => groupMessages(messages, prefs.language ?? "en"), [messages, prefs.language]);
 
   return (
     <div style={{
@@ -187,7 +222,8 @@ function ChatContent({ userId }: { userId: string }) {
       background: "var(--heat-0)",
       borderRadius: "var(--radius-lg)",
       overflow: "hidden",
-      height: 420,
+      flex: 1,
+      minHeight: 0,
       boxShadow: "var(--shadow-card)",
     }}>
       {/* Messages area */}
@@ -261,40 +297,109 @@ function ChatContent({ userId }: { userId: string }) {
                 showAvatar={item.showAvatar}
                 showNickname={item.showNickname}
                 onDelete={item.message.user_id === userId ? deleteMessage : undefined}
+                onReply={handleReply}
+                onTranslate={hasAiKey && hasAiModel ? handleTranslate : undefined}
+                reactions={reactions.get(item.message.id)}
+                userId={userId}
+                onReact={toggleReaction}
+                translation={translations[item.message.id] ?? null}
+                translating={translating.has(item.message.id)}
               />
             );
           })
         )}
       </div>
 
-      {/* Input bar */}
+      {/* Input bar (with optional reply preview integrated) */}
       <div style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "8px 10px",
         borderTop: "1px solid var(--heat-1, rgba(0,0,0,0.06))",
         background: "var(--bg-card)",
+        padding: "8px 10px",
       }}>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value.slice(0, 500))}
-          onKeyDown={handleKeyDown}
-          placeholder={t("chat.placeholder")}
-          disabled={sending}
-          style={{
-            flex: 1,
-            padding: "8px 14px",
-            fontSize: 12,
-            fontWeight: 500,
-            border: "1px solid var(--heat-1, rgba(0,0,0,0.08))",
-            borderRadius: 18,
-            background: "var(--heat-0)",
-            color: "var(--text-primary)",
-            outline: "none",
-          }}
-        />
+        {/* Reply preview */}
+        {replyingTo && (
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 10px",
+            marginBottom: 6,
+            borderRadius: 10,
+            background: "rgba(124, 92, 252, 0.08)",
+            borderLeft: "3px solid var(--accent-purple)",
+            fontSize: 11,
+          }}>
+            <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ fontWeight: 700, color: "var(--accent-purple)", marginRight: 4 }}>
+                {replyingTo.nickname}
+              </span>
+              <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>
+                {replyingTo.content.length > 50 ? replyingTo.content.slice(0, 50) + "…" : replyingTo.content}
+              </span>
+            </div>
+            {hasAiKey && hasAiModel && (
+              <button
+                onClick={handleTranslateReply}
+                disabled={!input.trim() || translatingReply}
+                style={{
+                  background: translatingReply ? "rgba(124, 92, 252, 0.2)" : "rgba(124, 92, 252, 0.06)",
+                  border: "1px solid rgba(124, 92, 252, 0.15)",
+                  borderRadius: 10,
+                  cursor: !input.trim() || translatingReply ? "default" : "pointer",
+                  padding: "3px 8px",
+                  fontSize: 9,
+                  color: input.trim() ? "var(--accent-purple)" : "var(--text-muted)",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 3,
+                  flexShrink: 0,
+                  opacity: !input.trim() ? 0.5 : 1,
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <TranslateIcon size={10} />
+                <span>{translatingReply ? t("chat.translating") : t("chat.translateReply")}</span>
+              </button>
+            )}
+            <button
+              onClick={() => { setReplyingTo(null); }}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: 2,
+                color: "var(--text-muted)",
+                fontSize: 13,
+                lineHeight: 1,
+                flexShrink: 0,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value.slice(0, 500))}
+            onKeyDown={handleKeyDown}
+            placeholder={replyingTo ? t("chat.replyPlaceholder") : t("chat.placeholder")}
+            disabled={sending}
+            style={{
+              flex: 1,
+              padding: "8px 14px",
+              fontSize: 12,
+              fontWeight: 500,
+              border: "1px solid var(--heat-1, rgba(0,0,0,0.08))",
+              borderRadius: 18,
+              background: "var(--heat-0)",
+              color: "var(--text-primary)",
+              outline: "none",
+            }}
+          />
 
         {/* Character count (show when > 450) */}
         {input.length > 450 && (
@@ -332,7 +437,8 @@ function ChatContent({ userId }: { userId: string }) {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
           </svg>
-        </button>
+          </button>
+        </div>
       </div>
 
       {/* Rate limit warning */}

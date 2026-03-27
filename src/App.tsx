@@ -1,9 +1,10 @@
 import { useState, useMemo } from "react";
 import { useCombinedStats } from "./hooks/useCombinedStats";
 import { useToday } from "./hooks/useToday";
+import { useUnreadChat } from "./hooks/useUnreadChat";
 import { getTotalTokens } from "./lib/format";
 import { SettingsProvider, useSettings } from "./contexts/SettingsContext";
-import { AuthProvider } from "./contexts/AuthContext";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { I18nProvider, useI18n } from "./i18n/I18nContext";
 import { PopoverShell } from "./components/PopoverShell";
 import { Header } from "./components/Header";
@@ -31,9 +32,11 @@ function AppContent() {
     includeCodex: prefs.include_codex,
   });
   const t = useI18n();
+  const { user } = useAuth();
   const updater = useUpdater();
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const todayStr = useToday();
+  const { unreadCount } = useUnreadChat(activeTab === "chat", user?.id ?? null);
 
   const { today, weekAvg } = useMemo(() => {
     if (!stats) return { today: null, weekAvg: 0 };
@@ -109,7 +112,7 @@ function AppContent() {
     <PopoverShell>
       <Header stats={stats} updater={updater} />
       <SourceSelector />
-      <TabBar activeTab={activeTab} onChange={setActiveTab} />
+      <TabBar activeTab={activeTab} onChange={setActiveTab} chatBadge={unreadCount} />
 
       {/* Keep mounted tabs alive to avoid remount/recalculation on switch */}
       <div style={{ display: activeTab === "overview" ? "contents" : "none" }}>
@@ -136,7 +139,9 @@ function AppContent() {
 
       {/* Chat lazy-loads (realtime subscription), keep conditional */}
       {activeTab === "chat" && (
-        <ChatRoom />
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <ChatRoom />
+        </div>
       )}
 
       <SupportBanner />
