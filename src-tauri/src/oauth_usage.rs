@@ -35,6 +35,11 @@ struct CacheEntry {
 
 static OAUTH_CACHE: Mutex<Option<CacheEntry>> = Mutex::new(None);
 
+/// Flag to prevent concurrent fetch_and_cache_usage calls.
+/// This avoids duplicate keychain prompts when enable_usage_tracking
+/// and the polling loop race to call fetch simultaneously.
+static FETCH_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Return cached OAuth usage data without fetching.
 pub fn get_cached_usage() -> Option<OAuthUsage> {
     let cache = OAUTH_CACHE.lock().ok()?;
@@ -48,8 +53,33 @@ pub fn get_cached_usage() -> Option<OAuthUsage> {
     })
 }
 
+/// Check if cache was fetched within the given number of seconds.
+pub fn is_cache_fresh(max_age_secs: u64) -> bool {
+    if let Ok(cache) = OAUTH_CACHE.lock() {
+        if let Some(ref entry) = *cache {
+            return entry.fetched_at.elapsed().as_secs() < max_age_secs;
+        }
+    }
+    false
+}
+
 /// Fetch usage from OAuth API and update cache. Returns the usage data.
+/// Uses an atomic flag to prevent concurrent fetches (avoids duplicate keychain prompts).
 pub async fn fetch_and_cache_usage() -> Option<OAuthUsage> {
+    use std::sync::atomic::Ordering;
+
+    // If another fetch is in progress, return cached data instead of
+    // triggering a second keychain access
+    if FETCH_IN_PROGRESS.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        return get_cached_usage();
+    }
+
+    let result = fetch_and_cache_usage_inner().await;
+    FETCH_IN_PROGRESS.store(false, Ordering::SeqCst);
+    result
+}
+
+async fn fetch_and_cache_usage_inner() -> Option<OAuthUsage> {
     let token = read_oauth_token()?;
 
     match fetch_usage_from_api(&token).await {
@@ -99,11 +129,21 @@ fn read_oauth_token_keychain() -> Option<String> {
 
     let account = whoami::username();
 
-    // Claude Code v2.1.52+ uses "Claude Code-credentials-{hash}" service name.
-    // Try the new hashed format first, then fall back to the old format.
-    let service_names = find_keychain_service_names();
+    // Try legacy name first (avoids `security dump-keychain` prompt)
+    let legacy = "Claude Code-credentials";
+    if let Ok(password) = get_generic_password(legacy, &account) {
+        if let Some(token) = extract_token_from_keychain_data(&password) {
+            return Some(token);
+        }
+    }
 
+    // Claude Code v2.1.52+ uses "Claude Code-credentials-{hash}" service name.
+    // Only run discovery if legacy name didn't work.
+    let service_names = find_keychain_service_names();
     for service in &service_names {
+        if service == legacy {
+            continue; // Already tried
+        }
         if let Ok(password) = get_generic_password(service, &account) {
             if let Some(token) = extract_token_from_keychain_data(&password) {
                 return Some(token);
@@ -113,10 +153,22 @@ fn read_oauth_token_keychain() -> Option<String> {
     None
 }
 
+/// Cached keychain service names to avoid repeated `security dump-keychain` calls
+/// which trigger additional macOS Keychain permission prompts.
+#[cfg(target_os = "macos")]
+static SERVICE_NAMES_CACHE: Mutex<Option<Vec<String>>> = Mutex::new(None);
+
 /// Find Keychain service names matching "Claude Code-credentials*"
 #[cfg(target_os = "macos")]
 fn find_keychain_service_names() -> Vec<String> {
     use std::process::Command;
+
+    // Return cached names if available
+    if let Ok(cache) = SERVICE_NAMES_CACHE.lock() {
+        if let Some(ref names) = *cache {
+            return names.clone();
+        }
+    }
 
     let mut names = Vec::new();
 
@@ -145,6 +197,11 @@ fn find_keychain_service_names() -> Vec<String> {
     let legacy = "Claude Code-credentials".to_string();
     if !names.contains(&legacy) {
         names.push(legacy);
+    }
+
+    // Cache the result
+    if let Ok(mut cache) = SERVICE_NAMES_CACHE.lock() {
+        *cache = Some(names.clone());
     }
 
     names

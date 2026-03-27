@@ -58,6 +58,20 @@ pub struct UserPreferences {
     pub usage_tracking_enabled: bool,
     #[serde(default)]
     pub usage_tracking_migrated: bool,
+    #[serde(default)]
+    pub ai_keys: Option<AiKeys>,
+    #[serde(default)]
+    pub ai_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiKeys {
+    #[serde(default)]
+    pub gemini: Option<String>,
+    #[serde(default)]
+    pub openai: Option<String>,
+    #[serde(default)]
+    pub anthropic: Option<String>,
 }
 
 fn default_theme() -> String {
@@ -96,6 +110,8 @@ impl Default for UserPreferences {
             usage_alerts_enabled: true,
             usage_tracking_enabled: false,
             usage_tracking_migrated: false,
+            ai_keys: None,
+            ai_model: None,
         }
     }
 }

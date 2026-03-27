@@ -42,6 +42,12 @@ export interface UserPreferences {
   monthly_salary?: number;
   usage_alerts_enabled: boolean;
   usage_tracking_enabled: boolean;
+  ai_keys?: {
+    gemini?: string;
+    openai?: string;
+    anthropic?: string;
+  };
+  ai_model?: string;
 }
 
 export interface UsageWindow {

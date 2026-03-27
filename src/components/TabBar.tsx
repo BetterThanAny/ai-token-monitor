@@ -5,9 +5,10 @@ export type TabType = "overview" | "analytics" | "leaderboard" | "chat";
 interface Props {
   activeTab: TabType;
   onChange: (tab: TabType) => void;
+  chatBadge?: number;
 }
 
-export function TabBar({ activeTab, onChange }: Props) {
+export function TabBar({ activeTab, onChange, chatBadge }: Props) {
   const t = useI18n();
 
   return (
@@ -39,6 +40,7 @@ export function TabBar({ activeTab, onChange }: Props) {
         active={activeTab === "chat"}
         onClick={() => onChange("chat")}
         icon="💬"
+        badge={chatBadge}
       />
     </div>
   );
@@ -49,11 +51,13 @@ function TabButton({
   active,
   onClick,
   icon,
+  badge,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
   icon?: string;
+  badge?: number;
 }) {
   return (
     <button
@@ -70,10 +74,32 @@ function TabButton({
         color: active ? "var(--accent-purple)" : "var(--text-secondary)",
         boxShadow: active ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
         transition: "all 0.15s ease",
+        position: "relative",
       }}
     >
       {icon && <span style={{ marginRight: 3 }}>{icon}</span>}
       {label}
+      {badge != null && badge > 0 && (
+        <span style={{
+          position: "absolute",
+          top: 2,
+          right: 4,
+          minWidth: 16,
+          height: 16,
+          borderRadius: 8,
+          background: "var(--accent-pink, #e74c8a)",
+          color: "#fff",
+          fontSize: 9,
+          fontWeight: 800,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "0 4px",
+          lineHeight: 1,
+        }}>
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
     </button>
   );
 }
