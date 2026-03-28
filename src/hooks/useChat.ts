@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { supabase } from "../lib/supabase";
+import { getCachedProfile, setCachedProfile, getOrFetchProfile } from "../lib/profileCache";
+import type { ProfileData } from "../lib/profileCache";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export type ReactionType = "like" | "heart" | "dislike";
@@ -21,11 +23,6 @@ export interface ReactionMap {
   dislike: string[];
 }
 
-interface ProfileCache {
-  nickname: string;
-  avatar_url: string | null;
-}
-
 const PAGE_SIZE = 50;
 const COOLDOWN_MS = 2000;
 
@@ -37,42 +34,38 @@ export function useChat(userId: string | null) {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const profileCache = useRef<Map<string, ProfileCache>>(new Map());
   const reactionsRef = useRef(reactions);
   reactionsRef.current = reactions;
   const channelRef = useRef<RealtimeChannel | null>(null);
   const lastSendRef = useRef(0);
   const loadingMoreRef = useRef(false);
 
-  // Cache profile from a message
+  // Cache profile from a message (shared module-level cache)
   const cacheProfile = useCallback((msg: ChatMessage) => {
-    if (!profileCache.current.has(msg.user_id)) {
-      profileCache.current.set(msg.user_id, {
+    if (!getCachedProfile(msg.user_id)) {
+      setCachedProfile(msg.user_id, {
         nickname: msg.nickname,
         avatar_url: msg.avatar_url,
       });
     }
   }, []);
 
-  // Fetch profile for a user_id
-  const fetchProfile = useCallback(async (uid: string): Promise<ProfileCache> => {
-    const cached = profileCache.current.get(uid);
-    if (cached) return cached;
+  // Fetch profile for a user_id (shared module-level cache with in-flight dedup)
+  const fetchProfile = useCallback(async (uid: string): Promise<ProfileData> => {
+    return getOrFetchProfile(uid, async () => {
+      if (!supabase) return { nickname: "Unknown", avatar_url: null };
 
-    if (!supabase) return { nickname: "Unknown", avatar_url: null };
+      const { data } = await supabase
+        .from("profiles")
+        .select("nickname, avatar_url")
+        .eq("id", uid)
+        .single();
 
-    const { data } = await supabase
-      .from("profiles")
-      .select("nickname, avatar_url")
-      .eq("id", uid)
-      .single();
-
-    const profile: ProfileCache = {
-      nickname: data?.nickname ?? "Unknown",
-      avatar_url: data?.avatar_url ?? null,
-    };
-    profileCache.current.set(uid, profile);
-    return profile;
+      return {
+        nickname: data?.nickname ?? "Unknown",
+        avatar_url: data?.avatar_url ?? null,
+      };
+    });
   }, []);
 
   // Parse raw DB row into ChatMessage
