@@ -86,7 +86,11 @@ impl CodexProvider {
             if !root.exists() {
                 continue;
             }
-            let pattern = root.join("**").join("*.jsonl").to_string_lossy().to_string();
+            let pattern = root
+                .join("**")
+                .join("*.jsonl")
+                .to_string_lossy()
+                .to_string();
             let files = glob::glob(&pattern).unwrap_or_else(|_| glob::glob("").unwrap());
             for path in files.flatten() {
                 if let Ok(m) = fs::metadata(&path) {
@@ -105,8 +109,9 @@ impl CodexProvider {
             return entries;
         };
 
-        // Try to extract date from directory structure: .../sessions/YYYY/MM/DD/rollout-*.jsonl
-        let dir_date = extract_date_from_path(path);
+        // Keep the path date as a fallback only. A single session file can span midnight,
+        // so per-event timestamps are more accurate for "today" stats.
+        let path_date = extract_date_from_path(path);
 
         let mut session_id = path
             .file_stem()
@@ -148,7 +153,8 @@ impl CodexProvider {
                                 continue;
                             }
 
-                            let Some((input, output, cached, total)) = extract_token_usage(info) else {
+                            let Some((input, output, cached, total)) = extract_token_usage(info)
+                            else {
                                 continue;
                             };
 
@@ -163,10 +169,7 @@ impl CodexProvider {
                                 continue;
                             }
 
-                            let date = dir_date
-                                .clone()
-                                .or_else(|| extract_date_from_timestamp(&value))
-                                .unwrap_or_else(|| "1970-01-01".to_string());
+                            let date = resolve_entry_date(path_date.as_deref(), &value);
 
                             let model = if current_model.is_empty() {
                                 "codex".to_string()
@@ -175,15 +178,18 @@ impl CodexProvider {
                             };
 
                             let key = format!("{}:{}", session_id, line_index);
-                            entries.insert(key, CodexEntry {
-                                date,
-                                model,
-                                session_id: session_id.clone(),
-                                input_tokens: input,
-                                output_tokens: output,
-                                cached_tokens: cached,
-                                total_tokens: total,
-                            });
+                            entries.insert(
+                                key,
+                                CodexEntry {
+                                    date,
+                                    model,
+                                    session_id: session_id.clone(),
+                                    input_tokens: input,
+                                    output_tokens: output,
+                                    cached_tokens: cached,
+                                    total_tokens: total,
+                                },
+                            );
                         }
                         _ => {}
                     }
@@ -206,8 +212,11 @@ impl CodexProvider {
         let mut changed_files: Vec<&PathBuf> = Vec::new();
         for (path, (mtime, size)) in current_meta {
             match cached_meta.get(path) {
-                Some((cached_mtime, cached_size)) if cached_mtime == mtime && cached_size == size => {}
-                _ => { changed_files.push(path); }
+                Some((cached_mtime, cached_size))
+                    if cached_mtime == mtime && cached_size == size => {}
+                _ => {
+                    changed_files.push(path);
+                }
             }
         }
 
@@ -230,7 +239,9 @@ impl CodexProvider {
             }
             eprintln!(
                 "[PERF][Codex] Incremental parse: {} changed files in {:?} (total {} files)",
-                count, start.elapsed(), current_meta.len()
+                count,
+                start.elapsed(),
+                current_meta.len()
             );
         }
 
@@ -253,20 +264,27 @@ impl CodexProvider {
             }
 
             let pricing = pricing::get_codex_pricing(&entry.model);
-            let cost = calculate_cost(&pricing, entry.input_tokens, entry.output_tokens, entry.cached_tokens);
+            let cost = calculate_cost(
+                &pricing,
+                entry.input_tokens,
+                entry.output_tokens,
+                entry.cached_tokens,
+            );
 
-            let daily = daily_map.entry(entry.date.clone()).or_insert_with(|| DailyUsage {
-                date: entry.date.clone(),
-                tokens: HashMap::new(),
-                cost_usd: 0.0,
-                messages: 0,
-                sessions: 0,
-                tool_calls: 0,
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
-            });
+            let daily = daily_map
+                .entry(entry.date.clone())
+                .or_insert_with(|| DailyUsage {
+                    date: entry.date.clone(),
+                    tokens: HashMap::new(),
+                    cost_usd: 0.0,
+                    messages: 0,
+                    sessions: 0,
+                    tool_calls: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                });
             *daily.tokens.entry(entry.model.clone()).or_insert(0) += entry.total_tokens;
             daily.cost_usd += cost;
             daily.messages += 1;
@@ -279,13 +297,15 @@ impl CodexProvider {
                 .or_default()
                 .insert(entry.session_id.clone());
 
-            let mu = model_usage_map.entry(entry.model.clone()).or_insert_with(|| ModelUsage {
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read: 0,
-                cache_write: 0,
-                cost_usd: 0.0,
-            });
+            let mu = model_usage_map
+                .entry(entry.model.clone())
+                .or_insert_with(|| ModelUsage {
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_read: 0,
+                    cache_write: 0,
+                    cost_usd: 0.0,
+                });
             mu.input_tokens += entry.input_tokens;
             mu.output_tokens += entry.output_tokens;
             mu.cache_read += entry.cached_tokens;
@@ -327,7 +347,10 @@ impl CodexProvider {
                             cached.computed_at = Instant::now();
                         }
                     }
-                    eprintln!("[PERF][Codex] No files changed, reusing cache ({:?})", start.elapsed());
+                    eprintln!(
+                        "[PERF][Codex] No files changed, reusing cache ({:?})",
+                        start.elapsed()
+                    );
                     if let Ok(cache) = STATS_CACHE.lock() {
                         if let Some(ref cached) = *cache {
                             return Ok(cached.stats.clone());
@@ -341,13 +364,19 @@ impl CodexProvider {
             } else {
                 // First run — full parse
                 drop(cache);
-                eprintln!("[PERF][Codex] First run, full parse of {} files...", current_meta.len());
+                eprintln!(
+                    "[PERF][Codex] First run, full parse of {} files...",
+                    current_meta.len()
+                );
                 let full_start = Instant::now();
                 let mut entries = HashMap::new();
                 for path in current_meta.keys() {
                     entries.extend(Self::parse_single_file(path));
                 }
-                eprintln!("[PERF][Codex] Full parse completed in {:?}", full_start.elapsed());
+                eprintln!(
+                    "[PERF][Codex] Full parse completed in {:?}",
+                    full_start.elapsed()
+                );
                 entries
             }
         } else {
@@ -390,7 +419,10 @@ impl TokenProvider for CodexProvider {
         }
 
         // Thundering herd prevention
-        if PARSING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        if PARSING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             if let Ok(cache) = STATS_CACHE.lock() {
                 if let Some(ref cached) = *cache {
                     return Ok(cached.stats.clone());
@@ -447,7 +479,12 @@ fn extract_date_from_path(path: &Path) -> Option<String> {
 fn extract_date_from_timestamp(value: &Value) -> Option<String> {
     let timestamp = value.get("timestamp")?.as_str()?;
     if let Ok(utc_dt) = timestamp.parse::<chrono::DateTime<chrono::Utc>>() {
-        Some(utc_dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+        Some(
+            utc_dt
+                .with_timezone(&chrono::Local)
+                .format("%Y-%m-%d")
+                .to_string(),
+        )
     } else {
         // Fallback: substring (less accurate but safe)
         timestamp.get(..10).map(ToString::to_string)
@@ -461,12 +498,30 @@ fn extract_token_usage(info: &Value) -> Option<(u64, u64, u64, u64)> {
         .get("last_token_usage")
         .or_else(|| info.get("total_token_usage"))?;
 
-    let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let cached = usage.get("cached_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let total = usage.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(input + output);
+    let input = usage
+        .get("input_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let output = usage
+        .get("output_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let cached = usage
+        .get("cached_input_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let total = usage
+        .get("total_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(input + output);
 
     Some((input, output, cached, total))
+}
+
+fn resolve_entry_date(path_date: Option<&str>, value: &Value) -> String {
+    extract_date_from_timestamp(value)
+        .or_else(|| path_date.map(ToString::to_string))
+        .unwrap_or_else(|| "1970-01-01".to_string())
 }
 
 #[cfg(test)]
@@ -478,8 +533,12 @@ mod tests {
         let path = PathBuf::from("/home/user/.codex/sessions/2026/03/24/rollout-abc123.jsonl");
         assert_eq!(extract_date_from_path(&path).as_deref(), Some("2026-03-24"));
 
-        let path2 = PathBuf::from("/home/user/.codex/archived_sessions/2026/01/15/rollout-xyz.jsonl");
-        assert_eq!(extract_date_from_path(&path2).as_deref(), Some("2026-01-15"));
+        let path2 =
+            PathBuf::from("/home/user/.codex/archived_sessions/2026/01/15/rollout-xyz.jsonl");
+        assert_eq!(
+            extract_date_from_path(&path2).as_deref(),
+            Some("2026-01-15")
+        );
 
         let path3 = PathBuf::from("/some/random/path/file.jsonl");
         assert_eq!(extract_date_from_path(&path3), None);
@@ -519,6 +578,24 @@ mod tests {
         assert_eq!(output, 5);
         assert_eq!(cached, 2);
         assert_eq!(total, 25);
+    }
+
+    #[test]
+    fn test_resolve_entry_date_prefers_event_timestamp() {
+        let value: Value = serde_json::json!({
+            "timestamp": "2026-03-27T15:30:00.000Z"
+        });
+        let resolved = resolve_entry_date(Some("2026-03-27"), &value);
+        assert_eq!(resolved, "2026-03-28");
+    }
+
+    #[test]
+    fn test_resolve_entry_date_falls_back_to_path_date() {
+        let value: Value = serde_json::json!({
+            "type": "event_msg"
+        });
+        let resolved = resolve_entry_date(Some("2026-03-27"), &value);
+        assert_eq!(resolved, "2026-03-27");
     }
 
     #[test]
@@ -581,7 +658,11 @@ mod tests {
 
     #[test]
     fn test_calculate_cost() {
-        let pricing = pricing::CodexPricing { input: 1.0, output: 5.0, cached_input: 0.5 };
+        let pricing = pricing::CodexPricing {
+            input: 1.0,
+            output: 5.0,
+            cached_input: 0.5,
+        };
         let cost = calculate_cost(&pricing, 1_000_000, 500_000, 200_000);
         let expected = 1.0 + 2.5 + 0.1;
         assert!((cost - expected).abs() < 0.0001);

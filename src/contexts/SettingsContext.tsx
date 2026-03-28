@@ -33,13 +33,6 @@ const SettingsContext = createContext<SettingsContextType>({
   ready: false,
 });
 
-function generateDeviceId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefs] = useState<UserPreferences>(defaultPrefs);
   const [ready, setReady] = useState(false);
@@ -47,11 +40,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     invoke<UserPreferences>("get_preferences").then((p) => {
-      const nextPrefs = p.device_id ? p : { ...p, device_id: generateDeviceId() };
-      setPrefs(nextPrefs);
-      // Skip the persist effect triggered by this setPrefs
-      skipNextPersist.current = !!p.device_id;
-      prevConfigDirsRef.current = JSON.stringify(nextPrefs.config_dirs);
+      setPrefs(p);
+      // Skip the persist effect triggered by the initial load from disk.
+      skipNextPersist.current = true;
+      prevConfigDirsRef.current = JSON.stringify(p.config_dirs);
       setReady(true);
     }).catch(() => {
       setReady(true);

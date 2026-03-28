@@ -197,14 +197,12 @@ function ProviderLeaderboard({
   user: User;
 }) {
   const t = useI18n();
-  const { prefs } = useSettings();
   const { stats } = useTokenStats(provider);
   const { leaderboard, loading, period, setPeriod } = useLeaderboardSync({
     stats,
     user,
     optedIn: true,
     provider,
-    deviceId: prefs.device_id ?? null,
   });
 
   const [page, setPage] = useState(0);

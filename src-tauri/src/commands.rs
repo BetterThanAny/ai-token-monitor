@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
@@ -186,6 +187,14 @@ fn derive_encryption_key() -> [u8; 32] {
     hasher.finalize().into()
 }
 
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(&mut out, "{:02x}", byte);
+    }
+    out
+}
+
 fn encrypt_data(plaintext: &[u8]) -> Option<String> {
     let key = derive_encryption_key();
     let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
@@ -204,7 +213,9 @@ fn encrypt_data(plaintext: &[u8]) -> Option<String> {
 fn decrypt_data(encoded: &str) -> Option<Vec<u8>> {
     let key = derive_encryption_key();
     let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
-    let combined = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
+    let combined = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
     if combined.len() < 12 {
         return None;
     }
@@ -294,6 +305,24 @@ pub fn get_ai_keys() -> Option<AiKeys> {
 }
 
 #[tauri::command]
+pub fn get_stable_device_id(user_id: String) -> Result<String, String> {
+    let trimmed = user_id.trim();
+    if trimmed.is_empty() {
+        return Err("Missing user_id".to_string());
+    }
+
+    let machine_id = get_machine_id();
+    let mut hasher = Sha256::new();
+    hasher.update(APP_SALT);
+    hasher.update(b":device-id:");
+    hasher.update(trimmed.as_bytes());
+    hasher.update(b":");
+    hasher.update(machine_id.as_bytes());
+    let digest = hasher.finalize();
+    Ok(bytes_to_hex(&digest[..16]))
+}
+
+#[tauri::command]
 pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<(), String> {
     // Save ai_keys to encrypted file, not to JSON file
     save_ai_keys(&prefs.ai_keys);
@@ -304,8 +333,7 @@ pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<
     let path = prefs_path();
     let json = serde_json::to_string_pretty(&file_prefs)
         .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
-    fs::write(&path, json)
-        .map_err(|e| format!("Failed to write preferences: {}", e))?;
+    fs::write(&path, json).map_err(|e| format!("Failed to write preferences: {}", e))?;
     // Update tray in background to avoid blocking the IPC response
     let handle = app.clone();
     std::thread::spawn(move || {
@@ -319,17 +347,19 @@ pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<
 pub fn copy_png_to_clipboard(png_data: Vec<u8>) -> Result<(), String> {
     #[allow(deprecated)]
     use cocoa::base::{id, nil};
-    use objc::{msg_send, sel, sel_impl, class};
+    use objc::{class, msg_send, sel, sel_impl};
 
     unsafe {
-        let ns_data: id = msg_send![class!(NSData), dataWithBytes:png_data.as_ptr() length:png_data.len()];
+        let ns_data: id =
+            msg_send![class!(NSData), dataWithBytes:png_data.as_ptr() length:png_data.len()];
         if ns_data == nil {
             return Err("Failed to create NSData".to_string());
         }
 
         let pasteboard: id = msg_send![class!(NSPasteboard), generalPasteboard];
         let _: () = msg_send![pasteboard, clearContents];
-        let png_type: id = msg_send![class!(NSString), stringWithUTF8String: b"public.png\0".as_ptr()];
+        let png_type: id =
+            msg_send![class!(NSString), stringWithUTF8String: b"public.png\0".as_ptr()];
         let success: bool = msg_send![pasteboard, setData: ns_data forType: png_type];
 
         if success {
@@ -361,13 +391,13 @@ pub fn copy_png_to_clipboard(_png_data: Vec<u8>) -> Result<(), String> {
 pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
     #[allow(deprecated)]
     use cocoa::base::{id, nil};
-    use objc::{msg_send, sel, sel_impl, class};
+    use objc::{class, msg_send, sel, sel_impl};
 
-    let window = app.get_webview_window("main")
-        .ok_or("Window not found")?;
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
 
     // Get the native NSWindow number
-    let ns_window: id = window.ns_window()
+    let ns_window: id = window
+        .ns_window()
         .map_err(|e| format!("Failed to get NSWindow: {}", e))? as id;
     let window_number: i64 = unsafe { msg_send![ns_window, windowNumber] };
 
@@ -385,17 +415,29 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
 
         #[repr(C)]
         #[derive(Copy, Clone)]
-        struct CGPoint { x: f64, y: f64 }
+        struct CGPoint {
+            x: f64,
+            y: f64,
+        }
         #[repr(C)]
         #[derive(Copy, Clone)]
-        struct CGSize { width: f64, height: f64 }
+        struct CGSize {
+            width: f64,
+            height: f64,
+        }
         #[repr(C)]
         #[derive(Copy, Clone)]
-        struct CGRect { origin: CGPoint, size: CGSize }
+        struct CGRect {
+            origin: CGPoint,
+            size: CGSize,
+        }
 
         let null_rect = CGRect {
             origin: CGPoint { x: 0.0, y: 0.0 },
-            size: CGSize { width: 0.0, height: 0.0 },
+            size: CGSize {
+                width: 0.0,
+                height: 0.0,
+            },
         };
 
         // kCGWindowListOptionIncludingWindow = 1 << 3 = 8
@@ -406,10 +448,7 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         }
 
         // Convert CGImage to PNG NSData via NSBitmapImageRep
-        let ns_bitmap_rep: id = msg_send![
-            class!(NSBitmapImageRep),
-            alloc
-        ];
+        let ns_bitmap_rep: id = msg_send![class!(NSBitmapImageRep), alloc];
         let ns_bitmap_rep: id = msg_send![ns_bitmap_rep, initWithCGImage: cg_image];
         if ns_bitmap_rep == nil {
             // Release CGImage
@@ -432,7 +471,8 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         // Copy to pasteboard
         let pasteboard: id = msg_send![class!(NSPasteboard), generalPasteboard];
         let _: () = msg_send![pasteboard, clearContents];
-        let png_type: id = msg_send![class!(NSString), stringWithUTF8String: b"public.png\0".as_ptr()];
+        let png_type: id =
+            msg_send![class!(NSString), stringWithUTF8String: b"public.png\0".as_ptr()];
         let success: bool = msg_send![pasteboard, setData: png_data forType: png_type];
 
         // Cleanup
@@ -464,9 +504,7 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
     };
 
-    let window = app
-        .get_webview_window("main")
-        .ok_or("Window not found")?;
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
 
     let hwnd = window
         .hwnd()
@@ -487,7 +525,17 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         let old_obj = SelectObject(hdc_mem, hbm.into());
 
         // Capture window content via BitBlt
-        let _ = BitBlt(hdc_mem, 0, 0, width, height, Some(hdc_window), 0, 0, SRCCOPY);
+        let _ = BitBlt(
+            hdc_mem,
+            0,
+            0,
+            width,
+            height,
+            Some(hdc_window),
+            0,
+            0,
+            SRCCOPY,
+        );
 
         // Deselect bitmap from DC before clipboard operations
         SelectObject(hdc_mem, old_obj);
