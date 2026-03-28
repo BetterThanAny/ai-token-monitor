@@ -44,7 +44,8 @@ interface UseLeaderboardSyncProps {
   provider: LeaderboardProvider;
 }
 
-const LEADERBOARD_CACHE_TTL = 60_000; // 60 seconds
+const LEADERBOARD_CACHE_TTL = 180_000; // 3 minutes
+const LEADERBOARD_POLL_INTERVAL = 180_000; // 3 minutes
 
 export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeaderboardSyncProps) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -152,11 +153,33 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
     };
   }, [stats, user, optedIn, provider, fetchLeaderboard]);
 
-  // Auto-refresh every 60s (force refresh to bypass cache on interval)
+  // Auto-refresh with visibility-aware polling
   useEffect(() => {
     fetchLeaderboard();
-    const interval = setInterval(() => fetchLeaderboard(true), 60_000);
-    return () => clearInterval(interval);
+
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    const startPolling = () => {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(() => fetchLeaderboard(false), LEADERBOARD_POLL_INTERVAL);
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (intervalId) { clearInterval(intervalId); intervalId = undefined; }
+      } else {
+        fetchLeaderboard(false);
+        startPolling();
+      }
+    };
+
+    startPolling();
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [fetchLeaderboard]);
 
   return { leaderboard, loading, period, setPeriod, refetch: () => fetchLeaderboard(true) };
