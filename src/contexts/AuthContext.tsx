@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { User } from "@supabase/supabase-js";
 
 const DEEP_LINK_CALLBACK = "ai-token-monitor://auth/callback";
@@ -64,42 +65,85 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Shared handler: extract code from deep-link URL and exchange for session.
+  // Uses a Set to prevent duplicate processing of the same auth code.
+  const processedCodes = useRef(new Set<string>());
+  const handleDeepLinkUrl = useCallback(async (url: string) => {
+    if (!supabase || !url.startsWith(DEEP_LINK_CALLBACK)) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      console.warn("[OAuth] Malformed deep-link URL, ignoring:", url);
+      return;
+    }
+    const code = parsed.searchParams.get("code");
+    if (!code) {
+      console.warn("[OAuth] Deep-link received but no code param:", url);
+      return;
+    }
+    if (processedCodes.current.has(code)) {
+      console.log("[OAuth] Code already processed, skipping:", code);
+      return;
+    }
+    processedCodes.current.add(code);
+    try {
+      await supabase.auth.exchangeCodeForSession(code);
+      await invoke("show_window");
+    } catch (err) {
+      console.error("[OAuth] Session exchange failed:", err);
+      processedCodes.current.delete(code);
+    } finally {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      setLoading(false);
+    }
+  }, []);
+
   // Production: listen for deep link OAuth callback (macOS + Windows)
   useEffect(() => {
     if (!isProduction() || !supabase) return;
 
     let cancelled = false;
-    let unlisten: (() => void) | undefined;
+    let unlistenDeepLink: (() => void) | undefined;
+    let unlistenEvent: (() => void) | undefined;
 
+    // Path 1: deep-link plugin (works on macOS, may not fire on Windows)
     onOpenUrl(async (urls: string[]) => {
       for (const url of urls) {
-        if (!url.startsWith(DEEP_LINK_CALLBACK)) continue;
-        const code = new URL(url).searchParams.get("code");
-        if (!code) {
-          console.warn("[OAuth] Deep-link received but no code param:", url);
-          continue;
-        }
-        try {
-          await supabase.auth.exchangeCodeForSession(code);
-          // OAuth 성공 — single-instance 콜백에서 스킵한 윈도우 표시를 여기서 수행
-          await invoke("show_window");
-        } catch (err) {
-          console.error("[OAuth] Session exchange failed:", err);
-        } finally {
-          if (timeoutRef.current) clearTimeout(timeoutRef.current);
-          setLoading(false);
-        }
+        await handleDeepLinkUrl(url);
       }
     }).then((fn) => {
       if (cancelled) fn();
-      else unlisten = fn;
+      else unlistenDeepLink = fn;
     });
+
+    // Path 2: Rust single-instance emit (Windows fallback when Path 1 does not fire)
+    listen<string>("deep-link-auth", async (event) => {
+      console.log("[OAuth] Received deep-link-auth event:", event.payload);
+      await handleDeepLinkUrl(event.payload);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenEvent = fn;
+    });
+
+    // Path 3: cold start (Windows) — check for URL stored before frontend mounted.
+    // Delayed slightly to let Path 1/2 listeners register first.
+    const pendingTimer = setTimeout(() => {
+      invoke<string | null>("get_pending_deep_link").then(async (url) => {
+        if (url) {
+          console.log("[OAuth] Pending deep-link found:", url);
+          await handleDeepLinkUrl(url);
+        }
+      });
+    }, 100);
 
     return () => {
       cancelled = true;
-      unlisten?.();
+      clearTimeout(pendingTimer);
+      unlistenDeepLink?.();
+      unlistenEvent?.();
     };
-  }, []);
+  }, [handleDeepLinkUrl]);
 
   // Cleanup auth timeout on unmount
   useEffect(() => {
@@ -165,6 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!supabase) return;
     setLoading(true);
     await supabase.auth.signOut();
+    processedCodes.current.clear();
     setUser(null);
     setProfile(null);
     setLoading(false);
