@@ -28,10 +28,10 @@ const COOLDOWN_MS = 2000;
 
 const emptyReactions = (): ReactionMap => ({ like: [], heart: [], dislike: [] });
 
-export function useChat(userId: string | null) {
+export function useChat(userId: string | null, enabled: boolean = true) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [reactions, setReactions] = useState<Map<string, ReactionMap>>(new Map());
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [sending, setSending] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const reactionsRef = useRef(reactions);
@@ -156,7 +156,7 @@ export function useChat(userId: string | null) {
 
   // Initial fetch
   useEffect(() => {
-    if (!supabase || !userId) return;
+    if (!supabase || !userId || !enabled) return;
 
     let cancelled = false;
     (async () => {
@@ -182,11 +182,11 @@ export function useChat(userId: string | null) {
     })();
 
     return () => { cancelled = true; };
-  }, [userId, parseRow, cacheProfile, enrichReplies, fetchReactions]);
+  }, [userId, enabled, parseRow, cacheProfile, enrichReplies, fetchReactions]);
 
   // Realtime subscription for messages + reactions
   useEffect(() => {
-    if (!supabase || !userId) return;
+    if (!supabase || !userId || !enabled) return;
 
     const channel = supabase
       .channel("chat_realtime")
@@ -274,7 +274,7 @@ export function useChat(userId: string | null) {
       channel.unsubscribe();
       channelRef.current = null;
     };
-  }, [userId, fetchProfile, enrichReplies]);
+  }, [userId, enabled, fetchProfile, enrichReplies]);
 
   // Toggle reaction (uses ref to avoid stale closure)
   const toggleReaction = useCallback(async (messageId: string, type: ReactionType) => {
