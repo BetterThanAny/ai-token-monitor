@@ -7,7 +7,7 @@ import { ChatMessageRow, DateSeparator, formatDateSeparator, TranslateIcon } fro
 import { useI18n, LANGUAGE_NAMES } from "../i18n/I18nContext";
 import type { ChatMessage } from "../hooks/useChat";
 
-export function ChatRoom() {
+export function ChatRoom({ activated = true, visible = true }: { activated?: boolean; visible?: boolean }) {
   const { user, loading: authLoading, signIn, available } = useAuth();
   const { prefs } = useSettings();
   const t = useI18n();
@@ -36,7 +36,7 @@ export function ChatRoom() {
     return <ChatCTA onSignIn={signIn} loading={authLoading} hasUser={!!user} />;
   }
 
-  return <ChatContent userId={user.id} />;
+  return <ChatContent userId={user.id} activated={activated} visible={visible} />;
 }
 
 function ChatCTA({
@@ -122,13 +122,13 @@ function ChatCTA({
   );
 }
 
-function ChatContent({ userId }: { userId: string }) {
+function ChatContent({ userId, activated, visible }: { userId: string; activated: boolean; visible: boolean }) {
   const t = useI18n();
   const { prefs } = useSettings();
   const {
     messages, reactions, loading, sending, hasMore,
     sendMessage, deleteMessage, loadMore, toggleReaction,
-  } = useChat(userId);
+  } = useChat(userId, activated);
   const langName = LANGUAGE_NAMES[prefs.language] ?? prefs.language;
   const { translations, translating, translate, translateReply: invokeTranslateReply } = useTranslate(langName);
   const hasAiKey = !!(prefs.ai_keys?.gemini || prefs.ai_keys?.openai || prefs.ai_keys?.anthropic);
@@ -149,12 +149,12 @@ function ChatContent({ userId }: { userId: string }) {
     prevMessagesLenRef.current = messages.length;
   }, [messages.length]);
 
-  // Initial scroll to bottom
+  // Scroll to bottom on initial load or when tab becomes visible again
   useEffect(() => {
-    if (!loading && scrollRef.current) {
+    if (!loading && visible && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [loading]);
+  }, [loading, visible]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;

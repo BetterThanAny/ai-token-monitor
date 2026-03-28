@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useCombinedStats } from "./hooks/useCombinedStats";
 import { useToday } from "./hooks/useToday";
 import { useUnreadChat } from "./hooks/useUnreadChat";
@@ -35,8 +35,13 @@ function AppContent() {
   const { user } = useAuth();
   const updater = useUpdater();
   const [activeTab, setActiveTab] = useState<TabType>("overview");
+  const [chatActivated, setChatActivated] = useState(false);
   const todayStr = useToday();
   const { unreadCount } = useUnreadChat(activeTab === "chat", user?.id ?? null);
+
+  useEffect(() => {
+    if (activeTab === "chat") setChatActivated(true);
+  }, [activeTab]);
 
   const { today, weekAvg } = useMemo(() => {
     if (!stats) return { today: null, weekAvg: 0 };
@@ -137,12 +142,15 @@ function AppContent() {
         <Leaderboard />
       )}
 
-      {/* Chat lazy-loads (realtime subscription), keep conditional */}
-      {activeTab === "chat" && (
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <ChatRoom />
-        </div>
-      )}
+      {/* Chat: always mounted but hidden via CSS; defers fetch until first visit */}
+      <div style={{
+        flex: 1,
+        minHeight: 0,
+        display: activeTab === "chat" ? "flex" : "none",
+        flexDirection: "column" as const,
+      }}>
+        <ChatRoom activated={chatActivated} visible={activeTab === "chat"} />
+      </div>
 
       <SupportBanner />
     </PopoverShell>
