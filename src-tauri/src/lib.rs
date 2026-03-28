@@ -12,6 +12,14 @@ use std::time::Instant;
 
 /// When true, the window will not auto-hide on focus loss (e.g. during dialog).
 static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// Stores a deep-link URL that arrived before the frontend was ready (cold start).
+/// The frontend can retrieve it via the `get_pending_deep_link` command.
+static PENDING_DEEP_LINK: Mutex<Option<String>> = Mutex::new(None);
+
+/// Set to true when the single-instance callback has already emitted the deep-link URL,
+/// so the setup block doesn't store a duplicate into PENDING_DEEP_LINK.
+static DEEP_LINK_EMITTED: AtomicBool = AtomicBool::new(false);
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
@@ -358,6 +366,11 @@ fn show_window(window: tauri::WebviewWindow) {
 }
 
 #[tauri::command]
+fn get_pending_deep_link() -> Option<String> {
+    PENDING_DEEP_LINK.lock().ok().and_then(|mut guard| guard.take())
+}
+
+#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     eprintln!("[CMD] quit_app called");
     app.exit(0);
@@ -367,11 +380,14 @@ fn quit_app(app: tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // OAuth deep-link 콜백이면 윈도우를 표시하지 않음 —
-            // 프론트엔드에서 세션 교환 완료 후 직접 show_window를 호출한다.
-            let is_oauth_callback = args.iter().any(|a| a.contains("auth/callback"));
-            if is_oauth_callback {
-                eprintln!("[SINGLE-INSTANCE] OAuth callback detected, skipping window show");
+            // Windows에서 deep link는 새 프로세스의 CLI arg로 전달되며,
+            // single-instance 플러그인이 이를 가로챈다.
+            // deep-link 플러그인의 onOpenUrl에 도달하지 않을 수 있으므로
+            // 여기서 직접 프론트엔드에 emit한다.
+            if let Some(url) = args.iter().find(|a| a.contains("auth/callback")) {
+                eprintln!("[SINGLE-INSTANCE] OAuth callback detected, emitting to frontend: {}", url);
+                DEEP_LINK_EMITTED.store(true, Ordering::SeqCst);
+                let _ = app.emit("deep-link-auth", url.clone());
                 return;
             }
 
@@ -398,6 +414,7 @@ pub fn run() {
             set_dialog_open,
             hide_window,
             show_window,
+            get_pending_deep_link,
             quit_app,
             commands::capture_window,
             commands::copy_png_to_clipboard,
@@ -471,6 +488,21 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // Cold start (Windows only): check if the app was launched with a deep-link URL as arg.
+            // macOS delivers deep links via Apple Events, not process args.
+            #[cfg(target_os = "windows")]
+            {
+                if !DEEP_LINK_EMITTED.load(Ordering::SeqCst) {
+                    let args: Vec<String> = std::env::args().collect();
+                    if let Some(url) = args.iter().find(|a| a.contains("auth/callback")) {
+                        eprintln!("[SETUP] Deep-link URL found in launch args: {}", url);
+                        if let Ok(mut guard) = PENDING_DEEP_LINK.lock() {
+                            *guard = Some(url.clone());
+                        }
+                    }
+                }
+            }
 
             // Hide from dock on macOS
             #[cfg(target_os = "macos")]
