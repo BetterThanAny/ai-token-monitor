@@ -304,6 +304,10 @@ begin
       true
     );
 
+    -- Remove __legacy__ entry: it was a placeholder for pre-multi-device data
+    -- from the same single device, now superseded by real device submissions.
+    v_next_snapshots := v_next_snapshots - '__legacy__';
+
     select coalesce(jsonb_object_agg(key, value), '{}'::jsonb)
     into v_next_snapshots
     from jsonb_each(v_next_snapshots)
