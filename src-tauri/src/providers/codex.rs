@@ -582,11 +582,12 @@ mod tests {
 
     #[test]
     fn test_resolve_entry_date_prefers_event_timestamp() {
+        // Use midday UTC so the local date is 2026-03-27 in any timezone (UTC-12 to UTC+12).
         let value: Value = serde_json::json!({
-            "timestamp": "2026-03-27T15:30:00.000Z"
+            "timestamp": "2026-03-27T12:00:00.000Z"
         });
-        let resolved = resolve_entry_date(Some("2026-03-27"), &value);
-        assert_eq!(resolved, "2026-03-28");
+        let resolved = resolve_entry_date(Some("2026-03-20"), &value);
+        assert_eq!(resolved, "2026-03-27");
     }
 
     #[test]
