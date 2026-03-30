@@ -53,7 +53,11 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
     };
 
     // Use resets_at as window_id (stable identifier from API)
-    let window_id = usage.five_hour.as_ref().map(|w| w.resets_at.clone()).unwrap_or_default();
+    let window_id = usage
+        .five_hour
+        .as_ref()
+        .map(|w| w.resets_at.clone())
+        .unwrap_or_default();
 
     let thresholds: Vec<u32> = [50, 80, 90]
         .iter()
@@ -105,13 +109,18 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
     let highest = new_thresholds.iter().copied().max().unwrap_or(50);
     let title = "AI Token Monitor";
     let body = match highest {
-        90 => format!("Session usage at {:.0}% — may be throttled soon", utilization),
+        90 => format!(
+            "Session usage at {:.0}% — may be throttled soon",
+            utilization
+        ),
         80 => format!("Session usage at {:.0}%", utilization),
         _ => format!("Session usage at {:.0}%", utilization),
     };
 
     use tauri_plugin_notification::NotificationExt;
-    let _ = app_handle.notification().builder()
+    let _ = app_handle
+        .notification()
+        .builder()
         .title(title)
         .body(&body)
         .show();
@@ -129,13 +138,17 @@ fn get_config_dirs_from_prefs() -> Vec<PathBuf> {
         .and_then(|c| serde_json::from_str(&c).ok())
         .unwrap_or_default();
     let home = dirs::home_dir().unwrap_or_default();
-    prefs.config_dirs.iter().map(|d| {
-        if d.starts_with("~/") {
-            home.join(d.strip_prefix("~/").unwrap_or(d))
-        } else {
-            PathBuf::from(d)
-        }
-    }).collect()
+    prefs
+        .config_dirs
+        .iter()
+        .map(|d| {
+            if d.starts_with("~/") {
+                home.join(d.strip_prefix("~/").unwrap_or(d))
+            } else {
+                PathBuf::from(d)
+            }
+        })
+        .collect()
 }
 
 pub fn update_tray_title(app_handle: &tauri::AppHandle) {
@@ -189,16 +202,12 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
         let _ = tray.set_title(Some(&title));
         let _ = tray.set_tooltip(Some(&format!("AI Token Monitor - Today: {}", title)));
     }
-
 }
 
 fn get_all_watch_dirs() -> Vec<PathBuf> {
     let config_dirs = get_config_dirs_from_prefs();
     let home = dirs::home_dir().unwrap_or_default();
-    let mut dirs: Vec<PathBuf> = config_dirs
-        .iter()
-        .map(|d| d.join("projects"))
-        .collect();
+    let mut dirs: Vec<PathBuf> = config_dirs.iter().map(|d| d.join("projects")).collect();
 
     // Add Codex session directories
     let codex_sessions = home.join(".codex").join("sessions");
@@ -215,10 +224,7 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
 
         let mut watcher = match notify::recommended_watcher(move |res: Result<Event, _>| {
             if let Ok(event) = res {
-                if matches!(
-                    event.kind,
-                    EventKind::Modify(_) | EventKind::Create(_)
-                ) {
+                if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
                     let dominated = event.paths.iter().any(|p| {
                         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
                         ext == "jsonl" || ext == "json"
@@ -251,7 +257,8 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                 Ok(()) => {
                     // Detect burst: count triggers in last 10 seconds
                     let now = std::time::Instant::now();
-                    recent_triggers.retain(|t| now.duration_since(*t) < std::time::Duration::from_secs(10));
+                    recent_triggers
+                        .retain(|t| now.duration_since(*t) < std::time::Duration::from_secs(10));
                     recent_triggers.push(now);
 
                     let debounce = if recent_triggers.len() >= 3 {
@@ -268,7 +275,10 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                             Err(mpsc::RecvTimeoutError::Disconnected) => return,
                         }
                     }
-                    eprintln!("[WATCH] file changed (debounce={}s), invalidating cache", debounce.as_secs());
+                    eprintln!(
+                        "[WATCH] file changed (debounce={}s), invalidating cache",
+                        debounce.as_secs()
+                    );
                     providers::claude_code::invalidate_stats_cache();
                     providers::codex::invalidate_stats_cache();
                     let _ = app_handle.emit("stats-updated", ());
@@ -408,6 +418,7 @@ pub fn run() {
             commands::is_codex_available,
             commands::get_preferences,
             commands::set_preferences,
+            commands::get_stable_device_id,
             commands::detect_claude_dirs,
             commands::validate_claude_dir,
             get_home_dir,
@@ -432,8 +443,15 @@ pub fn run() {
                 .tooltip("AI Token Monitor")
                 .on_tray_icon_event(|tray, event| {
                     match &event {
-                        tauri::tray::TrayIconEvent::Click { button, button_state, .. } => {
-                            eprintln!("[TRAY] Click: button={:?}, state={:?}", button, button_state);
+                        tauri::tray::TrayIconEvent::Click {
+                            button,
+                            button_state,
+                            ..
+                        } => {
+                            eprintln!(
+                                "[TRAY] Click: button={:?}, state={:?}",
+                                button, button_state
+                            );
                         }
                         tauri::tray::TrayIconEvent::DoubleClick { .. } => {
                             eprintln!("[TRAY] DoubleClick");
@@ -643,10 +661,7 @@ fn position_window_near_tray(
             let x = tray_center_x - (window_size.width / 2.0);
             let y = tray_pos.y - window_size.height - padding;
 
-            window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
-                x,
-                y,
-            }))?;
+            window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))?;
         } else {
             // macOS-style: menu bar at top, show popup below tray
             let y = tray_pos.y + tray_size.height;
@@ -662,10 +677,7 @@ fn position_window_near_tray(
             let window_size = window.outer_size()?.to_logical::<f64>(scale);
             let x = tray_center_x - (window_size.width / 2.0);
 
-            window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
-                x,
-                y,
-            }))?;
+            window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))?;
         }
     } else {
         // Fallback: no monitor found, just position below tray
@@ -673,10 +685,7 @@ fn position_window_near_tray(
         let window_size = window.outer_size()?.to_logical::<f64>(scale);
         let x = tray_center_x - (window_size.width / 2.0);
 
-        window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
-            x,
-            y,
-        }))?;
+        window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))?;
     }
 
     Ok(())

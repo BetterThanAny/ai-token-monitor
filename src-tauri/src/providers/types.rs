@@ -38,6 +38,8 @@ pub struct UserPreferences {
     pub number_format: String,
     pub show_tray_cost: bool,
     pub leaderboard_opted_in: bool,
+    #[serde(default)]
+    pub device_id: Option<String>,
     #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default = "default_color_mode")]
@@ -100,6 +102,7 @@ impl Default for UserPreferences {
             number_format: "compact".to_string(),
             show_tray_cost: true,
             leaderboard_opted_in: false,
+            device_id: None,
             theme: default_theme(),
             color_mode: default_color_mode(),
             language: default_language(),

@@ -15,6 +15,7 @@ const defaultPrefs: UserPreferences = {
   number_format: "compact",
   show_tray_cost: true,
   leaderboard_opted_in: false,
+  device_id: undefined,
   include_claude: true,
   include_codex: false,
   theme: "github",
@@ -40,8 +41,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     invoke<UserPreferences>("get_preferences").then((p) => {
       setPrefs(p);
-      // Skip the persist effect triggered by this setPrefs
+      // Skip the persist effect triggered by the initial load from disk.
       skipNextPersist.current = true;
+      prevConfigDirsRef.current = JSON.stringify(p.config_dirs);
       setReady(true);
     }).catch(() => {
       setReady(true);

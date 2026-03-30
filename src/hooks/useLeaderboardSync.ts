@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "../lib/supabase";
 import type { AllStats, LeaderboardProvider } from "../lib/types";
 import { getTotalTokens, toLocalDateStr } from "../lib/format";
@@ -46,11 +47,13 @@ interface UseLeaderboardSyncProps {
 
 const LEADERBOARD_CACHE_TTL = 180_000; // 3 minutes
 const LEADERBOARD_POLL_INTERVAL = 180_000; // 3 minutes
+const stableDeviceIdCache = new Map<string, string>();
 
 export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeaderboardSyncProps) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [period, setPeriod] = useState<"today" | "week">("today");
   const [loading, setLoading] = useState(false);
+  const [deviceId, setDeviceId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Track which past days (before today) have already been synced this session, per provider
   const syncedPastDatesRef = useRef<Set<string>>(new Set());
@@ -83,7 +86,7 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
       const today = toLocalDateStr(new Date());
 
       if (period === "today") {
-        const query = supabase
+        const { data } = await supabase
           .from("daily_snapshots")
           .select("user_id, total_tokens, cost_usd, messages, sessions, profiles(nickname, avatar_url)")
           .eq("date", today)
@@ -91,15 +94,12 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
           .order("total_tokens", { ascending: false })
           .limit(100);
 
-        const { data } = await query;
-
         if (data) {
           const entries = (data as SnapshotRow[]).map(toLeaderboardEntry);
           setLeaderboard(entries);
           cacheRef.current = { data: entries, fetchedAt: Date.now(), period, provider };
         }
       } else {
-        // Weekly: aggregate snapshots from monday to today
         const now = new Date();
         const dow = now.getDay();
         const mondayOffset = dow === 0 ? 6 : dow - 1;
@@ -117,7 +117,7 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
 
         if (data) {
           const userMap = new Map<string, LeaderboardEntry>();
-          for (const row of (data as SnapshotRow[])) {
+          for (const row of data as SnapshotRow[]) {
             const existing = userMap.get(row.user_id);
             if (existing) {
               existing.total_tokens += row.total_tokens;
@@ -138,20 +138,53 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
     }
   }, [period, provider]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!user) {
+      setDeviceId(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const cached = stableDeviceIdCache.get(user.id);
+    if (cached) {
+      setDeviceId(cached);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    invoke<string>("get_stable_device_id", { userId: user.id })
+      .then((derivedId) => {
+        if (cancelled) return;
+        stableDeviceIdCache.set(user.id, derivedId);
+        setDeviceId(derivedId);
+      })
+      .catch(() => {
+        if (!cancelled) setDeviceId(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
   // Upload snapshot (debounced), then immediately refresh leaderboard
   useEffect(() => {
-    if (!supabase || !user || !optedIn || !stats) return;
+    if (!supabase || !user || !optedIn || !stats || !deviceId) return;
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
-      await uploadSnapshot(user.id, stats, provider, syncedPastDatesRef.current);
+      await uploadSnapshot(stats, provider, deviceId, syncedPastDatesRef.current);
       fetchLeaderboard(true);
     }, 500);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [stats, user, optedIn, provider, fetchLeaderboard]);
+  }, [stats, user, optedIn, provider, deviceId, fetchLeaderboard]);
 
   // Auto-refresh with visibility-aware polling
   useEffect(() => {
@@ -186,9 +219,9 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
 }
 
 async function uploadSnapshot(
-  userId: string,
   stats: AllStats,
   provider: LeaderboardProvider,
+  deviceId: string,
   syncedPastDates: Set<string>,
 ) {
   if (!supabase) return;
@@ -221,20 +254,6 @@ async function uploadSnapshot(
   const staleDates = allDatesInWeek.filter((d) => !localDatesInWeek.has(d));
   const toClean = staleDates.filter((d) => !syncedPastDates.has(cleanKey(d)));
 
-  if (toClean.length > 0) {
-    const { error: delError } = await supabase
-      .from("daily_snapshots")
-      .delete()
-      .eq("user_id", userId)
-      .eq("provider", provider)
-      .in("date", toClean);
-
-    if (!delError) {
-      toClean.forEach((d) => syncedPastDates.add(cleanKey(d)));
-    }
-  }
-
-  // If today gains local data mid-session, clear the clean cache so upsert takes over
   if (localDatesInWeek.has(today)) {
     syncedPastDates.delete(cleanKey(today));
   }
@@ -245,24 +264,25 @@ async function uploadSnapshot(
     (d) => d.date >= weekStart && d.date <= today &&
       (d.date === today || !syncedPastDates.has(syncKey(d.date)))
   );
-  if (toSync.length === 0) return;
+  if (toSync.length === 0 && toClean.length === 0) return;
 
   const rows = toSync.map((d) => ({
-    user_id: userId,
     date: d.date,
-    provider,
     total_tokens: getTotalTokens(d.tokens),
     cost_usd: d.cost_usd,
     messages: d.messages,
     sessions: d.sessions,
   }));
 
-  const { error } = await supabase.from("daily_snapshots").upsert(rows, {
-    onConflict: "user_id,date,provider",
+  const { error } = await supabase.rpc("sync_device_snapshots", {
+    p_provider: provider,
+    p_device_id: deviceId,
+    p_rows: rows,
+    p_stale_dates: toClean,
   });
 
-  // Mark past days as synced so they won't be re-uploaded until next session
   if (!error) {
+    toClean.forEach((d) => syncedPastDates.add(cleanKey(d)));
     toSync.forEach((d) => { if (d.date !== today) syncedPastDates.add(syncKey(d.date)); });
   }
 }
