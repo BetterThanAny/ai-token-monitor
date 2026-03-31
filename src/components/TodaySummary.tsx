@@ -62,7 +62,7 @@ export function TodaySummary({ today, weekAvg }: Props) {
         {t("today.title")}
       </div>
 
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
         <span style={{
           fontSize: 28,
           fontWeight: 800,
@@ -74,9 +74,11 @@ export function TodaySummary({ today, weekAvg }: Props) {
         <span style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 600 }}>
           {t("today.tokens")}
         </span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
         {cacheTokens > 0 && (
-          <span style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 500, opacity: 0.75 }}>
-            ({formatTokens(cacheTokens, prefs.number_format)} cached)
+          <span style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 500, opacity: 0.7 }}>
+            {formatTokens(cacheTokens, prefs.number_format)} cached
           </span>
         )}
         {comparison !== 0 && (

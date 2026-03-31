@@ -156,21 +156,20 @@ function PeriodCard({
         onNext={onNext}
         canNext={canNext}
       />
-      <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 6 }}>
-        <span style={{
-          fontSize: 20,
-          fontWeight: 800,
-          color,
-          letterSpacing: "-0.5px",
-        }}>
-          {formatTokens(tokens, numberFormat)}
-        </span>
-        {cacheTokens > 0 && (
-          <span style={{ fontSize: 9, color: "var(--text-secondary)", fontWeight: 500, opacity: 0.75 }}>
-            ({formatTokens(cacheTokens, numberFormat)} cached)
-          </span>
-        )}
+      <div style={{
+        fontSize: 20,
+        fontWeight: 800,
+        color,
+        letterSpacing: "-0.5px",
+        marginTop: 6,
+      }}>
+        {formatTokens(tokens, numberFormat)}
       </div>
+      {cacheTokens > 0 && (
+        <div style={{ fontSize: 9, color: "var(--text-secondary)", fontWeight: 500, opacity: 0.7, marginTop: 1 }}>
+          {formatTokens(cacheTokens, numberFormat)} cached
+        </div>
+      )}
       <div style={{
         display: "flex",
         gap: 8,
