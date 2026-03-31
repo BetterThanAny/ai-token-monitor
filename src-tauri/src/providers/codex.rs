@@ -40,7 +40,10 @@ pub fn get_cached_stats() -> Option<AllStats> {
 use super::pricing;
 
 fn calculate_cost(pricing: &pricing::CodexPricing, input: u64, output: u64, cached: u64) -> f64 {
-    (input as f64 / 1_000_000.0) * pricing.input
+    // OpenAI's input_tokens includes cached_input_tokens as a subset.
+    // Subtract cached to avoid double-counting: charge uncached at full rate, cached at discounted rate.
+    let uncached_input = input.saturating_sub(cached);
+    (uncached_input as f64 / 1_000_000.0) * pricing.input
         + (output as f64 / 1_000_000.0) * pricing.output
         + (cached as f64 / 1_000_000.0) * pricing.cached_input
 }
@@ -664,8 +667,11 @@ mod tests {
             output: 5.0,
             cached_input: 0.5,
         };
+        // input=1M (includes 200K cached), output=500K, cached=200K
+        // uncached_input = 1M - 200K = 800K
+        // cost = (800K/1M)*1.0 + (500K/1M)*5.0 + (200K/1M)*0.5 = 0.8 + 2.5 + 0.1 = 3.4
         let cost = calculate_cost(&pricing, 1_000_000, 500_000, 200_000);
-        let expected = 1.0 + 2.5 + 0.1;
+        let expected = 0.8 + 2.5 + 0.1;
         assert!((cost - expected).abs() < 0.0001);
     }
 

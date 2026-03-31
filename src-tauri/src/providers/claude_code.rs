@@ -43,19 +43,27 @@ pub fn get_cached_stats() -> Option<AllStats> {
 
 use super::pricing;
 
-fn calculate_cost(pricing: &pricing::ClaudePricing, input: u64, output: u64, cache_read: u64, cache_write: u64) -> f64 {
+fn calculate_cost(
+    pricing: &pricing::ClaudePricing,
+    input: u64, output: u64, cache_read: u64,
+    cache_write_5m: u64, cache_write_1h: u64,
+    web_search_requests: u32,
+) -> f64 {
     (input as f64 / 1_000_000.0) * pricing.input
         + (output as f64 / 1_000_000.0) * pricing.output
         + (cache_read as f64 / 1_000_000.0) * pricing.cache_read
-        + (cache_write as f64 / 1_000_000.0) * pricing.cache_write
+        + (cache_write_5m as f64 / 1_000_000.0) * pricing.cache_write_5m
+        + (cache_write_1h as f64 / 1_000_000.0) * pricing.cache_write_1h
+        + (web_search_requests as f64) * 0.01
 }
 
 // --- Persistent disk cache for historical month data ---
 
-/// Cache version — bump when the stored date format changes to force a full rebuild.
+/// Cache version — bump when the stored format changes to force a full rebuild.
 /// v1 (missing/0): dates stored as UTC strings (bug)
 /// v2: dates stored as local-timezone strings (correct)
-const CACHE_VERSION: u32 = 2;
+/// v3: total_tokens now includes cache tokens; cache TTL-aware cost calculation
+const CACHE_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DiskCache {
@@ -233,9 +241,12 @@ impl ClaudeCodeProvider {
             let pricing = pricing::get_claude_pricing(&entry.model);
             let cost = calculate_cost(
                 &pricing, entry.input_tokens, entry.output_tokens,
-                entry.cache_read_input_tokens, entry.cache_creation_input_tokens,
+                entry.cache_read_input_tokens,
+                entry.cache_creation_5m_tokens, entry.cache_creation_1h_tokens,
+                entry.web_search_requests,
             );
-            let total_tokens = entry.input_tokens + entry.output_tokens;
+            let total_tokens = entry.input_tokens + entry.output_tokens
+                + entry.cache_read_input_tokens + entry.cache_creation_input_tokens;
 
             let daily = daily_map.entry(entry.date.clone()).or_insert_with(|| DailyUsage {
                 date: entry.date.clone(), tokens: HashMap::new(), cost_usd: 0.0,
@@ -359,6 +370,9 @@ struct SessionEntry {
     output_tokens: u64,
     cache_read_input_tokens: u64,
     cache_creation_input_tokens: u64,
+    cache_creation_5m_tokens: u64,
+    cache_creation_1h_tokens: u64,
+    web_search_requests: u32,
 }
 
 fn parse_session_line(line: &str) -> Option<SessionEntry> {
@@ -405,11 +419,34 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
     let input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
     let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
     let cache_read_input_tokens = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let cache_creation_input_tokens = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    // Parse cache TTL-specific fields (newer API format)
+    let cache_creation_5m = usage.pointer("/cache_creation/ephemeral_5m_input_tokens")
+        .and_then(|v| v.as_u64()).unwrap_or(0);
+    let cache_creation_1h = usage.pointer("/cache_creation/ephemeral_1h_input_tokens")
+        .and_then(|v| v.as_u64()).unwrap_or(0);
+
+    // Fallback to flat field when TTL-specific fields are absent (older API format)
+    let cache_creation_input_tokens = if cache_creation_5m > 0 || cache_creation_1h > 0 {
+        cache_creation_5m + cache_creation_1h
+    } else {
+        usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+    };
+    // When only the flat field is available, treat all as 5m (the original default TTL)
+    let (cache_creation_5m_tokens, cache_creation_1h_tokens) = if cache_creation_5m > 0 || cache_creation_1h > 0 {
+        (cache_creation_5m, cache_creation_1h)
+    } else {
+        (cache_creation_input_tokens, 0)
+    };
+
+    // Parse web search requests
+    let web_search_requests = usage.pointer("/server_tool_use/web_search_requests")
+        .and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
     Some(SessionEntry {
         date, timestamp: timestamp.to_string(), model, session_id, message_id, request_id,
         input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens,
+        cache_creation_5m_tokens, cache_creation_1h_tokens, web_search_requests,
     })
 }
 
@@ -433,9 +470,12 @@ fn aggregate_entries(
         let pricing = pricing::get_claude_pricing(&entry.model);
         let cost = calculate_cost(
             &pricing, entry.input_tokens, entry.output_tokens,
-            entry.cache_read_input_tokens, entry.cache_creation_input_tokens,
+            entry.cache_read_input_tokens,
+            entry.cache_creation_5m_tokens, entry.cache_creation_1h_tokens,
+            entry.web_search_requests,
         );
-        let total_tokens = entry.input_tokens + entry.output_tokens;
+        let total_tokens = entry.input_tokens + entry.output_tokens
+            + entry.cache_read_input_tokens + entry.cache_creation_input_tokens;
 
         let daily = daily_map.entry(entry.date.clone()).or_insert_with(|| DailyUsage {
             date: entry.date.clone(), tokens: HashMap::new(), cost_usd: 0.0,
@@ -650,6 +690,14 @@ mod tests {
         r#"{"sessionId":"abc-123","type":"assistant","timestamp":"2026-03-23T10:00:00Z","requestId":"req-1","message":{"id":"msg-1","model":"claude-sonnet-4-6-20260320","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":50000,"cache_creation_input_tokens":2000}}}"#
     }
 
+    fn sample_jsonl_line_with_cache_ttl() -> &'static str {
+        r#"{"sessionId":"abc-456","type":"assistant","timestamp":"2026-03-23T10:00:00Z","requestId":"req-2","message":{"id":"msg-2","model":"claude-sonnet-4-6-20260320","usage":{"input_tokens":500,"output_tokens":200,"cache_read_input_tokens":30000,"cache_creation_input_tokens":1500,"cache_creation":{"ephemeral_5m_input_tokens":1000,"ephemeral_1h_input_tokens":500}}}}"#
+    }
+
+    fn sample_jsonl_line_with_web_search() -> &'static str {
+        r#"{"sessionId":"abc-789","type":"assistant","timestamp":"2026-03-23T10:00:00Z","requestId":"req-3","message":{"id":"msg-3","model":"claude-sonnet-4-6-20260320","usage":{"input_tokens":2000,"output_tokens":1000,"cache_read_input_tokens":10000,"cache_creation_input_tokens":0,"server_tool_use":{"web_search_requests":3}}}}"#
+    }
+
     #[test]
     fn parse_session_line_extracts_fields() {
         let entry = parse_session_line(sample_jsonl_line()).expect("should parse");
@@ -664,6 +712,26 @@ mod tests {
         assert_eq!(entry.output_tokens, 500);
         assert_eq!(entry.cache_read_input_tokens, 50000);
         assert_eq!(entry.cache_creation_input_tokens, 2000);
+        // Fallback: no TTL-specific fields → all assigned to 5m
+        assert_eq!(entry.cache_creation_5m_tokens, 2000);
+        assert_eq!(entry.cache_creation_1h_tokens, 0);
+        assert_eq!(entry.web_search_requests, 0);
+    }
+
+    #[test]
+    fn parse_session_line_with_cache_ttl() {
+        let entry = parse_session_line(sample_jsonl_line_with_cache_ttl()).expect("should parse");
+        assert_eq!(entry.cache_creation_5m_tokens, 1000);
+        assert_eq!(entry.cache_creation_1h_tokens, 500);
+        assert_eq!(entry.cache_creation_input_tokens, 1500);
+    }
+
+    #[test]
+    fn parse_session_line_with_web_search() {
+        let entry = parse_session_line(sample_jsonl_line_with_web_search()).expect("should parse");
+        assert_eq!(entry.web_search_requests, 3);
+        assert_eq!(entry.input_tokens, 2000);
+        assert_eq!(entry.cache_creation_input_tokens, 0);
     }
 
     #[test]
@@ -681,22 +749,40 @@ mod tests {
     #[test]
     fn cost_calculation_sonnet() {
         let pricing = pricing::get_claude_pricing("claude-sonnet-4-6-20260320");
-        let cost = calculate_cost(&pricing, 1_000_000, 1_000_000, 1_000_000, 1_000_000);
+        // 1M each: input, output, cache_read, cache_write_5m=1M, cache_write_1h=0, web_search=0
+        let cost = calculate_cost(&pricing, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 0, 0);
         let expected = 3.0 + 15.0 + 0.30 + 3.75;
+        assert!((cost - expected).abs() < 0.001, "cost={cost}, expected={expected}");
+    }
+
+    #[test]
+    fn cost_calculation_sonnet_with_1h_cache() {
+        let pricing = pricing::get_claude_pricing("claude-sonnet-4-6-20260320");
+        // 500K 5m cache + 500K 1h cache
+        let cost = calculate_cost(&pricing, 1_000_000, 1_000_000, 1_000_000, 500_000, 500_000, 0);
+        let expected = 3.0 + 15.0 + 0.30 + (0.5 * 3.75) + (0.5 * 6.0);
+        assert!((cost - expected).abs() < 0.001, "cost={cost}, expected={expected}");
+    }
+
+    #[test]
+    fn cost_calculation_with_web_search() {
+        let pricing = pricing::get_claude_pricing("claude-sonnet-4-6-20260320");
+        let cost = calculate_cost(&pricing, 1_000_000, 0, 0, 0, 0, 5);
+        let expected = 3.0 + 0.05; // input + 5 web searches * $0.01
         assert!((cost - expected).abs() < 0.001, "cost={cost}, expected={expected}");
     }
 
     #[test]
     fn cost_calculation_opus() {
         let pricing = pricing::get_claude_pricing("claude-opus-4-6-20260320");
-        let cost = calculate_cost(&pricing, 1_000_000, 0, 0, 0);
+        let cost = calculate_cost(&pricing, 1_000_000, 0, 0, 0, 0, 0);
         assert!((cost - 5.0).abs() < 0.001);
     }
 
     #[test]
     fn cost_calculation_haiku() {
         let pricing = pricing::get_claude_pricing("claude-haiku-4-5-20251001");
-        let cost = calculate_cost(&pricing, 1_000_000, 1_000_000, 0, 0);
+        let cost = calculate_cost(&pricing, 1_000_000, 1_000_000, 0, 0, 0, 0);
         assert!((cost - 6.0).abs() < 0.001);
     }
 

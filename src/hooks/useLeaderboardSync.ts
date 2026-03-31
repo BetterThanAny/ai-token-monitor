@@ -15,29 +15,6 @@ export interface LeaderboardEntry {
   sessions: number;
 }
 
-interface SnapshotRow {
-  user_id: string;
-  total_tokens: number;
-  cost_usd: number;
-  messages: number;
-  sessions: number;
-  profiles: { nickname: string; avatar_url: string | null }
-    | { nickname: string; avatar_url: string | null }[];
-}
-
-function toLeaderboardEntry(row: SnapshotRow): LeaderboardEntry {
-  const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-  return {
-    user_id: row.user_id,
-    nickname: profile?.nickname ?? "Unknown",
-    avatar_url: profile?.avatar_url ?? null,
-    total_tokens: row.total_tokens,
-    cost_usd: Number(row.cost_usd),
-    messages: row.messages,
-    sessions: row.sessions,
-  };
-}
-
 interface UseLeaderboardSyncProps {
   stats: AllStats | null;
   user: User | null;
@@ -84,54 +61,32 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
 
     try {
       const today = toLocalDateStr(new Date());
+      let dateFrom: string;
 
       if (period === "today") {
-        const { data } = await supabase
-          .from("daily_snapshots")
-          .select("user_id, total_tokens, cost_usd, messages, sessions, profiles(nickname, avatar_url)")
-          .eq("date", today)
-          .eq("provider", provider)
-          .order("total_tokens", { ascending: false })
-          .limit(100);
-
-        if (data) {
-          const entries = (data as SnapshotRow[]).map(toLeaderboardEntry);
-          setLeaderboard(entries);
-          cacheRef.current = { data: entries, fetchedAt: Date.now(), period, provider };
-        }
+        dateFrom = today;
       } else {
         const now = new Date();
         const dow = now.getDay();
         const mondayOffset = dow === 0 ? 6 : dow - 1;
         const monday = new Date(now);
         monday.setDate(now.getDate() - mondayOffset);
-        const weekStart = toLocalDateStr(monday);
+        dateFrom = toLocalDateStr(monday);
+      }
 
-        const { data } = await supabase
-          .from("daily_snapshots")
-          .select("user_id, total_tokens, cost_usd, messages, sessions, profiles(nickname, avatar_url)")
-          .gte("date", weekStart)
-          .lte("date", today)
-          .eq("provider", provider)
-          .limit(5000);
+      const { data } = await supabase.rpc("get_leaderboard_entries", {
+        p_provider: provider,
+        p_date_from: dateFrom,
+        p_date_to: today,
+      });
 
-        if (data) {
-          const userMap = new Map<string, LeaderboardEntry>();
-          for (const row of data as SnapshotRow[]) {
-            const existing = userMap.get(row.user_id);
-            if (existing) {
-              existing.total_tokens += row.total_tokens;
-              existing.cost_usd += Number(row.cost_usd);
-              existing.messages += row.messages;
-              existing.sessions += row.sessions;
-            } else {
-              userMap.set(row.user_id, toLeaderboardEntry(row));
-            }
-          }
-          const sorted = Array.from(userMap.values()).sort((a, b) => b.total_tokens - a.total_tokens);
-          setLeaderboard(sorted);
-          cacheRef.current = { data: sorted, fetchedAt: Date.now(), period, provider };
-        }
+      if (data) {
+        const entries = (data as LeaderboardEntry[]).map((e) => ({
+          ...e,
+          cost_usd: Number(e.cost_usd),
+        }));
+        setLeaderboard(entries);
+        cacheRef.current = { data: entries, fetchedAt: Date.now(), period, provider };
       }
     } finally {
       setLoading(false);

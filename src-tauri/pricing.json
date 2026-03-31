@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
-  "last_updated": "2026-03-25",
+  "version": "1.2.0",
+  "last_updated": "2026-03-31",
   "sources": {
     "claude": "https://docs.anthropic.com/en/docs/about-claude/pricing",
     "codex": "https://developers.openai.com/api/docs/pricing"
@@ -8,18 +8,18 @@
   "claude": {
     "default": "sonnet",
     "models": [
-      { "match": "opus-4-6",  "label": "Opus 4.6/4.5",  "input": 5.0,  "output": 25.0,  "cache_read": 0.50, "cache_write": 6.25  },
-      { "match": "opus-4-5",  "label": "Opus 4.6/4.5",  "input": 5.0,  "output": 25.0,  "cache_read": 0.50, "cache_write": 6.25  },
-      { "match": "opus-4-1",  "label": "Opus 4.1/4",    "input": 15.0, "output": 75.0,  "cache_read": 1.50, "cache_write": 18.75 },
-      { "match": "opus-4",    "label": "Opus 4.1/4",    "input": 15.0, "output": 75.0,  "cache_read": 1.50, "cache_write": 18.75 },
-      { "match": "opus",      "label": "Opus 4.6/4.5",  "input": 5.0,  "output": 25.0,  "cache_read": 0.50, "cache_write": 6.25  },
-      { "match": "sonnet-4-6","label": "Sonnet 4.x",    "input": 3.0,  "output": 15.0,  "cache_read": 0.30, "cache_write": 3.75  },
-      { "match": "sonnet-4-5","label": "Sonnet 4.x",    "input": 3.0,  "output": 15.0,  "cache_read": 0.30, "cache_write": 3.75  },
-      { "match": "sonnet-4",  "label": "Sonnet 4.x",    "input": 3.0,  "output": 15.0,  "cache_read": 0.30, "cache_write": 3.75  },
-      { "match": "sonnet",    "label": "Sonnet 4.x",    "input": 3.0,  "output": 15.0,  "cache_read": 0.30, "cache_write": 3.75  },
-      { "match": "haiku-4-5", "label": "Haiku 4.5",     "input": 1.0,  "output": 5.0,   "cache_read": 0.10, "cache_write": 1.25  },
-      { "match": "haiku-3-5", "label": "Haiku 3.5",     "input": 0.80, "output": 4.0,   "cache_read": 0.08, "cache_write": 1.00  },
-      { "match": "haiku",     "label": "Haiku 4.5",     "input": 1.0,  "output": 5.0,   "cache_read": 0.10, "cache_write": 1.25  }
+      { "match": "opus-4-6",  "label": "Opus 4.6/4.5",  "input": 5.0,  "output": 25.0,  "cache_read": 0.50, "cache_write": 6.25,  "cache_write_1h": 10.0  },
+      { "match": "opus-4-5",  "label": "Opus 4.6/4.5",  "input": 5.0,  "output": 25.0,  "cache_read": 0.50, "cache_write": 6.25,  "cache_write_1h": 10.0  },
+      { "match": "opus-4-1",  "label": "Opus 4.1/4",    "input": 15.0, "output": 75.0,  "cache_read": 1.50, "cache_write": 18.75, "cache_write_1h": 30.0  },
+      { "match": "opus-4",    "label": "Opus 4.1/4",    "input": 15.0, "output": 75.0,  "cache_read": 1.50, "cache_write": 18.75, "cache_write_1h": 30.0  },
+      { "match": "opus",      "label": "Opus 4.6/4.5",  "input": 5.0,  "output": 25.0,  "cache_read": 0.50, "cache_write": 6.25,  "cache_write_1h": 10.0  },
+      { "match": "sonnet-4-6","label": "Sonnet 4.x",    "input": 3.0,  "output": 15.0,  "cache_read": 0.30, "cache_write": 3.75,  "cache_write_1h": 6.0   },
+      { "match": "sonnet-4-5","label": "Sonnet 4.x",    "input": 3.0,  "output": 15.0,  "cache_read": 0.30, "cache_write": 3.75,  "cache_write_1h": 6.0   },
+      { "match": "sonnet-4",  "label": "Sonnet 4.x",    "input": 3.0,  "output": 15.0,  "cache_read": 0.30, "cache_write": 3.75,  "cache_write_1h": 6.0   },
+      { "match": "sonnet",    "label": "Sonnet 4.x",    "input": 3.0,  "output": 15.0,  "cache_read": 0.30, "cache_write": 3.75,  "cache_write_1h": 6.0   },
+      { "match": "haiku-4-5", "label": "Haiku 4.5",     "input": 1.0,  "output": 5.0,   "cache_read": 0.10, "cache_write": 1.25,  "cache_write_1h": 2.0   },
+      { "match": "haiku-3-5", "label": "Haiku 3.5",     "input": 0.80, "output": 4.0,   "cache_read": 0.08, "cache_write": 1.00,  "cache_write_1h": 1.60  },
+      { "match": "haiku",     "label": "Haiku 4.5",     "input": 1.0,  "output": 5.0,   "cache_read": 0.10, "cache_write": 1.25,  "cache_write_1h": 2.0   }
     ]
   },
   "codex": {

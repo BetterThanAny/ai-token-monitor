@@ -334,11 +334,7 @@ pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<
     let json = serde_json::to_string_pretty(&file_prefs)
         .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
     fs::write(&path, json).map_err(|e| format!("Failed to write preferences: {}", e))?;
-    // Update tray in background to avoid blocking the IPC response
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        crate::update_tray_title(&handle);
-    });
+    crate::update_tray_title(&app);
     Ok(())
 }
 
