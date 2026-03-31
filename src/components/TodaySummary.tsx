@@ -77,7 +77,7 @@ export function TodaySummary({ today, weekAvg }: Props) {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
         {cacheTokens > 0 && (
-          <span style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 500, opacity: 0.7 }}>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500, opacity: 0.7 }}>
             {formatTokens(cacheTokens, prefs.number_format)} cached
           </span>
         )}
