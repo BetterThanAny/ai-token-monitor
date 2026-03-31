@@ -341,33 +341,6 @@ impl ClaudeCodeProvider {
             .map_err(|e| format!("Failed to parse stats-cache.json: {}", e))
     }
 
-    /// Save completed historical months to disk cache for faster cold starts.
-    fn save_historical_months(&self, entries: &HashMap<String, SessionEntry>) {
-        let current_month = current_month_str();
-
-        let mut month_entries: HashMap<String, Vec<&SessionEntry>> = HashMap::new();
-        for entry in entries.values() {
-            let month = date_to_month(&entry.date);
-            if month < current_month {
-                month_entries.entry(month).or_default().push(entry);
-            }
-        }
-
-        if month_entries.is_empty() {
-            return;
-        }
-
-        let mut new_cache = DiskCache { version: CACHE_VERSION, months: HashMap::new() };
-        for (month, month_data) in &month_entries {
-            let (daily_map, model_map, messages, _) = aggregate_entries(month_data);
-            new_cache.months.insert(month.clone(), MonthData {
-                daily: daily_map.into_values().collect(),
-                model_usage: model_map,
-                total_messages: messages,
-            });
-        }
-        save_disk_cache(&self.primary_dir, &new_cache);
-    }
 }
 
 #[derive(Clone)]
