@@ -452,55 +452,42 @@ pub fn run() {
             ai_translate::translate_reply
         ])
         .setup(|app| {
-            // macOS 26 Tahoe: tray click events never fire because TaoTrayTarget NSView
-            // intercepts mouseDown: on the NSStatusBarButton. Fix: attach an NSMenu so
-            // the native click→menu path works, then strip the blocking subview after build.
-            #[cfg(target_os = "macos")]
-            let tray_menu = {
-                use tauri::menu::{MenuBuilder, MenuItem};
-                MenuBuilder::new(app)
-                    .item(&MenuItem::with_id(app, "show", "Show / Hide", true, None::<&str>)?)
-                    .item(&MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?)
-                    .build()?
-            };
-
-            let tray_builder = TrayIconBuilder::with_id("main-tray")
+            // Build tray icon — direct click toggle
+            let _tray = TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().cloned().unwrap())
-                .tooltip("AI Token Monitor");
+                .tooltip("AI Token Monitor")
+                .on_tray_icon_event(|tray, event| {
+                    // Only handle mouse DOWN — Click fires for both Down and Up
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button_state: tauri::tray::MouseButtonState::Down,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let visible = window.is_visible().unwrap_or(false);
+                            if visible {
+                                let _ = window.hide();
+                            } else {
+                                let _ = app.emit("stats-updated", ());
+                                let _ = position_window_near_tray(&window, tray);
 
-            #[cfg(target_os = "macos")]
-            let tray_builder = tray_builder
-                .menu(&tray_menu)
-                .show_menu_on_left_click(true);
+                                let now_ms = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0);
+                                LAST_SHOWN_MS.store(now_ms, Ordering::SeqCst);
 
-            let _tray = tray_builder
-                .on_menu_event(|app, event| {
-                    match event.id().as_ref() {
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                if window.is_visible().unwrap_or(false) {
-                                    let _ = window.hide();
-                                } else {
-                                    let _ = app.emit("stats-updated", ());
-                                    if let Some(tray) = app.tray_by_id("main-tray") {
-                                        let _ = position_window_near_tray(&window, &tray);
-                                    }
-                                    let now_ms = SystemTime::now()
-                                        .duration_since(UNIX_EPOCH)
-                                        .map(|d| d.as_millis() as u64)
-                                        .unwrap_or(0);
-                                    LAST_SHOWN_MS.store(now_ms, Ordering::SeqCst);
-                                    let _ = window.show();
-                                    // MUST be after show() — macOS resets level on show
-                                    #[cfg(target_os = "macos")]
-                                    configure_window_for_fullscreen(&window);
-                                    #[cfg(target_os = "macos")]
-                                    activate_app();
-                                }
+                                let _ = window.show();
+                                // MUST be after show() — macOS resets level on show
+                                #[cfg(target_os = "macos")]
+                                configure_window_for_fullscreen(&window);
+                                #[cfg(target_os = "macos")]
+                                activate_app();
+
+                                let _ = window.set_focus();
                             }
                         }
-                        "quit" => { app.exit(0); }
-                        _ => {}
                     }
                 })
                 .build(app)?;
@@ -651,7 +638,7 @@ fn position_window_near_tray(
             let desired_height = available_height.min(900.0);
 
             let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                width: 400.0,
+                width: 440.0,
                 height: desired_height,
             }));
 
@@ -668,7 +655,7 @@ fn position_window_near_tray(
             let desired_height = max_height.min(900.0);
 
             let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                width: 400.0,
+                width: 440.0,
                 height: desired_height,
             }));
 
