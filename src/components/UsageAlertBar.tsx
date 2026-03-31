@@ -23,6 +23,8 @@ function formatResetTime(resetsAt: string, t: (key: string, params?: Record<stri
   return t("usageAlert.resetsIn", { time: `${m}m` });
 }
 
+const SEGMENT_COUNT = 10;
+
 function UsageRow({
   label,
   utilization,
@@ -34,14 +36,15 @@ function UsageRow({
 }) {
   const pct = Math.min(utilization, 100);
   const color = getBarColor(utilization);
+  const filledSegments = Math.round((pct / 100) * SEGMENT_COUNT);
 
   return (
-    <div style={{ marginBottom: 8 }}>
+    <div style={{ marginBottom: 10 }}>
       <div style={{
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        marginBottom: 3,
+        marginBottom: 4,
       }}>
         <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-primary)" }}>
           {label}
@@ -56,19 +59,28 @@ function UsageRow({
         </div>
       </div>
       <div style={{
+        display: "flex",
+        gap: 3,
         width: "100%",
-        height: 5,
+        height: 10,
+        padding: 2,
+        background: "rgba(0,0,0,0.3)",
         borderRadius: 3,
-        background: "var(--heat-0)",
-        overflow: "hidden",
+        border: "1px solid rgba(255,255,255,0.08)",
       }}>
-        <div style={{
-          width: `${pct}%`,
-          height: "100%",
-          borderRadius: 3,
-          background: color,
-          transition: "width 0.3s ease, background 0.3s ease",
-        }} />
+        {Array.from({ length: SEGMENT_COUNT }, (_, i) => (
+          <div
+            key={i}
+            style={{
+              flex: 1,
+              height: "100%",
+              borderRadius: 1,
+              background: i < filledSegments ? color : "rgba(255,255,255,0.06)",
+              boxShadow: i < filledSegments ? `0 0 4px ${color}40` : "none",
+              transition: "background 0.3s ease",
+            }}
+          />
+        ))}
       </div>
     </div>
   );
