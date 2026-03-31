@@ -163,7 +163,7 @@ fn read_oauth_token_keychain() -> Option<String> {
 fn read_keychain_password(service: &str, account: &str) -> Option<String> {
     use std::process::Command;
 
-    let output = Command::new("security")
+    let output = Command::new("/usr/bin/security")
         .args(["find-generic-password", "-s", service, "-a", account, "-w"])
         .output()
         .ok()?;
@@ -196,7 +196,7 @@ fn find_keychain_service_names() -> Vec<String> {
 
     // Use `security find-generic-password` to discover entries.
     // First try prefix-based discovery via `security dump-keychain` grep.
-    if let Ok(output) = Command::new("security")
+    if let Ok(output) = Command::new("/usr/bin/security")
         .args(["dump-keychain"])
         .output()
     {
