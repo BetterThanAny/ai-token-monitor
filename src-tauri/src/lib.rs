@@ -161,47 +161,42 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
         .and_then(|c| serde_json::from_str(&c).ok())
         .unwrap_or_default();
 
-    if !prefs.show_tray_cost {
-        if let Some(tray) = app_handle.tray_by_id("main-tray") {
-            #[cfg(target_os = "macos")]
-            let _ = tray.set_title(Some(""));
-            let _ = tray.set_tooltip(Some("AI Token Monitor"));
-        }
-        return;
-    }
-
-    // Use cached stats only — never trigger a full re-parse from tray update
-    // Sum costs from all enabled providers
-    let claude_cost = providers::claude_code::get_cached_stats()
-        .and_then(|s| {
-            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-            s.daily.iter().find(|d| d.date == today).map(|d| d.cost_usd)
-        })
-        .unwrap_or(0.0);
-
-    let codex_cost = if prefs.include_codex {
-        providers::codex::get_cached_stats()
-            .and_then(|s| {
-                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                s.daily.iter().find(|d| d.date == today).map(|d| d.cost_usd)
-            })
-            .unwrap_or(0.0)
+    let (title, tooltip) = if !prefs.show_tray_cost {
+        (String::new(), "AI Token Monitor".to_string())
     } else {
-        0.0
-    };
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-    let today_cost = claude_cost + codex_cost;
+        let claude_cost = providers::claude_code::get_cached_stats()
+            .and_then(|s| s.daily.iter().find(|d| d.date == today).map(|d| d.cost_usd))
+            .unwrap_or(0.0);
 
-    if let Some(tray) = app_handle.tray_by_id("main-tray") {
-        let title = if today_cost >= 1.0 {
+        let codex_cost = if prefs.include_codex {
+            providers::codex::get_cached_stats()
+                .and_then(|s| s.daily.iter().find(|d| d.date == today).map(|d| d.cost_usd))
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+
+        let today_cost = claude_cost + codex_cost;
+        let cost_str = if today_cost >= 1.0 {
             format!("${:.0}", today_cost)
         } else {
             format!("${:.2}", today_cost)
         };
-        #[cfg(target_os = "macos")]
-        let _ = tray.set_title(Some(&title));
-        let _ = tray.set_tooltip(Some(&format!("AI Token Monitor - Today: {}", title)));
-    }
+        let tooltip_str = format!("AI Token Monitor - Today: {}", cost_str);
+        (cost_str, tooltip_str)
+    };
+
+    // Dispatch AppKit tray operations to main thread to avoid crash
+    let handle = app_handle.clone();
+    let _ = app_handle.run_on_main_thread(move || {
+        if let Some(tray) = handle.tray_by_id("main-tray") {
+            #[cfg(target_os = "macos")]
+            let _ = tray.set_title(Some(&title));
+            let _ = tray.set_tooltip(Some(&tooltip));
+        }
+    });
 }
 
 fn get_all_watch_dirs() -> Vec<PathBuf> {
