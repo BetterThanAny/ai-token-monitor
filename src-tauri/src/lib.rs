@@ -354,6 +354,12 @@ fn is_app_active() -> bool {
     }
 }
 
+/// macOS window levels (from NSWindow.h)
+#[cfg(target_os = "macos")]
+const NS_FLOATING_WINDOW_LEVEL: i64 = 3;
+#[cfg(target_os = "macos")]
+const NS_STATUS_WINDOW_LEVEL: i64 = 25;
+
 /// Temporarily lower window level so system panels (emoji picker) can appear above us.
 #[cfg(target_os = "macos")]
 fn lower_window_level(window: &tauri::WebviewWindow) {
@@ -363,9 +369,8 @@ fn lower_window_level(window: &tauri::WebviewWindow) {
         unsafe {
             #[allow(deprecated)]
             let ns_win = ns_win as cocoa::base::id;
-            // NSFloatingWindowLevel (3) — above normal windows but below system panels
             #[allow(deprecated)]
-            ns_win.setLevel_(3);
+            ns_win.setLevel_(NS_FLOATING_WINDOW_LEVEL);
         }
     }
 }
@@ -383,9 +388,8 @@ fn configure_window_for_fullscreen(window: &tauri::WebviewWindow) {
         unsafe {
             #[allow(deprecated)]
             let ns_win = ns_win as cocoa::base::id;
-            // NSStatusWindowLevel (25) is above alwaysOnTop (3) and fullscreen spaces
             #[allow(deprecated)]
-            ns_win.setLevel_(25);
+            ns_win.setLevel_(NS_STATUS_WINDOW_LEVEL);
             #[allow(deprecated)]
             ns_win.setCollectionBehavior_(
                 NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
