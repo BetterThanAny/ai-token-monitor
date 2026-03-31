@@ -14,7 +14,7 @@
       {
         "label": "main",
         "title": "AI Token Monitor",
-        "width": 400,
+        "width": 440,
         "height": 800,
         "visible": false,
         "decorations": false,

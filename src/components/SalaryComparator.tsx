@@ -140,22 +140,38 @@ export function SalaryComparator({ stats }: Props) {
             {t("salary.percentOfSalary")}
           </span>
         </div>
-        {/* Progress bar */}
-        <div style={{
-          height: 4,
-          background: "var(--heat-0)",
-          borderRadius: 2,
-          marginTop: 6,
-          overflow: "hidden",
-        }}>
-          <div style={{
-            height: "100%",
-            width: `${Math.min(percent, 100)}%`,
-            background: "linear-gradient(90deg, var(--accent-purple), var(--accent-pink))",
-            borderRadius: 2,
-            transition: "width 0.3s ease",
-          }} />
-        </div>
+        {/* Progress bar — segmented HP bar style */}
+        {(() => {
+          const segCount = 10;
+          const filled = Math.round((Math.min(percent, 100) / 100) * segCount);
+          return (
+            <div style={{
+              display: "flex",
+              gap: 3,
+              width: "100%",
+              height: 10,
+              padding: 2,
+              background: "rgba(0,0,0,0.3)",
+              borderRadius: 3,
+              border: "1px solid rgba(255,255,255,0.08)",
+              marginTop: 6,
+            }}>
+              {Array.from({ length: segCount }, (_, i) => (
+                <div
+                  key={i}
+                  style={{
+                    flex: 1,
+                    height: "100%",
+                    borderRadius: 1,
+                    background: i < filled ? "var(--accent-purple)" : "rgba(255,255,255,0.06)",
+                    boxShadow: i < filled ? "0 0 4px rgba(168,85,247,0.4)" : "none",
+                    transition: "background 0.3s ease",
+                  }}
+                />
+              ))}
+            </div>
+          );
+        })()}
         <div style={{
           display: "flex",
           justifyContent: "space-between",

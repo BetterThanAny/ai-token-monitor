@@ -166,7 +166,7 @@ function PeriodCard({
         {formatTokens(tokens, numberFormat)}
       </div>
       {cacheTokens > 0 && (
-        <div style={{ fontSize: 9, color: "var(--text-secondary)", fontWeight: 500, opacity: 0.7, marginTop: 1 }}>
+        <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 500, opacity: 0.7, marginTop: 1 }}>
           {formatTokens(cacheTokens, numberFormat)} cached
         </div>
       )}
