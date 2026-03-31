@@ -2,6 +2,7 @@ export function formatTokens(n: number, format: "compact" | "full" = "compact"):
   if (format === "full") {
     return n.toLocaleString("en-US");
   }
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toString();
@@ -29,6 +30,11 @@ export function formatDate(dateStr: string, locale?: string): string {
 
 export function getTotalTokens(tokens: Record<string, number>): number {
   return Object.values(tokens).reduce((sum, v) => sum + v, 0);
+}
+
+/** Cache-only tokens for a day (cache_read + cache_write) — used for "(cached)" UI labels */
+export function getDayCacheTokens(day: { cache_read_tokens: number; cache_write_tokens: number }): number {
+  return day.cache_read_tokens + day.cache_write_tokens;
 }
 
 /** Format a Date to local YYYY-MM-DD string without UTC conversion */

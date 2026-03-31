@@ -4,14 +4,17 @@ mod oauth_usage;
 mod providers;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// When true, the window will not auto-hide on focus loss (e.g. during dialog).
 static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// Timestamp (ms) when the window was last shown — prevents immediate focus-loss hide.
+static LAST_SHOWN_MS: AtomicU64 = AtomicU64::new(0);
 
 /// Stores a deep-link URL that arrived before the frontend was ready (cold start).
 /// The frontend can retrieve it via the `get_pending_deep_link` command.
@@ -24,6 +27,7 @@ use notify::{Event, EventKind, RecursiveMode, Watcher};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 
+use providers::traits::TokenProvider;
 use providers::types::UserPreferences;
 
 struct AlertState {
@@ -277,7 +281,18 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                     providers::claude_code::invalidate_stats_cache();
                     providers::codex::invalidate_stats_cache();
                     let _ = app_handle.emit("stats-updated", ());
-                    update_tray_title(&app_handle);
+                    // Re-parse in background so the tray reflects new data even when the
+                    // popup is closed (get_all_stats is only called by the frontend).
+                    let app_for_refresh = app_handle.clone();
+                    thread::spawn(move || {
+                        let prefs = commands::get_preferences();
+                        let provider = providers::claude_code::ClaudeCodeProvider::new(prefs.config_dirs.clone());
+                        let _ = provider.fetch_stats();
+                        if prefs.include_codex {
+                            let _ = providers::codex::CodexProvider::new().fetch_stats();
+                        }
+                        update_tray_title(&app_for_refresh);
+                    });
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     // Re-read watch dirs and update if changed
@@ -305,7 +320,9 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
     });
 }
 
-/// Activate the macOS app so it can properly receive focus
+/// Bring the app to the foreground so WKWebView renders.
+/// Required on macOS 26 Tahoe where the app runs as Accessory policy
+/// and won't auto-activate — without this the window appears but content is white.
 #[cfg(target_os = "macos")]
 fn activate_app() {
     #[allow(deprecated)]
@@ -320,7 +337,41 @@ fn activate_app() {
     }
 }
 
-/// Set NSWindow level and collection behavior so the window appears over fullscreen apps
+/// Check if our app is still the frontmost (active) application.
+/// System panels like the emoji picker steal window focus but keep the app active.
+#[cfg(target_os = "macos")]
+fn is_app_active() -> bool {
+    #[allow(deprecated)]
+    use cocoa::appkit::NSApplication;
+    #[allow(deprecated)]
+    use cocoa::base::nil;
+    use objc::{msg_send, sel, sel_impl};
+    unsafe {
+        #[allow(deprecated)]
+        let ns_app = NSApplication::sharedApplication(nil);
+        let active: bool = msg_send![ns_app, isActive];
+        active
+    }
+}
+
+/// Temporarily lower window level so system panels (emoji picker) can appear above us.
+#[cfg(target_os = "macos")]
+fn lower_window_level(window: &tauri::WebviewWindow) {
+    #[allow(deprecated)]
+    use cocoa::appkit::NSWindow;
+    if let Ok(ns_win) = window.ns_window() {
+        unsafe {
+            #[allow(deprecated)]
+            let ns_win = ns_win as cocoa::base::id;
+            // NSFloatingWindowLevel (3) — above normal windows but below system panels
+            #[allow(deprecated)]
+            ns_win.setLevel_(3);
+        }
+    }
+}
+
+/// Set NSWindow level and collection behavior so the window appears above all other apps.
+/// Must be called AFTER window.show() — macOS resets the level on show.
 #[cfg(target_os = "macos")]
 fn configure_window_for_fullscreen(window: &tauri::WebviewWindow) {
     #[allow(deprecated)]
@@ -332,16 +383,18 @@ fn configure_window_for_fullscreen(window: &tauri::WebviewWindow) {
         unsafe {
             #[allow(deprecated)]
             let ns_win = ns_win as cocoa::base::id;
-            // NSStatusWindowLevel (25) is above fullscreen spaces
+            // NSStatusWindowLevel (25) is above alwaysOnTop (3) and fullscreen spaces
             #[allow(deprecated)]
             ns_win.setLevel_(25);
-            // Allow the window to join any space including fullscreen
             #[allow(deprecated)]
             ns_win.setCollectionBehavior_(
                 NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
                     | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary
                     | NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle,
             );
+            // Give keyboard focus so Escape key works
+            #[allow(deprecated)]
+            ns_win.makeKeyAndOrderFront_(cocoa::base::nil);
         }
     }
 }
@@ -432,39 +485,11 @@ pub fn run() {
             ai_translate::translate_reply
         ])
         .setup(|app| {
-            // Build tray icon
+            // Build tray icon — direct click toggle
             let _tray = TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().cloned().unwrap())
                 .tooltip("AI Token Monitor")
                 .on_tray_icon_event(|tray, event| {
-                    match &event {
-                        tauri::tray::TrayIconEvent::Click {
-                            button,
-                            button_state,
-                            ..
-                        } => {
-                            eprintln!(
-                                "[TRAY] Click: button={:?}, state={:?}",
-                                button, button_state
-                            );
-                        }
-                        tauri::tray::TrayIconEvent::DoubleClick { .. } => {
-                            eprintln!("[TRAY] DoubleClick");
-                        }
-                        tauri::tray::TrayIconEvent::Enter { .. } => {
-                            eprintln!("[TRAY] Enter");
-                        }
-                        tauri::tray::TrayIconEvent::Leave { .. } => {
-                            eprintln!("[TRAY] Leave");
-                        }
-                        tauri::tray::TrayIconEvent::Move { .. } => {
-                            // too noisy, skip
-                        }
-                        _ => {
-                            eprintln!("[TRAY] Other event: {:?}", event);
-                        }
-                    }
-
                     // Only handle mouse DOWN — Click fires for both Down and Up
                     if let tauri::tray::TrayIconEvent::Click {
                         button_state: tauri::tray::MouseButtonState::Down,
@@ -474,28 +499,26 @@ pub fn run() {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
                             let visible = window.is_visible().unwrap_or(false);
-                            eprintln!("[TRAY] Window visible={}, toggling", visible);
                             if visible {
                                 let _ = window.hide();
-                                eprintln!("[TRAY] Window hidden");
                             } else {
-                                // Pre-fetch stats before showing window (uses cache if fresh)
                                 let _ = app.emit("stats-updated", ());
                                 let _ = position_window_near_tray(&window, tray);
 
-                                // Ensure window appears over fullscreen apps
-                                #[cfg(target_os = "macos")]
-                                configure_window_for_fullscreen(&window);
+                                let now_ms = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0);
+                                LAST_SHOWN_MS.store(now_ms, Ordering::SeqCst);
 
                                 let _ = window.show();
-                                eprintln!("[TRAY] Window shown");
-
+                                // MUST be after show() — macOS resets level on show
+                                #[cfg(target_os = "macos")]
+                                configure_window_for_fullscreen(&window);
                                 #[cfg(target_os = "macos")]
                                 activate_app();
-                                eprintln!("[TRAY] App activated");
 
                                 let _ = window.set_focus();
-                                eprintln!("[TRAY] Focus set");
                             }
                         }
                     }
@@ -528,39 +551,50 @@ pub fn run() {
             main_window.on_window_event(move |event| {
                 match event {
                     tauri::WindowEvent::Focused(focused) => {
-                        eprintln!("[WINDOW] Focused({})", focused);
                         if !focused {
-                            // Skip auto-hide when a dialog (e.g. folder picker) is open
-                            if DIALOG_OPEN.load(Ordering::Relaxed) {
-                                eprintln!("[WINDOW] Skipping hide — dialog is open");
-                                return;
-                            }
-                            // Delay hide to prevent race condition with fullscreen spaces
-                            // where macOS fires focus-lost immediately after show
+                            if DIALOG_OPEN.load(Ordering::Relaxed) { return; }
                             let win = win_clone.clone();
                             std::thread::spawn(move || {
                                 std::thread::sleep(std::time::Duration::from_millis(200));
-                                // Only hide if still unfocused after delay and no dialog open
-                                if !DIALOG_OPEN.load(Ordering::Relaxed)
-                                    && !win.is_focused().unwrap_or(true)
-                                {
-                                    let _ = win.hide();
-                                    eprintln!("[WINDOW] Hidden on focus lost (delayed)");
+                                if win.is_focused().unwrap_or(true) { return; }
+                                // Grace period: ignore focus-loss immediately after show
+                                let now_ms = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0);
+                                if now_ms.saturating_sub(LAST_SHOWN_MS.load(Ordering::SeqCst)) < 400 {
+                                    return;
                                 }
+                                // All AppKit calls must run on the main thread
+                                #[cfg(target_os = "macos")]
+                                {
+                                    let w = win.clone();
+                                    let _ = win.run_on_main_thread(move || {
+                                        // Don't hide if our app is still active (e.g. emoji picker)
+                                        // Instead, lower window level so system panels appear above us
+                                        if is_app_active() {
+                                            lower_window_level(&w);
+                                        } else {
+                                            let _ = w.hide();
+                                        }
+                                    });
+                                    return;
+                                }
+                                #[cfg(not(target_os = "macos"))]
+                                let _ = win.hide();
                             });
+                        } else {
+                            // Focus regained — restore high window level on main thread
+                            #[cfg(target_os = "macos")]
+                            {
+                                let w = win_clone.clone();
+                                let _ = win_clone.run_on_main_thread(move || {
+                                    configure_window_for_fullscreen(&w);
+                                });
+                            }
                         }
                     }
-                    tauri::WindowEvent::CloseRequested { .. } => {
-                        eprintln!("[WINDOW] CloseRequested");
-                    }
-                    tauri::WindowEvent::Destroyed => {
-                        eprintln!("[WINDOW] Destroyed");
-                    }
-                    tauri::WindowEvent::Moved(_) => {}
-                    tauri::WindowEvent::Resized(_) => {}
-                    _ => {
-                        eprintln!("[WINDOW] Other event");
-                    }
+                    _ => {}
                 }
             });
 
@@ -662,7 +696,7 @@ fn position_window_near_tray(
             let desired_height = available_height.min(900.0);
 
             let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                width: 400.0,
+                width: 440.0,
                 height: desired_height,
             }));
 
@@ -679,7 +713,7 @@ fn position_window_near_tray(
             let desired_height = max_height.min(900.0);
 
             let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                width: 400.0,
+                width: 440.0,
                 height: desired_height,
             }));
 
