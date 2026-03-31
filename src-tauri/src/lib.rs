@@ -565,19 +565,33 @@ pub fn run() {
                                 if now_ms.saturating_sub(LAST_SHOWN_MS.load(Ordering::SeqCst)) < 400 {
                                     return;
                                 }
-                                // Don't hide if our app is still active (e.g. emoji picker, system panels)
-                                // Instead, lower window level so system panels appear above us
+                                // All AppKit calls must run on the main thread
                                 #[cfg(target_os = "macos")]
-                                if is_app_active() {
-                                    lower_window_level(&win);
+                                {
+                                    let w = win.clone();
+                                    let _ = win.run_on_main_thread(move || {
+                                        // Don't hide if our app is still active (e.g. emoji picker)
+                                        // Instead, lower window level so system panels appear above us
+                                        if is_app_active() {
+                                            lower_window_level(&w);
+                                        } else {
+                                            let _ = w.hide();
+                                        }
+                                    });
                                     return;
                                 }
+                                #[cfg(not(target_os = "macos"))]
                                 let _ = win.hide();
                             });
                         } else {
-                            // Focus regained — restore high window level
+                            // Focus regained — restore high window level on main thread
                             #[cfg(target_os = "macos")]
-                            configure_window_for_fullscreen(&win_clone);
+                            {
+                                let w = win_clone.clone();
+                                let _ = win_clone.run_on_main_thread(move || {
+                                    configure_window_for_fullscreen(&w);
+                                });
+                            }
                         }
                     }
                     _ => {}
