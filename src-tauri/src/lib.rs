@@ -337,6 +337,39 @@ fn activate_app() {
     }
 }
 
+/// Check if our app is still the frontmost (active) application.
+/// System panels like the emoji picker steal window focus but keep the app active.
+#[cfg(target_os = "macos")]
+fn is_app_active() -> bool {
+    #[allow(deprecated)]
+    use cocoa::appkit::NSApplication;
+    #[allow(deprecated)]
+    use cocoa::base::nil;
+    use objc::{msg_send, sel, sel_impl};
+    unsafe {
+        #[allow(deprecated)]
+        let ns_app = NSApplication::sharedApplication(nil);
+        let active: bool = msg_send![ns_app, isActive];
+        active
+    }
+}
+
+/// Temporarily lower window level so system panels (emoji picker) can appear above us.
+#[cfg(target_os = "macos")]
+fn lower_window_level(window: &tauri::WebviewWindow) {
+    #[allow(deprecated)]
+    use cocoa::appkit::NSWindow;
+    if let Ok(ns_win) = window.ns_window() {
+        unsafe {
+            #[allow(deprecated)]
+            let ns_win = ns_win as cocoa::base::id;
+            // NSFloatingWindowLevel (3) — above normal windows but below system panels
+            #[allow(deprecated)]
+            ns_win.setLevel_(3);
+        }
+    }
+}
+
 /// Set NSWindow level and collection behavior so the window appears above all other apps.
 /// Must be called AFTER window.show() — macOS resets the level on show.
 #[cfg(target_os = "macos")]
@@ -532,8 +565,19 @@ pub fn run() {
                                 if now_ms.saturating_sub(LAST_SHOWN_MS.load(Ordering::SeqCst)) < 400 {
                                     return;
                                 }
+                                // Don't hide if our app is still active (e.g. emoji picker, system panels)
+                                // Instead, lower window level so system panels appear above us
+                                #[cfg(target_os = "macos")]
+                                if is_app_active() {
+                                    lower_window_level(&win);
+                                    return;
+                                }
                                 let _ = win.hide();
                             });
+                        } else {
+                            // Focus regained — restore high window level
+                            #[cfg(target_os = "macos")]
+                            configure_window_for_fullscreen(&win_clone);
                         }
                     }
                     _ => {}
