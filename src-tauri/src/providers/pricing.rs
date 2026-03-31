@@ -33,6 +33,8 @@ struct PricingEntry {
     #[serde(default)]
     cache_write: f64,
     #[serde(default)]
+    cache_write_1h: f64,
+    #[serde(default)]
     cached_input: f64,
 }
 
@@ -42,7 +44,8 @@ pub struct ClaudePricing {
     pub input: f64,
     pub output: f64,
     pub cache_read: f64,
-    pub cache_write: f64,
+    pub cache_write_5m: f64,
+    pub cache_write_1h: f64,
 }
 
 pub struct CodexPricing {
@@ -96,7 +99,8 @@ pub fn get_claude_pricing(model: &str) -> ClaudePricing {
         input: entry.input,
         output: entry.output,
         cache_read: entry.cache_read,
-        cache_write: entry.cache_write,
+        cache_write_5m: entry.cache_write,
+        cache_write_1h: if entry.cache_write_1h > 0.0 { entry.cache_write_1h } else { entry.cache_write },
     }
 }
 
@@ -186,6 +190,8 @@ mod tests {
         let p = get_claude_pricing("claude-opus-4-6-20260320");
         assert!((p.input - 5.0).abs() < 0.001);
         assert!((p.output - 25.0).abs() < 0.001);
+        assert!((p.cache_write_5m - 6.25).abs() < 0.001);
+        assert!((p.cache_write_1h - 10.0).abs() < 0.001);
     }
 
     #[test]
@@ -193,6 +199,8 @@ mod tests {
         let p = get_claude_pricing("claude-sonnet-4-6-20260320");
         assert!((p.input - 3.0).abs() < 0.001);
         assert!((p.output - 15.0).abs() < 0.001);
+        assert!((p.cache_write_5m - 3.75).abs() < 0.001);
+        assert!((p.cache_write_1h - 6.0).abs() < 0.001);
     }
 
     #[test]
@@ -200,6 +208,8 @@ mod tests {
         let p = get_claude_pricing("claude-haiku-4-5-20251001");
         assert!((p.input - 1.0).abs() < 0.001);
         assert!((p.output - 5.0).abs() < 0.001);
+        assert!((p.cache_write_5m - 1.25).abs() < 0.001);
+        assert!((p.cache_write_1h - 2.0).abs() < 0.001);
     }
 
     #[test]
