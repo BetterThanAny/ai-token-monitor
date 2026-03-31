@@ -11,7 +11,10 @@ const DEEP_LINK_CALLBACK = "ai-token-monitor://auth/callback";
 const AUTH_TIMEOUT_MS = 120_000;
 
 function isProduction(): boolean {
-  return window.location.protocol !== "http:";
+  // Tauri v2: macOS/Linux → "tauri:", Windows → "http:" with host "tauri.localhost"
+  const { protocol, hostname } = window.location;
+  if (protocol !== "http:") return true;
+  return hostname === "tauri.localhost";
 }
 
 interface AuthContextType {
