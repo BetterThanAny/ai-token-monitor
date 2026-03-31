@@ -107,6 +107,18 @@ fn current_month_str() -> String {
     chrono::Local::now().format("%Y-%m").to_string()
 }
 
+fn prev_month_str() -> String {
+    let now = chrono::Local::now();
+    use chrono::Datelike;
+    let year = now.year();
+    let month = now.month();
+    if month == 1 {
+        format!("{}-12", year - 1)
+    } else {
+        format!("{}-{:02}", year, month - 1)
+    }
+}
+
 fn date_to_month(date: &str) -> String {
     date.get(..7).unwrap_or(date).to_string()
 }
@@ -611,14 +623,21 @@ impl ClaudeCodeProvider {
                 let full_start = Instant::now();
 
                 // Check disk cache for historical months to speed up cold start
-                let disk_cache = load_disk_cache(&self.primary_dir);
-                let has_historical = disk_cache.as_ref().map_or(false, |c| !c.months.is_empty());
+                let mut disk_cache = load_disk_cache(&self.primary_dir)
+                    .unwrap_or(DiskCache { version: CACHE_VERSION, months: HashMap::new() });
+                let has_historical = !disk_cache.months.is_empty();
 
                 let current_month = current_month_str();
                 let mut entries = HashMap::new();
 
-                if has_historical {
-                    // Only parse files from current month (skip historical)
+                // Only skip historical files when the disk cache covers up to the previous
+                // month. If the previous month is absent (e.g. the month just rolled over),
+                // a full parse is required so that month's data is not lost.
+                let prev_month = prev_month_str();
+                let only_current = has_historical && disk_cache.months.contains_key(&prev_month);
+
+                if only_current {
+                    // Fast path: disk cache is complete — only parse current-month files
                     for (path, (_, _)) in &current_meta {
                         if let Ok(metadata) = fs::metadata(path) {
                             if let Ok(modified) = metadata.modified() {
@@ -632,14 +651,39 @@ impl ClaudeCodeProvider {
                         entries.extend(Self::parse_single_file(path));
                     }
                 } else {
-                    // Full parse all files
+                    // Full parse: either no cache yet, or the cache is missing some months
                     for path in current_meta.keys() {
                         entries.extend(Self::parse_single_file(path));
                     }
-                    // Save historical months to disk cache for future cold starts
-                    self.save_historical_months(&entries);
-                    // Remove historical entries from memory (disk cache has them)
-                    entries.retain(|_, e| date_to_month(&e.date) >= current_month);
+
+                    // Split off historical entries, persist any months missing from cache
+                    let mut current_entries = HashMap::new();
+                    let mut month_buckets: HashMap<String, Vec<SessionEntry>> = HashMap::new();
+                    for (key, entry) in entries {
+                        let month = date_to_month(&entry.date);
+                        if month >= current_month {
+                            current_entries.insert(key, entry);
+                        } else if !disk_cache.months.contains_key(&month) {
+                            month_buckets.entry(month).or_default().push(entry);
+                        }
+                        // Entries for months already in disk_cache are dropped here;
+                        // build_stats will merge them from disk_cache.
+                    }
+
+                    if !month_buckets.is_empty() {
+                        for (month, month_data) in &month_buckets {
+                            let refs: Vec<&SessionEntry> = month_data.iter().collect();
+                            let (daily_map, model_map, messages, _) = aggregate_entries(&refs);
+                            disk_cache.months.insert(month.clone(), MonthData {
+                                daily: daily_map.into_values().collect(),
+                                model_usage: model_map,
+                                total_messages: messages,
+                            });
+                        }
+                        save_disk_cache(&self.primary_dir, &disk_cache);
+                    }
+
+                    entries = current_entries;
                 }
 
                 eprintln!("[PERF] Full parse completed in {:?}", full_start.elapsed());
