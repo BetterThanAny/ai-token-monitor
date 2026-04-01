@@ -17,10 +17,14 @@ function formatResetTime(resetsAt: string, t: (key: string, params?: Record<stri
   const diffMs = reset.getTime() - now.getTime();
   if (diffMs <= 0) return t("usageAlert.resetsNow");
   const totalMin = Math.floor(diffMs / 60000);
-  const h = Math.floor(totalMin / 60);
+  const d = Math.floor(totalMin / 1440);
+  const h = Math.floor((totalMin % 1440) / 60);
   const m = totalMin % 60;
-  if (h > 0) return t("usageAlert.resetsIn", { time: `${h}h ${m}m` });
-  return t("usageAlert.resetsIn", { time: `${m}m` });
+  const parts: string[] = [];
+  if (d > 0) parts.push(`${d}d`);
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0 || parts.length === 0) parts.push(`${m}m`);
+  return t("usageAlert.resetsIn", { time: parts.join(" ") });
 }
 
 const SEGMENT_COUNT = 10;
