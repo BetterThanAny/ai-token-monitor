@@ -26,6 +26,7 @@ export function useUpdater(): UpdaterState {
     let cancelled = false;
 
     async function checkForUpdate() {
+      if (updateAvailable) return;
       try {
         const update = await check();
         if (cancelled) return;
@@ -35,17 +36,19 @@ export function useUpdater(): UpdaterState {
           setUpdateAvailable(true);
         }
       } catch (e) {
-        // Silently ignore update check failures (e.g. no network, no latest.json)
         console.warn("[updater] check failed:", e);
       }
     }
 
     checkForUpdate();
 
+    const interval = setInterval(checkForUpdate, 30 * 60 * 1000);
+
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
-  }, []);
+  }, [updateAvailable]);
 
   const download = useCallback(async () => {
     const update = updateRef.current;
