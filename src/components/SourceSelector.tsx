@@ -7,19 +7,23 @@ export function SourceSelector() {
   const { prefs, updatePrefs } = useSettings();
   const t = useI18n();
   const [codexAvailable, setCodexAvailable] = useState(false);
+  const [opencodeAvailable, setOpencodeAvailable] = useState(false);
 
   useEffect(() => {
     invoke<boolean>("is_codex_available")
       .then(setCodexAvailable)
       .catch(() => setCodexAvailable(false));
+    invoke<boolean>("is_opencode_available")
+      .then(setOpencodeAvailable)
+      .catch(() => setOpencodeAvailable(false));
   }, []);
 
-  // Hide entirely if Codex is not installed
-  if (!codexAvailable) return null;
+  // Hide entirely if no additional sources are available
+  if (!codexAvailable && !opencodeAvailable) return null;
 
-  const toggleSource = (key: "include_claude" | "include_codex") => {
+  const toggleSource = (key: "include_claude" | "include_codex" | "include_opencode") => {
     const nextValue = !prefs[key];
-    const activeCount = Number(prefs.include_claude) + Number(prefs.include_codex);
+    const activeCount = Number(prefs.include_claude) + Number(prefs.include_codex) + Number(prefs.include_opencode);
     // Must keep at least one source active
     if (!nextValue && activeCount === 1) return;
     updatePrefs({ [key]: nextValue });
@@ -47,15 +51,25 @@ export function SourceSelector() {
         <SourceToggle
           label={t("sources.claude")}
           checked={prefs.include_claude}
-          locked={!prefs.include_codex}
+          locked={!prefs.include_codex && !prefs.include_opencode}
           onClick={() => toggleSource("include_claude")}
         />
-        <SourceToggle
-          label={t("sources.codex")}
-          checked={prefs.include_codex}
-          locked={!prefs.include_claude}
-          onClick={() => toggleSource("include_codex")}
-        />
+        {codexAvailable && (
+          <SourceToggle
+            label={t("sources.codex")}
+            checked={prefs.include_codex}
+            locked={!prefs.include_claude && !prefs.include_opencode}
+            onClick={() => toggleSource("include_codex")}
+          />
+        )}
+        {opencodeAvailable && (
+          <SourceToggle
+            label={t("sources.opencode")}
+            checked={prefs.include_opencode}
+            locked={!prefs.include_claude && !prefs.include_codex}
+            onClick={() => toggleSource("include_opencode")}
+          />
+        )}
       </div>
     </div>
   );

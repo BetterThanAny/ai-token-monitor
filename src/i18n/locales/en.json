@@ -3,7 +3,7 @@
   "app.subtitle": "AI Coding Usage Tracker",
   "app.loading": "Loading...",
   "app.error.title": "No usage stats found",
-  "app.error.description": "Make sure Claude Code or Codex has been used at least once.",
+  "app.error.description": "Make sure Claude Code, Codex, or OpenCode has been used at least once.",
 
   "tab.overview": "Overview",
   "tab.analytics": "Analytics",
@@ -13,6 +13,7 @@
   "sources.title": "Sources",
   "sources.claude": "Claude",
   "sources.codex": "Codex",
+  "sources.opencode": "OpenCode",
 
   "today.title": "Today",
   "today.tokens": "tokens",

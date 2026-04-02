@@ -5,26 +5,29 @@ import type { AllStats, DailyUsage, ModelUsage } from "../lib/types";
 interface UseCombinedStatsProps {
   includeClaude: boolean;
   includeCodex: boolean;
+  includeOpencode: boolean;
 }
 
-export function useCombinedStats({ includeClaude, includeCodex }: UseCombinedStatsProps) {
+export function useCombinedStats({ includeClaude, includeCodex, includeOpencode }: UseCombinedStatsProps) {
   const claude = useTokenStats("claude");
   const codex = useTokenStats("codex");
+  const opencode = useTokenStats("opencode");
 
   const stats = useMemo<AllStats | null>(() => {
     const sources: (AllStats | null)[] = [];
     if (includeClaude) sources.push(claude.stats);
     if (includeCodex) sources.push(codex.stats);
+    if (includeOpencode) sources.push(opencode.stats);
 
     const validStats = sources.filter((s): s is AllStats => s !== null);
-    if (validStats.length === 0) return includeClaude ? claude.stats : codex.stats;
+    if (validStats.length === 0) return includeClaude ? claude.stats : includeCodex ? codex.stats : opencode.stats;
     if (validStats.length === 1) return validStats[0];
 
     return mergeStats(validStats);
-  }, [claude.stats, codex.stats, includeClaude, includeCodex]);
+  }, [claude.stats, codex.stats, opencode.stats, includeClaude, includeCodex, includeOpencode]);
 
-  const loading = (includeClaude && claude.loading) || (includeCodex && codex.loading);
-  const error = includeClaude ? claude.error : codex.error;
+  const loading = (includeClaude && claude.loading) || (includeCodex && codex.loading) || (includeOpencode && opencode.loading);
+  const error = includeClaude ? claude.error : includeCodex ? codex.error : opencode.error;
 
   return { stats, loading, error };
 }

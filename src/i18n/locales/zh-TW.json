@@ -3,7 +3,7 @@
   "app.subtitle": "AI程式設計使用量追蹤器",
   "app.loading": "載入中...",
   "app.error.title": "未找到使用統計",
-  "app.error.description": "請確保已安裝Claude Code或Codex，並已使用至少一次。",
+  "app.error.description": "請確保已安裝Claude Code、Codex或OpenCode，並已使用至少一次。",
 
   "tab.overview": "總覽",
   "tab.analytics": "分析",
@@ -13,6 +13,7 @@
   "sources.title": "來源",
   "sources.claude": "Claude",
   "sources.codex": "Codex",
+  "sources.opencode": "OpenCode",
 
   "today.title": "今日",
   "today.tokens": "令牌",

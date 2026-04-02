@@ -3,7 +3,7 @@
   "app.subtitle": "Suivi d'utilisation AI Coding",
   "app.loading": "Chargement...",
   "app.error.title": "Aucune statistique trouvée",
-  "app.error.description": "Assurez-vous que Claude Code ou Codex est installé et a été utilisé au moins une fois.",
+  "app.error.description": "Assurez-vous que Claude Code, Codex ou OpenCode est installé et a été utilisé au moins une fois.",
 
   "tab.overview": "Aperçu",
   "tab.analytics": "Analyse",
@@ -13,6 +13,7 @@
   "sources.title": "Sources",
   "sources.claude": "Claude",
   "sources.codex": "Codex",
+  "sources.opencode": "OpenCode",
 
   "today.title": "Aujourd'hui",
   "today.tokens": "jetons",
