@@ -18,6 +18,7 @@ const defaultPrefs: UserPreferences = {
   device_id: undefined,
   include_claude: true,
   include_codex: false,
+  include_opencode: false,
   theme: "github",
   color_mode: "system",
   language: "en",

@@ -27,7 +27,7 @@ export interface AllStats {
   first_session_date: string | null;
 }
 
-export type LeaderboardProvider = "claude" | "codex";
+export type LeaderboardProvider = "claude" | "codex" | "opencode";
 
 export interface UserPreferences {
   number_format: "compact" | "full";
@@ -36,6 +36,7 @@ export interface UserPreferences {
   device_id?: string;
   include_claude: boolean;
   include_codex: boolean;
+  include_opencode: boolean;
   theme: "github" | "purple" | "ocean" | "sunset";
   color_mode: "system" | "light" | "dark";
   language: "en" | "ko" | "ja" | "zh-CN" | "zh-TW" | "fr" | "es" | "de";

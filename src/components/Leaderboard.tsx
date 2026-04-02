@@ -140,6 +140,7 @@ function LeaderboardContent({ user }: { user: User }) {
   const availableProviders: LeaderboardProvider[] = [];
   if (prefs.include_claude) availableProviders.push("claude");
   if (prefs.include_codex) availableProviders.push("codex");
+  if (prefs.include_opencode) availableProviders.push("opencode");
   // Default to claude if nothing enabled
   if (availableProviders.length === 0) availableProviders.push("claude");
 
@@ -173,7 +174,7 @@ function LeaderboardContent({ user }: { user: User }) {
                 transition: "all 0.15s ease",
               }}
             >
-              {p === "claude" ? t("sources.claude") : t("sources.codex")}
+              {t(`sources.${p}`)}
             </button>
           ))}
         </div>
