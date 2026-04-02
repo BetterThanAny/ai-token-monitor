@@ -457,19 +457,57 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-/// Spawn a new instance of this app and then exit the current process.
-/// This avoids the single-instance plugin blocking `relaunch()`.
+/// Exit current process, then let a detached helper re-launch the app.
+/// Direct spawn fails because the single-instance plugin holds a lock;
+/// the new process sees the lock, sends a message to old, and quits —
+/// then the old process exits too, leaving nothing running.
+/// Fix: spawn a shell that sleeps past our exit, then opens the app.
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
     eprintln!("[CMD] restart_app called");
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    eprintln!("[CMD] spawning new process: {:?}", exe);
-    std::process::Command::new(&exe)
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    eprintln!("[CMD] new process spawned, exiting current");
-    // Small delay to let the new process start before releasing the single-instance lock
-    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    #[cfg(target_os = "macos")]
+    {
+        // exe: …/AI Token Monitor.app/Contents/MacOS/AI Token Monitor
+        // Navigate up to the .app bundle for `open`
+        let app_bundle = exe
+            .parent() // MacOS/
+            .and_then(|p| p.parent()) // Contents/
+            .and_then(|p| p.parent()) // .app
+            .ok_or("Could not determine .app bundle path")?;
+        eprintln!("[CMD] scheduling relaunch of {:?}", app_bundle);
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("sleep 1 && open '{}'", app_bundle.display()))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        eprintln!("[CMD] scheduling relaunch of {:?}", exe);
+        std::process::Command::new("cmd")
+            .args([
+                "/C",
+                &format!("ping -n 2 127.0.0.1 >nul && start \"\" \"{}\"", exe.display()),
+            ])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        eprintln!("[CMD] scheduling relaunch of {:?}", exe);
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("sleep 1 && '{}'", exe.display()))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Exit immediately — the detached shell outlives us and restarts the app
+    // after the single-instance lock is released.
     app.exit(0);
     Ok(())
 }
