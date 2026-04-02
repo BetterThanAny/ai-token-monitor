@@ -7,12 +7,19 @@
     "core:default",
     "core:window:allow-start-dragging",
     "opener:default",
+    "clipboard-manager:allow-read-image",
     "clipboard-manager:allow-write-image",
     "clipboard-manager:allow-write-text",
     "dialog:allow-open",
     "updater:default",
     "process:allow-restart",
     "deep-link:default",
-    "notification:default"
+    "notification:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-set-title",
+    "core:window:allow-set-size",
+    "core:window:allow-center",
+    "core:window:allow-show",
+    "core:window:allow-close"
   ]
 }

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCombinedStats } from "./hooks/useCombinedStats";
 import { useToday } from "./hooks/useToday";
 import { useUnreadChat } from "./hooks/useUnreadChat";
+import { useChatNotification } from "./hooks/useChatNotification";
 import { getTotalTokens } from "./lib/format";
 import { SettingsProvider, useSettings } from "./contexts/SettingsContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
@@ -45,12 +46,18 @@ function AppContent() {
     includeCodex: prefs.include_codex,
   });
   const t = useI18n();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const updater = useUpdater();
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [chatActivated, setChatActivated] = useState(false);
   const todayStr = useToday();
   const { unreadCount } = useUnreadChat(activeTab === "chat", user?.id ?? null);
+
+  useChatNotification({
+    isChatActive: activeTab === "chat",
+    currentNickname: profile?.nickname ?? null,
+    currentUserId: user?.id ?? null,
+  });
 
   useEffect(() => {
     if (activeTab === "chat") setChatActivated(true);
