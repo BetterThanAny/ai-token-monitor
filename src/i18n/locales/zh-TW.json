@@ -262,5 +262,12 @@
   "settings.webhookNotifyReset": "重置時通知",
   "settings.webhookGuideDiscord": "伺服器設定 > 整合 > Webhooks > 新建 Webhook > 複製 URL",
   "settings.webhookGuideSlack": "應用程式 > Incoming Webhooks > 新增到 Slack > 複製 Webhook URL",
-  "settings.webhookGuideTelegram": "向 @BotFather 傳送 /newbot > 複製令牌，將機器人加入群組後透過 /getUpdates API 取得 Chat ID"
+  "settings.webhookGuideTelegram": "向 @BotFather 傳送 /newbot > 複製令牌，將機器人加入群組後透過 /getUpdates API 取得 Chat ID",
+
+  "miniProfile.viewGithub": "查看 GitHub 個人資料",
+  "miniProfile.noActivity": "暫無近期活動",
+  "miniProfile.loadError": "無法載入活動資料",
+  "miniProfile.streakTooltip": "連續活躍天數",
+  "miniProfile.addLink": "新增連結",
+  "miniProfile.add": "新增"
 }

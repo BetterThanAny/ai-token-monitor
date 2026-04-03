@@ -262,5 +262,12 @@
   "settings.webhookNotifyReset": "Notify on Reset",
   "settings.webhookGuideDiscord": "Server Settings > Integrations > Webhooks > New Webhook > Copy URL",
   "settings.webhookGuideSlack": "Apps > Incoming Webhooks > Add to Slack > Copy Webhook URL",
-  "settings.webhookGuideTelegram": "Message @BotFather > /newbot > Copy token, then add bot to group and get Chat ID via /getUpdates API"
+  "settings.webhookGuideTelegram": "Message @BotFather > /newbot > Copy token, then add bot to group and get Chat ID via /getUpdates API",
+
+  "miniProfile.viewGithub": "View GitHub Profile",
+  "miniProfile.noActivity": "No recent activity",
+  "miniProfile.loadError": "Could not load activity data",
+  "miniProfile.streakTooltip": "Consecutive days of activity",
+  "miniProfile.addLink": "Add link",
+  "miniProfile.add": "Add"
 }

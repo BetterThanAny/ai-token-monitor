@@ -262,5 +262,12 @@
   "settings.webhookNotifyReset": "리셋 시 알림",
   "settings.webhookGuideDiscord": "서버 설정 > 연동 > 웹훅 > 새 웹훅 > URL 복사",
   "settings.webhookGuideSlack": "앱 > Incoming Webhooks > Slack에 추가 > 웹훅 URL 복사",
-  "settings.webhookGuideTelegram": "@BotFather에게 /newbot 메시지 > 토큰 복사, 봇을 그룹에 추가 후 /getUpdates API로 Chat ID 확인"
+  "settings.webhookGuideTelegram": "@BotFather에게 /newbot 메시지 > 토큰 복사, 봇을 그룹에 추가 후 /getUpdates API로 Chat ID 확인",
+
+  "miniProfile.viewGithub": "GitHub 프로필 보기",
+  "miniProfile.noActivity": "최근 활동 없음",
+  "miniProfile.loadError": "활동 데이터를 불러올 수 없습니다",
+  "miniProfile.streakTooltip": "연속으로 작업한 일수",
+  "miniProfile.addLink": "링크 추가",
+  "miniProfile.add": "추가"
 }
