@@ -2,6 +2,7 @@ mod ai_translate;
 mod commands;
 mod oauth_usage;
 mod providers;
+mod url_metadata;
 mod webhooks;
 
 use std::path::PathBuf;
@@ -455,6 +456,7 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
 /// Bring the app to the foreground so WKWebView renders.
 /// Required on macOS 26 Tahoe where the app runs as Accessory policy
 /// and won't auto-activate — without this the window appears but content is white.
+/// Skipped in fullscreen Spaces to avoid Space-switching.
 #[cfg(target_os = "macos")]
 fn activate_app() {
     #[allow(deprecated)]
@@ -466,6 +468,21 @@ fn activate_app() {
         let ns_app = NSApplication::sharedApplication(nil);
         #[allow(deprecated)]
         ns_app.activateIgnoringOtherApps_(true);
+    }
+}
+
+/// Check if the current Space is a fullscreen Space.
+/// Uses NSApplication's currentSystemPresentationOptions.
+#[cfg(target_os = "macos")]
+fn is_fullscreen_space() -> bool {
+    use objc::{msg_send, sel, sel_impl};
+    unsafe {
+        #[allow(deprecated)]
+        let ns_app: cocoa::base::id =
+            msg_send![objc::class!(NSApplication), sharedApplication];
+        let options: u64 = msg_send![ns_app, currentSystemPresentationOptions];
+        // NSApplicationPresentationFullScreen = 1 << 10
+        (options & (1 << 10)) != 0
     }
 }
 
@@ -560,14 +577,38 @@ fn promote_to_panel(window: &tauri::WebviewWindow) {
     });
 }
 
-/// Set NSWindow level and collection behavior so the window appears above all other apps.
-/// Must be called AFTER window.show() — macOS resets the level on show.
+/// Apply collection behavior + hidesOnDeactivate so the window can appear in
+/// fullscreen Spaces and won't auto-hide when another app takes activation.
 #[cfg(target_os = "macos")]
-fn configure_window_for_fullscreen(window: &tauri::WebviewWindow) {
+fn prepare_window_space_behavior(window: &tauri::WebviewWindow) {
     #[allow(deprecated)]
     use cocoa::appkit::NSWindow;
     #[allow(deprecated)]
     use cocoa::appkit::NSWindowCollectionBehavior;
+    use objc::{msg_send, sel, sel_impl};
+
+    if let Ok(ns_win) = window.ns_window() {
+        unsafe {
+            #[allow(deprecated)]
+            let ns_win = ns_win as cocoa::base::id;
+            #[allow(deprecated)]
+            ns_win.setCollectionBehavior_(
+                NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
+                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle,
+            );
+            // Prevent auto-hide when another app activates (important in fullscreen)
+            let _: () = msg_send![ns_win, setHidesOnDeactivate: false];
+        }
+    }
+}
+
+/// Restore window level only — used when focus is regained and the window is
+/// already visible (no ordering needed).
+#[cfg(target_os = "macos")]
+fn restore_window_level(window: &tauri::WebviewWindow) {
+    #[allow(deprecated)]
+    use cocoa::appkit::NSWindow;
 
     if let Ok(ns_win) = window.ns_window() {
         unsafe {
@@ -575,18 +616,51 @@ fn configure_window_for_fullscreen(window: &tauri::WebviewWindow) {
             let ns_win = ns_win as cocoa::base::id;
             #[allow(deprecated)]
             ns_win.setLevel_(NS_STATUS_WINDOW_LEVEL);
-            #[allow(deprecated)]
-            ns_win.setCollectionBehavior_(
-                NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
-                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
-                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle,
-            );
-            // Give keyboard focus so Escape key works
-            #[allow(deprecated)]
-            ns_win.makeKeyAndOrderFront_(cocoa::base::nil);
         }
     }
 }
+
+/// Show the window using raw AppKit calls for fullscreen compatibility.
+/// Tauri's window.show() internally calls orderFront: which does nothing
+/// when the app is inactive (Accessory policy). We use orderFrontRegardless
+/// which works regardless of activation state.
+#[cfg(target_os = "macos")]
+fn show_window_native(window: &tauri::WebviewWindow) {
+    #[allow(deprecated)]
+    use cocoa::appkit::NSWindow;
+    #[allow(deprecated)]
+    use cocoa::base::nil;
+    use objc::{msg_send, sel, sel_impl};
+
+    if let Ok(ns_win) = window.ns_window() {
+        unsafe {
+            #[allow(deprecated)]
+            let ns_win = ns_win as cocoa::base::id;
+            #[allow(deprecated)]
+            ns_win.setLevel_(NS_STATUS_WINDOW_LEVEL);
+            // orderFrontRegardless works even when app is not active —
+            // unlike orderFront:/makeKeyAndOrderFront: which are no-ops
+            // for inactive apps
+            let _: () = msg_send![ns_win, orderFrontRegardless];
+
+            let in_fullscreen = is_fullscreen_space();
+            if in_fullscreen {
+                // In fullscreen: skip activateIgnoringOtherApps to avoid
+                // Space-switching. The window is already visible via
+                // orderFrontRegardless + CanJoinAllSpaces + FullScreenAuxiliary.
+                // Try to accept keyboard input without full activation.
+                let _: () = msg_send![ns_win, makeKeyWindow];
+            } else {
+                // Normal desktop: activate app (needed for WKWebView on Tahoe)
+                // and bring to front with keyboard focus
+                activate_app();
+                #[allow(deprecated)]
+                ns_win.makeKeyAndOrderFront_(nil);
+            }
+        }
+    }
+}
+
 
 #[tauri::command]
 fn get_home_dir() -> Option<String> {
@@ -730,7 +804,8 @@ pub fn run() {
             commands::get_ai_keys,
             commands::test_webhook,
             ai_translate::translate_text,
-            ai_translate::translate_reply
+            ai_translate::translate_reply,
+            url_metadata::fetch_url_metadata
         ])
         .setup(|app| {
             // Build tray icon — direct click toggle
@@ -759,14 +834,18 @@ pub fn run() {
                                     .unwrap_or(0);
                                 LAST_SHOWN_MS.store(now_ms, Ordering::SeqCst);
 
-                                let _ = window.show();
-                                // MUST be after show() — macOS resets level on show
                                 #[cfg(target_os = "macos")]
-                                configure_window_for_fullscreen(&window);
-                                #[cfg(target_os = "macos")]
-                                activate_app();
-
-                                let _ = window.set_focus();
+                                {
+                                    // 1. Set collection behavior so window can join fullscreen Spaces
+                                    prepare_window_space_behavior(&window);
+                                    // 2. Show via raw AppKit — handles fullscreen vs desktop differently
+                                    show_window_native(&window);
+                                }
+                                #[cfg(not(target_os = "macos"))]
+                                {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
                             }
                         }
                     }
@@ -799,6 +878,10 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             promote_to_panel(&main_window);
 
+            // Set collection behavior early so it persists across hide/show cycles
+            #[cfg(target_os = "macos")]
+            prepare_window_space_behavior(&main_window);
+
             let win_clone = main_window.clone();
             main_window.on_window_event(move |event| {
                 match event {
@@ -822,6 +905,12 @@ pub fn run() {
                                 {
                                     let w = win.clone();
                                     let _ = win.run_on_main_thread(move || {
+                                        // In fullscreen Space: don't hide — the window was
+                                        // shown without activation, so focus state is unreliable
+                                        if is_fullscreen_space() {
+                                            lower_window_level(&w);
+                                            return;
+                                        }
                                         // Don't hide if our app is still active (e.g. emoji picker)
                                         // Instead, lower window level so system panels appear above us
                                         if is_app_active() {
@@ -836,12 +925,14 @@ pub fn run() {
                                 let _ = win.hide();
                             });
                         } else {
-                            // Focus regained — restore high window level on main thread
+                            // Focus regained — restore space behavior and level only
+                            // (no orderFront needed, window already has focus)
                             #[cfg(target_os = "macos")]
                             {
                                 let w = win_clone.clone();
                                 let _ = win_clone.run_on_main_thread(move || {
-                                    configure_window_for_fullscreen(&w);
+                                    prepare_window_space_behavior(&w);
+                                    restore_window_level(&w);
                                 });
                             }
                         }
