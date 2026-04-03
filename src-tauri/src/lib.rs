@@ -2,6 +2,7 @@ mod ai_translate;
 mod commands;
 mod oauth_usage;
 mod providers;
+mod webhooks;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -30,15 +31,22 @@ use tauri::{Emitter, Manager};
 use providers::traits::TokenProvider;
 use providers::types::UserPreferences;
 
-struct AlertState {
+use std::collections::HashMap;
+
+struct WindowAlertState {
     window_id: String,
     fired_thresholds: Vec<u32>,
+    prev_utilization: f64,
+}
+
+struct AlertState {
+    windows: HashMap<String, WindowAlertState>,
     last_notification_at: Option<Instant>,
 }
 
 static ALERT_STATE: Mutex<Option<AlertState>> = Mutex::new(None);
 
-/// Check OAuth usage thresholds and fire OS notifications for newly crossed thresholds.
+/// Check OAuth usage thresholds and fire OS notifications + webhooks for newly crossed thresholds.
 fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
     let prefs = commands::get_preferences();
     if !prefs.usage_alerts_enabled {
@@ -50,24 +58,69 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
         None => return,
     };
 
-    // Use five_hour utilization for threshold alerts
-    let utilization = match &usage.five_hour {
-        Some(w) => w.utilization,
-        None => return,
-    };
-
-    // Use resets_at as window_id (stable identifier from API)
-    let window_id = usage
-        .five_hour
+    let webhook_config = prefs.webhook_config.clone();
+    let thresholds: Vec<u32> = webhook_config
         .as_ref()
-        .map(|w| w.resets_at.clone())
+        .map(|c| c.thresholds.clone())
+        .unwrap_or_else(|| vec![50, 80, 90]);
+
+    let has_webhooks = webhook_config
+        .as_ref()
+        .map(|c| c.discord_enabled || c.slack_enabled || c.telegram_enabled)
+        .unwrap_or(false);
+
+    // Determine which windows to monitor
+    let monitored = webhook_config
+        .as_ref()
+        .map(|c| &c.monitored_windows)
+        .cloned()
         .unwrap_or_default();
 
-    let thresholds: Vec<u32> = [50, 80, 90]
-        .iter()
-        .filter(|&&t| utilization >= t as f64)
-        .copied()
-        .collect();
+    // Build list of (name, utilization, window_id, resets_at) for each monitored window.
+    // window_id combines the window name with resets_at (truncated to hour) so that:
+    //   - It changes when the usage window resets → clears fired_thresholds
+    //   - It doesn't change on minor timestamp drift within the same window
+    let mut windows_to_check: Vec<(&str, f64, String, Option<String>)> = Vec::new();
+
+    // Truncate resets_at to hour to avoid spurious resets from second-level drift
+    fn stable_window_id(name: &str, resets_at: &str) -> String {
+        // Take first 13 chars of ISO timestamp (e.g. "2026-04-03T11") for hour-level stability
+        let truncated = &resets_at[..resets_at.len().min(13)];
+        format!("{}:{}", name, truncated)
+    }
+
+    if monitored.five_hour {
+        if let Some(w) = &usage.five_hour {
+            windows_to_check.push(("Session (5h)", w.utilization, stable_window_id("5h", &w.resets_at), Some(w.resets_at.clone())));
+        }
+    }
+    if monitored.seven_day {
+        if let Some(w) = &usage.seven_day {
+            windows_to_check.push(("Weekly", w.utilization, stable_window_id("7d", &w.resets_at), Some(w.resets_at.clone())));
+        }
+    }
+    if monitored.seven_day_sonnet {
+        if let Some(w) = &usage.seven_day_sonnet {
+            windows_to_check.push(("Weekly Sonnet", w.utilization, stable_window_id("7d-sonnet", &w.resets_at), Some(w.resets_at.clone())));
+        }
+    }
+    if monitored.seven_day_opus {
+        if let Some(w) = &usage.seven_day_opus {
+            windows_to_check.push(("Weekly Opus", w.utilization, stable_window_id("7d-opus", &w.resets_at), Some(w.resets_at.clone())));
+        }
+    }
+    if monitored.extra_usage {
+        if let Some(w) = &usage.extra_usage {
+            if w.is_enabled {
+                // Extra usage resets monthly; use monthly_limit as part of ID
+                windows_to_check.push(("Extra Usage", w.utilization, format!("extra:{}", w.monthly_limit), None));
+            }
+        }
+    }
+
+    if windows_to_check.is_empty() {
+        return;
+    }
 
     let mut state_guard = match ALERT_STATE.lock() {
         Ok(g) => g,
@@ -75,61 +128,121 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
     };
 
     let state = state_guard.get_or_insert_with(|| AlertState {
-        window_id: window_id.clone(),
-        fired_thresholds: Vec::new(),
+        windows: HashMap::new(),
         last_notification_at: None,
     });
 
-    // Reset if window changed
-    if state.window_id != window_id {
-        state.window_id = window_id;
-        state.fired_thresholds.clear();
-    }
-
-    let new_thresholds: Vec<u32> = thresholds
-        .iter()
-        .filter(|t| !state.fired_thresholds.contains(t))
-        .copied()
-        .collect();
-
-    if new_thresholds.is_empty() {
-        return;
-    }
-
     // Cooldown: at least 60 seconds between notifications
-    if let Some(last) = state.last_notification_at {
-        if last.elapsed().as_secs() < 60 {
-            return;
+    let cooldown_ok = state
+        .last_notification_at
+        .map(|last| last.elapsed().as_secs() >= 60)
+        .unwrap_or(true);
+
+    let mut webhook_alerts: Vec<webhooks::WebhookAlertType> = Vec::new();
+    let mut os_notification: Option<(String, String)> = None;
+
+    for (name, utilization, window_id, resets_at) in &windows_to_check {
+        let win_state = state
+            .windows
+            .entry(name.to_string())
+            .or_insert_with(|| WindowAlertState {
+                window_id: window_id.clone(),
+                fired_thresholds: Vec::new(),
+                prev_utilization: 0.0,
+            });
+
+        // Reset detection: if window changed or utilization dropped to ~0
+        if win_state.window_id != *window_id {
+            // Check if this is a reset (prev was > 0)
+            let was_active = win_state.prev_utilization > 5.0;
+            win_state.window_id = window_id.clone();
+            win_state.fired_thresholds.clear();
+
+            if was_active
+                && has_webhooks
+                && webhook_config.as_ref().map(|c| c.notify_on_reset).unwrap_or(false)
+            {
+                webhook_alerts.push(webhooks::WebhookAlertType::ResetCompleted {
+                    window_name: name.to_string(),
+                });
+            }
+        }
+
+        win_state.prev_utilization = *utilization;
+
+        // Find newly crossed thresholds
+        let new_thresholds: Vec<u32> = thresholds
+            .iter()
+            .filter(|&&t| *utilization >= t as f64)
+            .filter(|t| !win_state.fired_thresholds.contains(t))
+            .copied()
+            .collect();
+
+        if new_thresholds.is_empty() {
+            continue;
+        }
+
+        if !cooldown_ok {
+            continue;
+        }
+
+        let highest = new_thresholds.iter().copied().max().unwrap_or(50);
+
+        // Mark ALL crossed thresholds as fired to prevent re-sending lower ones
+        // on subsequent polls while usage remains high. Only the highest is sent.
+        for t in &new_thresholds {
+            if !win_state.fired_thresholds.contains(t) {
+                win_state.fired_thresholds.push(*t);
+            }
+        }
+
+        // OS notification (only for five_hour to avoid spam, or if it's the highest alert)
+        if *name == "Session (5h)" || os_notification.is_none() {
+            let body = if highest >= 90 {
+                format!("{} usage at {:.0}% — may be throttled soon", name, utilization)
+            } else {
+                format!("{} usage at {:.0}%", name, utilization)
+            };
+            os_notification = Some(("AI Token Monitor".to_string(), body));
+        }
+
+        // Webhook alerts for all monitored windows
+        if has_webhooks {
+            webhook_alerts.push(webhooks::WebhookAlertType::ThresholdCrossed {
+                window_name: name.to_string(),
+                utilization: *utilization,
+                threshold: highest,
+                resets_at: resets_at.clone(),
+            });
         }
     }
 
-    // Record thresholds only after cooldown check passes
-    for t in &new_thresholds {
-        if !state.fired_thresholds.contains(t) {
-            state.fired_thresholds.push(*t);
-        }
+    // Fire OS notification
+    if let Some((title, body)) = os_notification {
+        use tauri_plugin_notification::NotificationExt;
+        let _ = app_handle
+            .notification()
+            .builder()
+            .title(&title)
+            .body(&body)
+            .show();
+        state.last_notification_at = Some(Instant::now());
     }
 
-    let highest = new_thresholds.iter().copied().max().unwrap_or(50);
-    let title = "AI Token Monitor";
-    let body = match highest {
-        90 => format!(
-            "Session usage at {:.0}% — may be throttled soon",
-            utilization
-        ),
-        80 => format!("Session usage at {:.0}%", utilization),
-        _ => format!("Session usage at {:.0}%", utilization),
-    };
-
-    use tauri_plugin_notification::NotificationExt;
-    let _ = app_handle
-        .notification()
-        .builder()
-        .title(title)
-        .body(&body)
-        .show();
-
-    state.last_notification_at = Some(Instant::now());
+    // Fire webhook alerts asynchronously
+    if !webhook_alerts.is_empty() {
+        if let Some(config) = webhook_config {
+            tauri::async_runtime::spawn(async move {
+                let secrets = match commands::get_ai_keys() {
+                    Some(s) => s,
+                    None => return,
+                };
+                for alert in webhook_alerts {
+                    webhooks::send_webhook_alerts(&config, &secrets, &alert).await;
+                }
+            });
+        }
+    }
 }
 
 fn get_config_dirs_from_prefs() -> Vec<PathBuf> {
@@ -562,6 +675,7 @@ pub fn run() {
             commands::get_oauth_usage,
             commands::enable_usage_tracking,
             commands::get_ai_keys,
+            commands::test_webhook,
             ai_translate::translate_text,
             ai_translate::translate_reply
         ])
