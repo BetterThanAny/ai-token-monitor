@@ -199,7 +199,7 @@ function ProviderLeaderboard({
 }) {
   const t = useI18n();
   const { stats } = useTokenStats(provider);
-  const { leaderboard, loading, period, setPeriod } = useLeaderboardSync({
+  const { leaderboard, loading, period, setPeriod, dateRange } = useLeaderboardSync({
     stats,
     user,
     optedIn: true,
@@ -257,6 +257,13 @@ function ProviderLeaderboard({
           </button>
         ))}
       </div>
+
+      {/* Period date range */}
+      {period !== "today" && (
+        <div style={{ textAlign: "center", fontSize: 10, color: "var(--text-tertiary)", marginTop: -6 }}>
+          {dateRange.from.slice(5).replace("-", "/")} ~ {dateRange.to.slice(5).replace("-", "/")}
+        </div>
+      )}
 
       {/* My rank card */}
       {myRank > 0 && (
