@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "../lib/supabase";
 import type { AllStats, LeaderboardProvider } from "../lib/types";
@@ -174,7 +174,22 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
     };
   }, [fetchLeaderboard]);
 
-  return { leaderboard, loading, period, setPeriod, refetch: () => fetchLeaderboard(true) };
+  const dateRange = useMemo(() => {
+    const now = new Date();
+    const today = toLocalDateStr(now);
+    if (period === "today") return { from: today, to: today };
+    if (period === "week") {
+      const dow = now.getDay();
+      const mondayOffset = dow === 0 ? 6 : dow - 1;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - mondayOffset);
+      return { from: toLocalDateStr(monday), to: today };
+    }
+    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: toLocalDateStr(firstOfMonth), to: today };
+  }, [period]);
+
+  return { leaderboard, loading, period, setPeriod, dateRange, refetch: () => fetchLeaderboard(true) };
 }
 
 async function uploadSnapshot(
