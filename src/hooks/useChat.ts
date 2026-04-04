@@ -29,7 +29,7 @@ const COOLDOWN_MS = 2000;
 
 const emptyReactions = (): ReactionMap => ({ like: [], heart: [], dislike: [] });
 
-export function useChat(userId: string | null, enabled: boolean = true) {
+export function useChat(userId: string | null, enabled: boolean = true, visible: boolean = true) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [reactions, setReactions] = useState<Map<string, ReactionMap>>(new Map());
   const [loading, setLoading] = useState(enabled);
@@ -285,7 +285,19 @@ export function useChat(userId: string | null, enabled: boolean = true) {
           return next;
         });
       })
-      .subscribe();
+      .subscribe((status) => {
+        // Auto-reconnect when channel becomes disconnected (network change, server timeout)
+        if (status === "TIMED_OUT" || status === "CHANNEL_ERROR") {
+          setTimeout(() => {
+            if (channelRef.current) {
+              supabase.removeChannel(channelRef.current);
+              channelRef.current = null;
+            }
+            setupChannelRef.current();
+            catchUpMessagesRef.current();
+          }, 1000);
+        }
+      });
 
     channelRef.current = channel;
   }, []);
@@ -365,6 +377,29 @@ export function useChat(userId: string | null, enabled: boolean = true) {
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [userId, enabled]);
+
+  // Catch up missed messages when chat tab becomes visible again
+  // (visibilitychange only fires for window-level hide, not tab switches)
+  const prevVisibleRef = useRef(visible);
+  useEffect(() => {
+    if (!supabase || !userId || !enabled) return;
+    const wasHidden = !prevVisibleRef.current;
+    prevVisibleRef.current = visible;
+
+    if (visible && wasHidden) {
+      // Check if channel is still healthy; reconnect if not
+      const ch = channelRef.current;
+      const state = ch?.state;
+      if (!ch || state === "errored" || state === "closed") {
+        if (ch) {
+          supabase.removeChannel(ch);
+          channelRef.current = null;
+        }
+        setupChannelRef.current();
+      }
+      catchUpMessagesRef.current();
+    }
+  }, [visible, userId, enabled]);
 
   // Toggle reaction (uses ref to avoid stale closure)
   const toggleReaction = useCallback(async (messageId: string, type: ReactionType) => {
