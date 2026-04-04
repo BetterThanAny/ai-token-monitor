@@ -133,7 +133,7 @@ function ChatContent({ userId, activated, visible }: { userId: string; activated
   const {
     messages, reactions, loading, sending, hasMore,
     sendMessage, deleteMessage, loadMore, toggleReaction,
-  } = useChat(userId, activated);
+  } = useChat(userId, activated, visible);
   const langName = LANGUAGE_NAMES[prefs.language] ?? prefs.language;
   const { translations, translating, translate, translateReply: invokeTranslateReply } = useTranslate(langName);
   const hasAiKey = !!(prefs.ai_keys?.gemini || prefs.ai_keys?.openai || prefs.ai_keys?.anthropic);
@@ -175,9 +175,14 @@ function ChatContent({ userId, activated, visible }: { userId: string; activated
   }, [messages.length]);
 
   // Scroll to bottom on initial load or when tab becomes visible again
+  // Use rAF to ensure DOM layout is flushed after display:none→flex transition
   useEffect(() => {
     if (!loading && visible && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      });
     }
   }, [loading, visible]);
 
