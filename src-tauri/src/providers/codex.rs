@@ -318,7 +318,10 @@ impl CodexProvider {
             *daily.tokens.entry(entry.model.clone()).or_insert(0) += entry.total_tokens;
             daily.cost_usd += cost;
             daily.messages += 1;
-            daily.input_tokens += entry.input_tokens;
+            // OpenAI's input_tokens includes cached as a subset.
+            // Normalize to uncached-only so the frontend cache-hit formula
+            // (cache_read / (input + cache_read)) stays consistent with Claude.
+            daily.input_tokens += entry.input_tokens.saturating_sub(entry.cached_tokens);
             daily.output_tokens += entry.output_tokens;
             daily.cache_read_tokens += entry.cached_tokens;
 
@@ -336,7 +339,7 @@ impl CodexProvider {
                     cache_write: 0,
                     cost_usd: 0.0,
                 });
-            mu.input_tokens += entry.input_tokens;
+            mu.input_tokens += entry.input_tokens.saturating_sub(entry.cached_tokens);
             mu.output_tokens += entry.output_tokens;
             mu.cache_read += entry.cached_tokens;
             mu.cost_usd += cost;
