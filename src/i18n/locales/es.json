@@ -273,5 +273,23 @@
   "miniProfile.loadError": "No se pudieron cargar los datos de actividad",
   "miniProfile.streakTooltip": "Días consecutivos de actividad",
   "miniProfile.addLink": "Añadir enlace",
-  "miniProfile.add": "Añadir"
+  "miniProfile.add": "Añadir",
+
+  "badge.title": "Mi insignia",
+  "badge.leaderboard": "Clasificación",
+  "badge.card": "Tarjeta",
+  "badge.compact": "Compacto",
+  "badge.light": "Claro",
+  "badge.dark": "Oscuro",
+  "badge.flat": "Plano",
+  "badge.flatSquare": "Plano cuadrado",
+  "badge.copyImage": "Copiar imagen",
+  "badge.savePng": "Guardar PNG",
+  "badge.copySvg": "Copiar SVG",
+  "badge.copyMarkdown": "Copiar Markdown",
+  "badge.copyUrl": "Copiar URL de insignia",
+  "badge.copied": "¡Copiado!",
+  "badge.saved": "¡Guardado!",
+  "badge.urlSection": "URL de insignia dinámica",
+  "badge.urlDesc": "Inserta en tu GitHub README"
 }

@@ -468,6 +468,20 @@ pub fn copy_png_to_clipboard(_png_data: Vec<u8>) -> Result<(), String> {
     Err("Image clipboard not supported on this platform".to_string())
 }
 
+#[tauri::command]
+pub fn save_png_to_file(png_data: Vec<u8>, path: String) -> Result<(), String> {
+    let path = PathBuf::from(&path);
+    let parent = path.parent().ok_or("Invalid path")?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|_| "Invalid destination directory".to_string())?;
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    if !canonical_parent.starts_with(&home) {
+        return Err("Destination must be within home directory".to_string());
+    }
+    fs::write(&path, &png_data).map_err(|e| format!("Failed to save PNG: {}", e))
+}
+
 #[cfg(target_os = "macos")]
 #[tauri::command]
 #[allow(deprecated)]

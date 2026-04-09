@@ -273,5 +273,23 @@
   "miniProfile.loadError": "활동 데이터를 불러올 수 없습니다",
   "miniProfile.streakTooltip": "연속으로 작업한 일수",
   "miniProfile.addLink": "링크 추가",
-  "miniProfile.add": "추가"
+  "miniProfile.add": "추가",
+
+  "badge.title": "내 배지",
+  "badge.leaderboard": "리더보드",
+  "badge.card": "카드",
+  "badge.compact": "컴팩트",
+  "badge.light": "라이트",
+  "badge.dark": "다크",
+  "badge.flat": "플랫",
+  "badge.flatSquare": "플랫 스퀘어",
+  "badge.copyImage": "이미지 복사",
+  "badge.savePng": "PNG 저장",
+  "badge.copySvg": "SVG 복사",
+  "badge.copyMarkdown": "마크다운 복사",
+  "badge.copyUrl": "배지 URL 복사",
+  "badge.copied": "복사됨!",
+  "badge.saved": "저장됨!",
+  "badge.urlSection": "동적 배지 URL",
+  "badge.urlDesc": "GitHub README에 삽입하세요"
 }

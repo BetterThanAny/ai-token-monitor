@@ -273,5 +273,23 @@
   "miniProfile.loadError": "Could not load activity data",
   "miniProfile.streakTooltip": "Consecutive days of activity",
   "miniProfile.addLink": "Add link",
-  "miniProfile.add": "Add"
+  "miniProfile.add": "Add",
+
+  "badge.title": "My Badge",
+  "badge.leaderboard": "Leaderboard",
+  "badge.card": "Card",
+  "badge.compact": "Compact",
+  "badge.light": "Light",
+  "badge.dark": "Dark",
+  "badge.flat": "Flat",
+  "badge.flatSquare": "Flat Square",
+  "badge.copyImage": "Copy Image",
+  "badge.savePng": "Save PNG",
+  "badge.copySvg": "Copy SVG",
+  "badge.copyMarkdown": "Copy Markdown",
+  "badge.copyUrl": "Copy Badge URL",
+  "badge.copied": "Copied!",
+  "badge.saved": "Saved!",
+  "badge.urlSection": "Dynamic Badge URL",
+  "badge.urlDesc": "Embed in your GitHub README"
 }

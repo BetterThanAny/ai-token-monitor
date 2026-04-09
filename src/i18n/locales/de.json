@@ -273,5 +273,23 @@
   "miniProfile.loadError": "Aktivitätsdaten konnten nicht geladen werden",
   "miniProfile.streakTooltip": "Aufeinanderfolgende Tage mit Aktivität",
   "miniProfile.addLink": "Link hinzufügen",
-  "miniProfile.add": "Hinzufügen"
+  "miniProfile.add": "Hinzufügen",
+
+  "badge.title": "Mein Abzeichen",
+  "badge.leaderboard": "Rangliste",
+  "badge.card": "Karte",
+  "badge.compact": "Kompakt",
+  "badge.light": "Hell",
+  "badge.dark": "Dunkel",
+  "badge.flat": "Flach",
+  "badge.flatSquare": "Flach Quadratisch",
+  "badge.copyImage": "Bild kopieren",
+  "badge.savePng": "PNG speichern",
+  "badge.copySvg": "SVG kopieren",
+  "badge.copyMarkdown": "Markdown kopieren",
+  "badge.copyUrl": "Abzeichen-URL kopieren",
+  "badge.copied": "Kopiert!",
+  "badge.saved": "Gespeichert!",
+  "badge.urlSection": "Dynamische Abzeichen-URL",
+  "badge.urlDesc": "In deine GitHub README einbetten"
 }
