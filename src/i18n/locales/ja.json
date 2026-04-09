@@ -273,5 +273,23 @@
   "miniProfile.loadError": "アクティビティデータを読み込めませんでした",
   "miniProfile.streakTooltip": "連続作業日数",
   "miniProfile.addLink": "リンクを追加",
-  "miniProfile.add": "追加"
+  "miniProfile.add": "追加",
+
+  "badge.title": "マイバッジ",
+  "badge.leaderboard": "リーダーボード",
+  "badge.card": "カード",
+  "badge.compact": "コンパクト",
+  "badge.light": "ライト",
+  "badge.dark": "ダーク",
+  "badge.flat": "フラット",
+  "badge.flatSquare": "フラットスクエア",
+  "badge.copyImage": "画像をコピー",
+  "badge.savePng": "PNGを保存",
+  "badge.copySvg": "SVGをコピー",
+  "badge.copyMarkdown": "Markdownをコピー",
+  "badge.copyUrl": "バッジURLをコピー",
+  "badge.copied": "コピーしました！",
+  "badge.saved": "保存しました！",
+  "badge.urlSection": "動的バッジURL",
+  "badge.urlDesc": "GitHub READMEに埋め込みましょう"
 }

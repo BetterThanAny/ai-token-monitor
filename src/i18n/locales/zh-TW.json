@@ -273,5 +273,23 @@
   "miniProfile.loadError": "無法載入活動資料",
   "miniProfile.streakTooltip": "連續活躍天數",
   "miniProfile.addLink": "新增連結",
-  "miniProfile.add": "新增"
+  "miniProfile.add": "新增",
+
+  "badge.title": "我的徽章",
+  "badge.leaderboard": "排行榜",
+  "badge.card": "卡片",
+  "badge.compact": "精簡",
+  "badge.light": "淺色",
+  "badge.dark": "深色",
+  "badge.flat": "扁平",
+  "badge.flatSquare": "方形扁平",
+  "badge.copyImage": "複製圖片",
+  "badge.savePng": "儲存 PNG",
+  "badge.copySvg": "複製 SVG",
+  "badge.copyMarkdown": "複製 Markdown",
+  "badge.copyUrl": "複製徽章 URL",
+  "badge.copied": "已複製！",
+  "badge.saved": "已儲存！",
+  "badge.urlSection": "動態徽章 URL",
+  "badge.urlDesc": "嵌入你的 GitHub README"
 }

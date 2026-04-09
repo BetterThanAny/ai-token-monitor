@@ -7,6 +7,7 @@ import type { User } from "@supabase/supabase-js";
 import { useSettings } from "../contexts/SettingsContext";
 import { LeaderboardRow } from "./LeaderboardRow";
 import { useI18n } from "../i18n/I18nContext";
+import { BadgeOverlay } from "./badge/BadgeOverlay";
 
 export function Leaderboard() {
   const { user, loading: authLoading, signIn, available } = useAuth();
@@ -207,6 +208,7 @@ function ProviderLeaderboard({
   });
 
   const [page, setPage] = useState(0);
+  const [showBadge, setShowBadge] = useState(false);
   const totalPages = Math.max(1, Math.ceil(leaderboard.length / PAGE_SIZE));
   const myRank = leaderboard.findIndex((e) => e.user_id === user.id) + 1;
 
@@ -267,31 +269,65 @@ function ProviderLeaderboard({
 
       {/* My rank card */}
       {myRank > 0 && (
-        <div
-          onClick={goToMyPage}
-          style={{
-            background: "linear-gradient(135deg, rgba(124,92,252,0.08), rgba(255,143,164,0.08))",
-            borderRadius: "var(--radius-lg)",
-            padding: "12px 16px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 6,
-            border: "1px solid rgba(124, 92, 252, 0.1)",
-            cursor: "pointer",
-          }}
-        >
-          <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>
-            {t("leaderboard.yourRank")}
-          </span>
-          <span style={{ fontSize: 20, fontWeight: 800, color: "var(--accent-purple)" }}>
-            #{myRank}
-          </span>
-          <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>
-            {t("leaderboard.of")} {leaderboard.length}
-          </span>
+        <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+          <div
+            onClick={goToMyPage}
+            style={{
+              flex: 1,
+              background: "linear-gradient(135deg, rgba(124,92,252,0.08), rgba(255,143,164,0.08))",
+              borderRadius: "var(--radius-lg)",
+              padding: "12px 16px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              border: "1px solid rgba(124, 92, 252, 0.1)",
+              cursor: "pointer",
+            }}
+          >
+            <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>
+              {t("leaderboard.yourRank")}
+            </span>
+            <span style={{ fontSize: 20, fontWeight: 800, color: "var(--accent-purple)" }}>
+              #{myRank}
+            </span>
+            <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>
+              {t("leaderboard.of")} {leaderboard.length}
+            </span>
+          </div>
+          <button
+            onClick={() => setShowBadge(true)}
+            title={t("badge.title")}
+            style={{
+              background: "linear-gradient(135deg, rgba(124,92,252,0.08), rgba(255,143,164,0.08))",
+              border: "1px solid rgba(124, 92, 252, 0.1)",
+              borderRadius: "var(--radius-lg)",
+              padding: "0 14px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--accent-purple)",
+              transition: "all 0.15s ease",
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.77 4 4 0 0 1 0 6.76 4 4 0 0 1-4.78 4.77 4 4 0 0 1-6.74 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" />
+              <path d="m9 12 2 2 4-4" />
+            </svg>
+          </button>
         </div>
       )}
+
+      <BadgeOverlay
+        visible={showBadge}
+        onClose={() => setShowBadge(false)}
+        leaderboard={leaderboard}
+        userId={user.id}
+        provider={provider}
+        period={period}
+        dateRange={dateRange}
+      />
 
       {/* Leaderboard list */}
       <div style={{

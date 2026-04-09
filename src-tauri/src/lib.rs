@@ -792,6 +792,7 @@ pub fn run() {
             restart_app,
             commands::capture_window,
             commands::copy_png_to_clipboard,
+            commands::save_png_to_file,
             commands::get_pricing_table,
             commands::get_oauth_usage,
             commands::enable_usage_tracking,

@@ -273,5 +273,23 @@
   "miniProfile.loadError": "Impossible de charger les données d'activité",
   "miniProfile.streakTooltip": "Jours consécutifs d'activité",
   "miniProfile.addLink": "Ajouter un lien",
-  "miniProfile.add": "Ajouter"
+  "miniProfile.add": "Ajouter",
+
+  "badge.title": "Mon badge",
+  "badge.leaderboard": "Classement",
+  "badge.card": "Carte",
+  "badge.compact": "Compact",
+  "badge.light": "Clair",
+  "badge.dark": "Sombre",
+  "badge.flat": "Plat",
+  "badge.flatSquare": "Plat carré",
+  "badge.copyImage": "Copier l'image",
+  "badge.savePng": "Enregistrer PNG",
+  "badge.copySvg": "Copier SVG",
+  "badge.copyMarkdown": "Copier Markdown",
+  "badge.copyUrl": "Copier l'URL du badge",
+  "badge.copied": "Copié !",
+  "badge.saved": "Enregistré !",
+  "badge.urlSection": "URL de badge dynamique",
+  "badge.urlDesc": "Intégrez dans votre GitHub README"
 }
