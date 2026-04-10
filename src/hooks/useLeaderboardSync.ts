@@ -20,30 +20,44 @@ interface UseLeaderboardSyncProps {
   user: User | null;
   optedIn: boolean;
   provider: LeaderboardProvider;
+  period: LeaderboardPeriod;
+  /**
+   * Called after a successful snapshot upload. Used by the grid view to
+   * refresh its own data, since `fetchLeaderboard` is a no-op in grid mode.
+   */
+  onAfterUpload?: () => void;
 }
 
 const LEADERBOARD_CACHE_TTL = 180_000; // 3 minutes
 const LEADERBOARD_POLL_INTERVAL = 180_000; // 3 minutes
 const stableDeviceIdCache = new Map<string, string>();
 
-export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeaderboardSyncProps) {
+export type LeaderboardPeriod = "today" | "week" | "month" | "grid";
+
+export function useLeaderboardSync({ stats, user, optedIn, provider, period, onAfterUpload }: UseLeaderboardSyncProps) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [period, setPeriod] = useState<"today" | "week" | "month">("today");
   const [loading, setLoading] = useState(false);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Keep a stable reference to onAfterUpload so the upload effect doesn't
+  // re-run (and restart its debounce) every render when the caller passes
+  // a non-memoized callback.
+  const onAfterUploadRef = useRef(onAfterUpload);
+  useEffect(() => { onAfterUploadRef.current = onAfterUpload; }, [onAfterUpload]);
   // Track which past days (before today) have already been synced this session, per provider
   const syncedPastDatesRef = useRef<Set<string>>(new Set());
   const cacheRef = useRef<{
     data: LeaderboardEntry[];
     fetchedAt: number;
-    period: "today" | "week" | "month";
+    period: LeaderboardPeriod;
     provider: LeaderboardProvider;
   } | null>(null);
 
   // Fetch leaderboard data
   const fetchLeaderboard = useCallback(async (forceRefresh = false) => {
     if (!supabase) return;
+    // Grid view uses a separate hook (useLeaderboardGrid); skip list fetch.
+    if (period === "grid") return;
 
     // Return cached data if still fresh and period+provider match
     if (
@@ -137,7 +151,16 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       await uploadSnapshot(stats, provider, deviceId, syncedPastDatesRef.current);
+      // Always invalidate the list cache so the "other" tab reads fresh data
+      // when the user eventually switches to it. fetchLeaderboard(true) is a
+      // no-op in grid mode due to its early return, so without this line a
+      // grid→list switch within the 3-minute TTL would show stale rankings.
+      cacheRef.current = null;
+      // List view: refresh cached leaderboard immediately (no-op in grid mode).
       fetchLeaderboard(true);
+      // Grid view: the caller's refetch also invalidates its cache, so a
+      // list→grid switch within TTL reads fresh data too.
+      onAfterUploadRef.current?.();
     }, 500);
 
     return () => {
@@ -147,6 +170,9 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
 
   // Auto-refresh with visibility-aware polling
   useEffect(() => {
+    // Grid view is served by useLeaderboardGrid; skip list polling entirely.
+    if (period === "grid") return;
+
     fetchLeaderboard();
 
     let intervalId: ReturnType<typeof setInterval> | undefined;
@@ -172,7 +198,7 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
       if (intervalId) clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [fetchLeaderboard]);
+  }, [period, fetchLeaderboard]);
 
   const dateRange = useMemo(() => {
     const now = new Date();
@@ -185,11 +211,16 @@ export function useLeaderboardSync({ stats, user, optedIn, provider }: UseLeader
       monday.setDate(now.getDate() - mondayOffset);
       return { from: toLocalDateStr(monday), to: today };
     }
+    if (period === "grid") {
+      const weekAgo = new Date(now);
+      weekAgo.setDate(now.getDate() - 6);
+      return { from: toLocalDateStr(weekAgo), to: today };
+    }
     const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     return { from: toLocalDateStr(firstOfMonth), to: today };
   }, [period]);
 
-  return { leaderboard, loading, period, setPeriod, dateRange, refetch: () => fetchLeaderboard(true) };
+  return { leaderboard, loading, dateRange, refetch: () => fetchLeaderboard(true) };
 }
 
 async function uploadSnapshot(

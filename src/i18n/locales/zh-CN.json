@@ -86,6 +86,11 @@
   "leaderboard.today": "今日",
   "leaderboard.thisWeek": "本周",
   "leaderboard.thisMonth": "本月",
+  "leaderboard.grid": "网格",
+  "leaderboard.gridSubtitle": "最近 7 天 · TOP 10",
+  "leaderboard.gridEmpty": "暂无足够数据",
+  "leaderboard.yesterday": "昨天",
+  "leaderboard.new": "NEW",
   "leaderboard.you": "(你)",
   "leaderboard.msgs": "条消息",
 

@@ -86,6 +86,11 @@
   "leaderboard.today": "오늘",
   "leaderboard.thisWeek": "이번 주",
   "leaderboard.thisMonth": "이번 달",
+  "leaderboard.grid": "그리드",
+  "leaderboard.gridSubtitle": "최근 7일 · TOP 10",
+  "leaderboard.gridEmpty": "아직 기록이 부족해요",
+  "leaderboard.yesterday": "어제",
+  "leaderboard.new": "NEW",
   "leaderboard.you": "(나)",
   "leaderboard.msgs": "메시지",
 

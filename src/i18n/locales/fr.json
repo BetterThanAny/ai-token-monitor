@@ -86,6 +86,11 @@
   "leaderboard.today": "Aujourd'hui",
   "leaderboard.thisWeek": "Cette semaine",
   "leaderboard.thisMonth": "Ce mois",
+  "leaderboard.grid": "Grille",
+  "leaderboard.gridSubtitle": "7 derniers jours · TOP 10",
+  "leaderboard.gridEmpty": "Pas encore assez d'historique",
+  "leaderboard.yesterday": "Hier",
+  "leaderboard.new": "NEW",
   "leaderboard.you": "(vous)",
   "leaderboard.msgs": "msgs",
 
