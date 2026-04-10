@@ -148,11 +148,14 @@ function ChatContent({ userId, activated, visible }: { userId: string; activated
   const [pendingImage, setPendingImage] = useState<{ blob: Blob; preview: string } | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const mentionRef = useRef<MentionAutocompleteRef>(null);
   const isAtBottomRef = useRef(true);
   const prevMessagesLenRef = useRef(0);
+  const dragDepthRef = useRef(0);
 
   // Build known nicknames set from profile cache for mention highlighting
   const knownNicknames = useMemo(() => {
@@ -275,19 +278,101 @@ function ChatContent({ userId, activated, visible }: { userId: string; activated
     setMentionState(null);
   }, []);
 
+  const acceptImageFile = useCallback((file: File | null | undefined) => {
+    if (!file) return;
+    // Must match the accept list enforced by Supabase Storage (see
+    // `supabase/migrations/20260402_chat_images.sql` and `chatImageUpload.ts`).
+    const ALLOWED_MIME = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+    if (!ALLOWED_MIME.includes(file.type)) {
+      setImageError(t("chat.imageOnly"));
+      setTimeout(() => setImageError(null), 3000);
+      return;
+    }
+    setPendingImage((prev) => {
+      if (prev) URL.revokeObjectURL(prev.preview);
+      return { blob: file, preview: URL.createObjectURL(file) };
+    });
+    setImageError(null);
+  }, [t]);
+
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
     for (const item of items) {
       if (item.type.startsWith("image/")) {
         e.preventDefault();
-        const blob = item.getAsFile();
-        if (!blob) return;
-        const preview = URL.createObjectURL(blob);
-        setPendingImage({ blob, preview });
+        acceptImageFile(item.getAsFile());
         return;
       }
     }
+  }, [acceptImageFile]);
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    acceptImageFile(file);
+    // Reset so selecting the same file again fires change.
+    e.target.value = "";
+  }, [acceptImageFile]);
+
+  const handleOpenFilePicker = useCallback(() => {
+    if (uploadingImage || pendingImage || sending) return;
+    fileInputRef.current?.click();
+  }, [uploadingImage, pendingImage, sending]);
+
+  // Drag & drop — gated on not having an image already.
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types?.includes("Files")) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    if (!pendingImage && !uploadingImage) {
+      setIsDragging(true);
+    }
+  }, [pendingImage, uploadingImage]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types?.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = pendingImage || uploadingImage ? "none" : "copy";
+  }, [pendingImage, uploadingImage]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types?.includes("Files")) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types?.includes("Files")) return;
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDragging(false);
+    if (pendingImage || uploadingImage) return;
+    const file = e.dataTransfer.files?.[0];
+    acceptImageFile(file);
+  }, [pendingImage, uploadingImage, acceptImageFile]);
+
+  // Safety net: if the user drags out of the window without a matching
+  // dragleave reaching our container, reset the overlay to avoid it getting
+  // stuck. Fires when the cursor leaves the document boundary.
+  useEffect(() => {
+    const handleDocLeave = (e: DragEvent) => {
+      if (e.relatedTarget === null) {
+        dragDepthRef.current = 0;
+        setIsDragging(false);
+      }
+    };
+    const handleDocDrop = () => {
+      dragDepthRef.current = 0;
+      setIsDragging(false);
+    };
+    document.addEventListener("dragleave", handleDocLeave);
+    document.addEventListener("drop", handleDocDrop);
+    return () => {
+      document.removeEventListener("dragleave", handleDocLeave);
+      document.removeEventListener("drop", handleDocDrop);
+    };
   }, []);
 
   const handleRemovePendingImage = useCallback(() => {
@@ -310,16 +395,51 @@ function ChatContent({ userId, activated, visible }: { userId: string; activated
   const grouped = useMemo(() => groupMessages(messages, prefs.language ?? "en"), [messages, prefs.language]);
 
   return (
-    <div style={{
-      display: "flex",
-      flexDirection: "column",
-      background: "var(--heat-0)",
-      borderRadius: "var(--radius-lg)",
-      overflow: "hidden",
-      flex: 1,
-      minHeight: 0,
-      boxShadow: "var(--shadow-card)",
-    }}>
+    <div
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--heat-0)",
+        borderRadius: "var(--radius-lg)",
+        overflow: "hidden",
+        flex: 1,
+        minHeight: 0,
+        boxShadow: "var(--shadow-card)",
+        position: "relative",
+      }}
+    >
+      {/* Drag & drop overlay */}
+      {isDragging && (
+        <div style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 20,
+          background: "rgba(124, 92, 252, 0.12)",
+          border: "2px dashed var(--accent-purple)",
+          borderRadius: "var(--radius-lg)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          pointerEvents: "none",
+          backdropFilter: "blur(2px)",
+        }}>
+          <div style={{ fontSize: 28 }}>📎</div>
+          <div style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: "var(--accent-purple)",
+          }}>
+            {t("chat.dropHere")}
+          </div>
+        </div>
+      )}
+
       {/* Messages area */}
       <div
         ref={scrollRef}
@@ -556,6 +676,39 @@ function ChatContent({ userId, activated, visible }: { userId: string; activated
         )}
 
         <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            onChange={handleFileInputChange}
+            style={{ display: "none" }}
+          />
+          <button
+            type="button"
+            onClick={handleOpenFilePicker}
+            disabled={uploadingImage || !!pendingImage || sending}
+            aria-label={t("chat.attachImage")}
+            title={t("chat.attachImage")}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 16,
+              border: "none",
+              cursor: uploadingImage || pendingImage || sending ? "default" : "pointer",
+              background: "transparent",
+              color: uploadingImage || pendingImage || sending ? "var(--text-muted)" : "var(--text-secondary)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              opacity: uploadingImage || pendingImage || sending ? 0.4 : 1,
+              transition: "all 0.15s ease",
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            </svg>
+          </button>
           <textarea
             ref={inputRef}
             value={input}
