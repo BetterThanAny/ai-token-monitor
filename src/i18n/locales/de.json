@@ -105,6 +105,7 @@
   "settings.language": "Sprache",
   "settings.numberFormat": "Zahlenformat",
   "settings.menuBarCost": "Menüleiste Kosten",
+  "settings.autostart": "Beim Start ausführen",
   "settings.leaderboard": "Rangliste",
   "settings.shareUsageData": "Nutzungsdaten teilen",
   "settings.signedIn": "Angemeldet",

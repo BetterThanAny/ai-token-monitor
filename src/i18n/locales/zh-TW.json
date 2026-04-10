@@ -105,6 +105,7 @@
   "settings.language": "語言",
   "settings.numberFormat": "數字格式",
   "settings.menuBarCost": "選單列費用",
+  "settings.autostart": "開機時自動啟動",
   "settings.leaderboard": "排行榜",
   "settings.shareUsageData": "分享使用資料",
   "settings.signedIn": "已登入",

@@ -105,6 +105,7 @@
   "settings.language": "언어",
   "settings.numberFormat": "숫자 형식",
   "settings.menuBarCost": "메뉴바 비용",
+  "settings.autostart": "부팅 시 자동 실행",
   "settings.leaderboard": "리더보드",
   "settings.shareUsageData": "사용 데이터 공유",
   "settings.signedIn": "로그인됨",
