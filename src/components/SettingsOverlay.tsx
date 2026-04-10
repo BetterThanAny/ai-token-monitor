@@ -221,6 +221,13 @@ function GeneralTab({
         />
       </SettingRow>
 
+      <SettingRow label={useI18n()("settings.autostart")}>
+        <ToggleSwitch
+          checked={prefs.autostart_enabled}
+          onChange={(v) => updatePrefs({ autostart_enabled: v })}
+        />
+      </SettingRow>
+
       <SettingRow label={useI18n()("settings.usageTracking")}>
         <ToggleSwitch
           checked={prefs.usage_tracking_enabled}

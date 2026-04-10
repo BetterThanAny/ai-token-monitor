@@ -72,6 +72,8 @@ pub struct UserPreferences {
     pub ai_model: Option<String>,
     #[serde(default)]
     pub webhook_config: Option<WebhookConfig>,
+    #[serde(default)]
+    pub autostart_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -210,6 +212,7 @@ impl Default for UserPreferences {
             ai_keys: None,
             ai_model: None,
             webhook_config: None,
+            autostart_enabled: false,
         }
     }
 }

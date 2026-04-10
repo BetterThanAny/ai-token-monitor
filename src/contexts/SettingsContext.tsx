@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef } f
 import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import type { UserPreferences } from "../lib/types";
 
 interface SettingsContextType {
@@ -27,6 +28,7 @@ const defaultPrefs: UserPreferences = {
   salary_enabled: false,
   usage_alerts_enabled: true,
   usage_tracking_enabled: false,
+  autostart_enabled: false,
 };
 
 const SettingsContext = createContext<SettingsContextType>({
@@ -81,6 +83,30 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, [prefs.color_mode]);
+
+  // Reconcile autostart plugin state with the stored preference.
+  // Preference is the source of truth — if the OS state drifts (e.g. user removed
+  // the login item manually), we restore it on next launch.
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const actual = await isAutostartEnabled();
+        if (cancelled) return;
+        if (prefs.autostart_enabled && !actual) {
+          await enableAutostart();
+        } else if (!prefs.autostart_enabled && actual) {
+          await disableAutostart();
+        }
+      } catch (err) {
+        console.warn("[autostart] sync failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, prefs.autostart_enabled]);
 
   // Persist to disk when prefs change
   const prevConfigDirsRef = useRef<string>(JSON.stringify(defaultPrefs.config_dirs));

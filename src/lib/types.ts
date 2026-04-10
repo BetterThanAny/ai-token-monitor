@@ -57,6 +57,7 @@ export interface UserPreferences {
   };
   ai_model?: string;
   webhook_config?: WebhookConfig;
+  autostart_enabled: boolean;
 }
 
 export interface WebhookConfig {

@@ -105,6 +105,7 @@
   "settings.language": "Langue",
   "settings.numberFormat": "Format des nombres",
   "settings.menuBarCost": "Coût barre de menus",
+  "settings.autostart": "Lancer au démarrage",
   "settings.leaderboard": "Classement",
   "settings.shareUsageData": "Partager les données",
   "settings.signedIn": "Connecté",
