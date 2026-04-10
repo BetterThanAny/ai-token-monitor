@@ -86,6 +86,11 @@
   "leaderboard.today": "今日",
   "leaderboard.thisWeek": "今週",
   "leaderboard.thisMonth": "今月",
+  "leaderboard.grid": "グリッド",
+  "leaderboard.gridSubtitle": "過去7日間 · TOP 10",
+  "leaderboard.gridEmpty": "まだ記録が足りません",
+  "leaderboard.yesterday": "昨日",
+  "leaderboard.new": "NEW",
   "leaderboard.you": "(あなた)",
   "leaderboard.msgs": "メッセージ",
 
