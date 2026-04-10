@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../hooks/useAuth";
-import { useLeaderboardSync } from "../hooks/useLeaderboardSync";
+import { useLeaderboardSync, type LeaderboardPeriod } from "../hooks/useLeaderboardSync";
+import { useLeaderboardGrid } from "../hooks/useLeaderboardGrid";
 import { useTokenStats } from "../hooks/useTokenStats";
 import type { LeaderboardProvider } from "../lib/types";
 import type { User } from "@supabase/supabase-js";
 import { useSettings } from "../contexts/SettingsContext";
 import { LeaderboardRow } from "./LeaderboardRow";
+import { LeaderboardGrid } from "./LeaderboardGrid";
 import { useI18n } from "../i18n/I18nContext";
 import { BadgeOverlay } from "./badge/BadgeOverlay";
 
@@ -200,11 +202,25 @@ function ProviderLeaderboard({
 }) {
   const t = useI18n();
   const { stats } = useTokenStats(provider);
-  const { leaderboard, loading, period, setPeriod, dateRange } = useLeaderboardSync({
+  const [period, setPeriod] = useState<LeaderboardPeriod>("today");
+  const {
+    gridData,
+    loading: gridLoading,
+    refetch: refetchGrid,
+  } = useLeaderboardGrid({
+    provider,
+    // Only poll while the user is looking at the grid; onAfterUpload below
+    // still fires for this hook but becomes a no-op when disabled, which is
+    // fine because the cache will be repopulated on the next grid tab entry.
+    enabled: period === "grid",
+  });
+  const { leaderboard, loading, dateRange } = useLeaderboardSync({
     stats,
     user,
     optedIn: true,
     provider,
+    period,
+    onAfterUpload: refetchGrid,
   });
 
   const [page, setPage] = useState(0);
@@ -239,7 +255,7 @@ function ProviderLeaderboard({
         padding: 2,
         alignSelf: "center",
       }}>
-        {(["today", "week", "month"] as const).map((p) => (
+        {(["today", "week", "month", "grid"] as const).map((p) => (
           <button
             key={p}
             onClick={() => setPeriod(p)}
@@ -255,7 +271,12 @@ function ProviderLeaderboard({
               transition: "all 0.15s ease",
             }}
           >
-            {{ today: t("leaderboard.today"), week: t("leaderboard.thisWeek"), month: t("leaderboard.thisMonth") }[p]}
+            {{
+              today: t("leaderboard.today"),
+              week: t("leaderboard.thisWeek"),
+              month: t("leaderboard.thisMonth"),
+              grid: t("leaderboard.grid"),
+            }[p]}
           </button>
         ))}
       </div>
@@ -263,12 +284,14 @@ function ProviderLeaderboard({
       {/* Period date range */}
       {period !== "today" && (
         <div style={{ textAlign: "center", fontSize: 10, color: "var(--text-tertiary)", marginTop: -6 }}>
-          {dateRange.from.slice(5).replace("-", "/")} ~ {dateRange.to.slice(5).replace("-", "/")}
+          {period === "grid"
+            ? t("leaderboard.gridSubtitle")
+            : `${dateRange.from.slice(5).replace("-", "/")} ~ ${dateRange.to.slice(5).replace("-", "/")}`}
         </div>
       )}
 
-      {/* My rank card */}
-      {myRank > 0 && (
+      {/* My rank card — hidden in grid view (different semantics) */}
+      {period !== "grid" && myRank > 0 && (
         <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
           <div
             onClick={goToMyPage}
@@ -325,10 +348,14 @@ function ProviderLeaderboard({
         leaderboard={leaderboard}
         userId={user.id}
         provider={provider}
-        period={period}
+        period={period === "grid" ? "today" : period}
         dateRange={dateRange}
       />
 
+      {period === "grid" ? (
+        <LeaderboardGrid gridData={gridData} loading={gridLoading} userId={user.id} />
+      ) : (
+      <>
       {/* Leaderboard list */}
       <div style={{
         background: "var(--bg-card)",
@@ -371,6 +398,8 @@ function ProviderLeaderboard({
       {/* Pagination */}
       {totalPages > 1 && (
         <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+      )}
+      </>
       )}
     </div>
   );
