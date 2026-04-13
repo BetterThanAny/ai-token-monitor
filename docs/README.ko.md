@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/soulduse/ai-token-monitor)](https://github.com/soulduse/ai-token-monitor/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
-> **[English](../README.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)**
+> **[English](../README.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Türkçe](README.tr.md) | [Italiano](README.it.md)**
 
 macOS / Windows 시스템 트레이에서 **Claude Code**, **Codex**, **OpenCode**의 토큰 사용량·비용·활동을 실시간으로 추적하는 앱입니다. 리더보드, 채팅, 웹훅 알림까지 한 화면에서 확인할 수 있습니다.
 
@@ -52,7 +52,7 @@ macOS / Windows 시스템 트레이에서 **Claude Code**, **Codex**, **OpenCode
 
 ### 커스터마이즈
 - **4가지 테마** — GitHub (초록), Purple, Ocean, Sunset + Auto/Light/Dark 모드
-- **8개 언어** — English, 한국어, 日本語, 简体中文, 繁體中文, Français, Español, Deutsch
+- **10개 언어** — English, 한국어, 日本語, 简体中文, 繁體中文, Français, Español, Deutsch, Türkçe, Italiano
 - **숫자 포맷** — 약식(`377.0K`) / 전체(`377,000`) 전환
 - **자동 시작** — 부팅 시 자동 실행 옵션
 - **AI 번역** — Gemini / OpenAI / Anthropic API 키를 등록하면 채팅 메시지 번역 (키는 로컬에 암호화 저장)

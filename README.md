@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/soulduse/ai-token-monitor)](https://github.com/soulduse/ai-token-monitor/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **[한국어](docs/README.ko.md) | [日本語](docs/README.ja.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md)**
+> **[한국어](docs/README.ko.md) | [日本語](docs/README.ja.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md) | [Türkçe](docs/README.tr.md) | [Italiano](docs/README.it.md)**
 
 A system tray app for macOS and Windows that tracks **Claude Code**, **Codex**, and **OpenCode** token usage, cost, and activity in real time — with a built-in leaderboard, chat, and webhook alerts.
 
@@ -65,7 +65,7 @@ A system tray app for macOS and Windows that tracks **Claude Code**, **Codex**, 
 
 ### Customization
 - **4 themes** — GitHub (green), Purple, Ocean, Sunset — with Auto/Light/Dark mode
-- **8 languages** — English, 한국어, 日本語, 简体中文, 繁體中文, Français, Español, Deutsch
+- **10 languages** — English, 한국어, 日本語, 简体中文, 繁體中文, Français, Español, Deutsch, Türkçe, Italiano
 - **Compact / full number format** — `377.0K` vs `377,000`
 - **Launch on startup** — optional auto-start on boot
 - **AI translation** — bring your own Gemini / OpenAI / Anthropic API key to translate chat messages (keys are encrypted locally)

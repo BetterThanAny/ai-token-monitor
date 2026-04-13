@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/soulduse/ai-token-monitor)](https://github.com/soulduse/ai-token-monitor/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
-> **[English](../README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)**
+> **[English](../README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Türkçe](README.tr.md) | [Italiano](README.it.md)**
 
 macOS と Windows のシステムトレイで **Claude Code**、**Codex**、**OpenCode** のトークン使用量・コスト・アクティビティをリアルタイムに追跡するアプリです。リーダーボード、チャット、Webhook 通知まで 1 画面で確認できます。
 
@@ -52,7 +52,7 @@ macOS と Windows のシステムトレイで **Claude Code**、**Codex**、**Op
 
 ### カスタマイズ
 - **4 つのテーマ** — GitHub（グリーン）、Purple、Ocean、Sunset + Auto/Light/Dark モード
-- **8 言語対応** — English, 한국어, 日本語, 简体中文, 繁體中文, Français, Español, Deutsch
+- **10 言語対応** — English, 한국어, 日本語, 简体中文, 繁體中文, Français, Español, Deutsch, Türkçe, Italiano
 - **数値フォーマット** — 短縮（`377.0K`）/ 完全（`377,000`）切替
 - **自動起動** — 起動時に自動実行
 - **AI 翻訳** — Gemini / OpenAI / Anthropic の API キーを登録するとチャットメッセージを翻訳（キーはローカルで暗号化保存）
