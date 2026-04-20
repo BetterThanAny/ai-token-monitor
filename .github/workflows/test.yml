@@ -35,6 +35,9 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Pricing sync check
+        run: node scripts/check-pricing-sync.mjs
+
       - name: Build frontend
         run: npm run build
 
