@@ -120,6 +120,9 @@
   "header.captureFailed": "캡처 실패",
   "header.summaryCopied": "요약이 복사됨!",
   "header.quickActions": "바로가기 버튼",
+  "header.stats_source.local": "Local",
+  "header.stats_source.account": "Account",
+  "header.stats_source.needs_signin": "Sign in to sync stats across devices",
 
   "settings.title": "설정",
   "settings.tab.general": "일반",

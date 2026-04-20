@@ -114,6 +114,9 @@
   "header.captureFailed": "截图失败",
   "header.summaryCopied": "摘要已复制！",
   "header.quickActions": "快捷操作",
+  "header.stats_source.local": "本机",
+  "header.stats_source.account": "账号",
+  "header.stats_source.needs_signin": "登录后可查看跨设备统计",
 
   "settings.title": "设置",
   "settings.tab.general": "通用",

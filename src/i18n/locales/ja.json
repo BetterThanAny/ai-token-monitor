@@ -114,6 +114,9 @@
   "header.captureFailed": "キャプチャ失敗",
   "header.summaryCopied": "要約をコピーしました！",
   "header.quickActions": "クイックアクション",
+  "header.stats_source.local": "Local",
+  "header.stats_source.account": "Account",
+  "header.stats_source.needs_signin": "Sign in to sync stats across devices",
 
   "settings.title": "設定",
   "settings.tab.general": "一般",

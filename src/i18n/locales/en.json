@@ -120,6 +120,9 @@
   "header.captureFailed": "Capture failed",
   "header.summaryCopied": "Summary copied!",
   "header.quickActions": "Quick Actions",
+  "header.stats_source.local": "Local",
+  "header.stats_source.account": "Account",
+  "header.stats_source.needs_signin": "Sign in to sync stats across devices",
 
   "settings.title": "Settings",
   "settings.tab.general": "General",

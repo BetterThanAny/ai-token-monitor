@@ -114,6 +114,9 @@
   "header.captureFailed": "Échec de la capture",
   "header.summaryCopied": "Résumé copié !",
   "header.quickActions": "Accès rapide",
+  "header.stats_source.local": "Local",
+  "header.stats_source.account": "Account",
+  "header.stats_source.needs_signin": "Sign in to sync stats across devices",
 
   "settings.title": "Paramètres",
   "settings.tab.general": "Général",
