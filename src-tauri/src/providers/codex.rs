@@ -360,6 +360,7 @@ impl CodexProvider {
         AllStats {
             daily,
             model_usage: model_usage_map,
+            daily_model_usage: Vec::new(),
             total_sessions,
             total_messages,
             first_session_date: first_date,

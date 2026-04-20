@@ -32,6 +32,8 @@ const defaultPrefs: UserPreferences = {
   usage_tracking_enabled: false,
   autostart_enabled: false,
   quick_action_items: [],
+  stats_source: "local",
+  account_sync_enabled: false,
 };
 
 const SettingsContext = createContext<SettingsContextType>({
