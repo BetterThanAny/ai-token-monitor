@@ -75,6 +75,7 @@ impl TokenProvider for GlmProvider {
         let stats = AllStats {
             daily: vec![],
             model_usage: HashMap::new(),
+            daily_model_usage: Vec::new(),
             total_sessions: 0,
             total_messages: 0,
             first_session_date: None,

@@ -19,6 +19,15 @@ export interface ModelUsage {
   cost_usd: number;
 }
 
+export interface DailyModelUsage {
+  date: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
 export interface ProjectUsage {
   name: string;
   cost_usd: number;
@@ -54,6 +63,7 @@ export interface AnalyticsData {
 export interface AllStats {
   daily: DailyUsage[];
   model_usage: Record<string, ModelUsage>;
+  daily_model_usage?: DailyModelUsage[];
   total_sessions: number;
   total_messages: number;
   first_session_date: string | null;
@@ -94,6 +104,8 @@ export interface UserPreferences {
   webhook_config?: WebhookConfig;
   autostart_enabled: boolean;
   quick_action_items: string[];
+  stats_source: "local" | "account";
+  account_sync_enabled: boolean;
 }
 
 export interface WebhookConfig {

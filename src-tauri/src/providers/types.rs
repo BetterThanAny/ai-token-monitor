@@ -25,6 +25,16 @@ pub struct ModelUsage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyModelUsage {
+    pub date: String,
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectUsage {
     pub name: String,
     pub cost_usd: f64,
@@ -65,6 +75,8 @@ pub struct AnalyticsData {
 pub struct AllStats {
     pub daily: Vec<DailyUsage>,
     pub model_usage: HashMap<String, ModelUsage>,
+    #[serde(default)]
+    pub daily_model_usage: Vec<DailyModelUsage>,
     pub total_sessions: u32,
     pub total_messages: u32,
     pub first_session_date: Option<String>,
