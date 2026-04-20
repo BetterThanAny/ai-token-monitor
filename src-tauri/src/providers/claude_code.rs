@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 use serde::{Deserialize, Serialize};
 
 use super::traits::TokenProvider;
-use super::types::{ActivityCategory, AllStats, AnalyticsData, DailyUsage, McpServerUsage, ModelUsage, ProjectUsage, ToolCount};
+use super::types::{ActivityCategory, AllStats, AnalyticsData, DailyModelUsage, DailyUsage, McpServerUsage, ModelUsage, ProjectUsage, ToolCount};
 
 /// Unified incremental cache: stats + per-file metadata for mtime-based change detection.
 struct IncrementalCache {
@@ -240,6 +240,7 @@ impl ClaudeCodeProvider {
     fn build_stats(&self, entries: &HashMap<String, SessionEntry>) -> AllStats {
         let mut daily_map: HashMap<String, DailyUsage> = HashMap::new();
         let mut model_usage_map: HashMap<String, ModelUsage> = HashMap::new();
+        let mut daily_model_map: HashMap<(String, String), DailyModelUsage> = HashMap::new();
         let mut total_messages: u32 = 0;
         let mut first_date: Option<String> = None;
 
@@ -259,6 +260,20 @@ impl ClaudeCodeProvider {
             );
             let total_tokens = entry.input_tokens + entry.output_tokens
                 + entry.cache_read_input_tokens + entry.cache_creation_input_tokens;
+
+            let dm_key = (entry.date.clone(), entry.model.clone());
+            let dm = daily_model_map.entry(dm_key).or_insert_with(|| DailyModelUsage {
+                date: entry.date.clone(),
+                model: entry.model.clone(),
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+            });
+            dm.input_tokens += entry.input_tokens;
+            dm.output_tokens += entry.output_tokens;
+            dm.cache_read_tokens += entry.cache_read_input_tokens;
+            dm.cache_write_tokens += entry.cache_creation_input_tokens;
 
             let daily = daily_map.entry(entry.date.clone()).or_insert_with(|| DailyUsage {
                 date: entry.date.clone(), tokens: HashMap::new(), cost_usd: 0.0,
@@ -330,7 +345,7 @@ impl ClaudeCodeProvider {
         AllStats {
             daily,
             model_usage: model_usage_map,
-            daily_model_usage: Vec::new(),
+            daily_model_usage: daily_model_map.into_values().collect(),
             total_sessions,
             total_messages,
             first_session_date: first_date,
@@ -1091,5 +1106,50 @@ mod tests {
         assert_eq!(entry.cwd, "/home/user/project");
         assert_eq!(entry.tool_names, vec!["Read", "Bash"]);
         assert_eq!(entry.bash_commands, vec!["git", "npm"]);
+    }
+
+    #[test]
+    fn build_stats_populates_daily_model_usage() {
+        let mut entries: HashMap<String, SessionEntry> = HashMap::new();
+        let mk = |id: u32, date: &str, model: &str, inp: u64, out: u64, cr: u64, cw: u64| SessionEntry {
+            date: date.to_string(),
+            timestamp: format!("{}T10:00:00Z", date),
+            model: model.to_string(),
+            session_id: format!("s{}", id),
+            message_id: format!("m{}", id),
+            request_id: format!("r{}", id),
+            input_tokens: inp,
+            output_tokens: out,
+            cache_read_input_tokens: cr,
+            cache_creation_input_tokens: cw,
+            cache_creation_5m_tokens: cw,
+            cache_creation_1h_tokens: 0,
+            web_search_requests: 0,
+            cwd: String::new(),
+            tool_names: Vec::new(),
+            bash_commands: Vec::new(),
+        };
+        // Two entries on the same (date, model) + one on a different day → expect 2 DailyModelUsage rows.
+        entries.insert("k1".to_string(), mk(1, "2026-04-19", "claude-opus-4-7", 100, 200, 50, 10));
+        entries.insert("k2".to_string(), mk(2, "2026-04-19", "claude-opus-4-7", 300, 400, 150, 20));
+        entries.insert("k3".to_string(), mk(3, "2026-04-20", "claude-sonnet-4-6", 500, 600, 0, 0));
+
+        let provider = ClaudeCodeProvider::new(vec![]);
+        let stats = provider.build_stats(&entries);
+
+        assert_eq!(stats.daily_model_usage.len(), 2, "expected 2 (date,model) combos, got {}", stats.daily_model_usage.len());
+
+        let opus = stats.daily_model_usage.iter()
+            .find(|d| d.date == "2026-04-19" && d.model == "claude-opus-4-7")
+            .expect("opus entry missing");
+        assert_eq!(opus.input_tokens, 400);
+        assert_eq!(opus.output_tokens, 600);
+        assert_eq!(opus.cache_read_tokens, 200);
+        assert_eq!(opus.cache_write_tokens, 30);
+
+        let sonnet = stats.daily_model_usage.iter()
+            .find(|d| d.date == "2026-04-20" && d.model == "claude-sonnet-4-6")
+            .expect("sonnet entry missing");
+        assert_eq!(sonnet.input_tokens, 500);
     }
 }
