@@ -63,7 +63,10 @@ fn calculate_cost(
 /// v1 (missing/0): dates stored as UTC strings (bug)
 /// v2: dates stored as local-timezone strings (correct)
 /// v3: total_tokens now includes cache tokens; cache TTL-aware cost calculation
-const CACHE_VERSION: u32 = 4;
+/// v4: (unused — bumped speculatively for the account-stats feature but the
+///      format didn't actually change on that pass)
+/// v5: MonthData now carries daily_model_usage for Account-view backfill
+const CACHE_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DiskCache {
@@ -77,6 +80,14 @@ struct MonthData {
     daily: Vec<DailyUsage>,
     model_usage: HashMap<String, ModelUsage>,
     total_messages: u32,
+    /// Per-(date, model) token breakdown. Absent in caches written by v3 and
+    /// earlier; CACHE_VERSION was bumped to 4 to force a rebuild. When
+    /// deserializing an older cache without this field, serde `default` gives
+    /// Vec::new() — combined with the version gate in load_disk_cache() (which
+    /// drops any cache < current version), this field is always populated on
+    /// any cache we actually read.
+    #[serde(default)]
+    daily_model_usage: Vec<DailyModelUsage>,
 }
 
 fn disk_cache_path(claude_dir: &PathBuf) -> PathBuf {
@@ -332,6 +343,14 @@ impl ClaudeCodeProvider {
                 existing.cache_read += mu.cache_read;
                 existing.cache_write += mu.cache_write;
                 existing.cost_usd += mu.cost_usd;
+            }
+            // Per-(date, model) historical rows for the Account view backfill.
+            // Each historical entry is already a fully-aggregated (date, model)
+            // bucket so we can or_insert it directly — no partial overlap with
+            // current-month data because month_buckets excludes the live month.
+            for dm in &month_data.daily_model_usage {
+                let key = (dm.date.clone(), dm.model.clone());
+                daily_model_map.entry(key).or_insert_with(|| dm.clone());
             }
         }
 
@@ -684,9 +703,16 @@ fn classify_activity(tool_names: &[String], bash_commands: &[String]) -> String 
 /// Aggregate session entries into daily and model maps (for disk cache building).
 fn aggregate_entries(
     entries: &[&SessionEntry],
-) -> (HashMap<String, DailyUsage>, HashMap<String, ModelUsage>, u32, Option<String>) {
+) -> (
+    HashMap<String, DailyUsage>,
+    HashMap<String, ModelUsage>,
+    HashMap<(String, String), DailyModelUsage>,
+    u32,
+    Option<String>,
+) {
     let mut daily_map: HashMap<String, DailyUsage> = HashMap::new();
     let mut model_usage_map: HashMap<String, ModelUsage> = HashMap::new();
+    let mut daily_model_map: HashMap<(String, String), DailyModelUsage> = HashMap::new();
     let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
     let mut total_messages: u32 = 0;
     let mut first_date: Option<String> = None;
@@ -733,6 +759,17 @@ fn aggregate_entries(
         mu.cache_read += entry.cache_read_input_tokens;
         mu.cache_write += entry.cache_creation_input_tokens;
         mu.cost_usd += cost;
+
+        let dm_key = (entry.date.clone(), entry.model.clone());
+        let dm = daily_model_map.entry(dm_key).or_insert_with(|| DailyModelUsage {
+            date: entry.date.clone(),
+            model: entry.model.clone(),
+            input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
+        });
+        dm.input_tokens       += entry.input_tokens;
+        dm.output_tokens      += entry.output_tokens;
+        dm.cache_read_tokens  += entry.cache_read_input_tokens;
+        dm.cache_write_tokens += entry.cache_creation_input_tokens;
     }
 
     for (date, session_ids) in &daily_session_ids {
@@ -741,7 +778,7 @@ fn aggregate_entries(
         }
     }
 
-    (daily_map, model_usage_map, total_messages, first_date)
+    (daily_map, model_usage_map, daily_model_map, total_messages, first_date)
 }
 
 impl TokenProvider for ClaudeCodeProvider {
@@ -892,11 +929,12 @@ impl ClaudeCodeProvider {
                     if !month_buckets.is_empty() {
                         for (month, month_data) in &month_buckets {
                             let refs: Vec<&SessionEntry> = month_data.iter().collect();
-                            let (daily_map, model_map, messages, _) = aggregate_entries(&refs);
+                            let (daily_map, model_map, daily_model_map, messages, _) = aggregate_entries(&refs);
                             disk_cache.months.insert(month.clone(), MonthData {
                                 daily: daily_map.into_values().collect(),
                                 model_usage: model_map,
                                 total_messages: messages,
+                                daily_model_usage: daily_model_map.into_values().collect(),
                             });
                         }
                         save_disk_cache(&self.primary_dir, &disk_cache);
