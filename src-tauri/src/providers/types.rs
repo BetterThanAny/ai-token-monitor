@@ -129,6 +129,10 @@ pub struct UserPreferences {
     pub webhook_config: Option<WebhookConfig>,
     #[serde(default)]
     pub autostart_enabled: bool,
+    #[serde(default = "default_stats_source")]
+    pub stats_source: String,
+    #[serde(default)]
+    pub account_sync_enabled: bool,
     #[serde(default)]
     pub quick_action_items: Vec<String>,
 }
@@ -185,6 +189,10 @@ fn default_codex_dirs() -> Vec<String> {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_stats_source() -> String {
+    "local".to_string()
 }
 
 fn default_webhook_thresholds() -> Vec<u32> {
@@ -272,6 +280,8 @@ impl Default for UserPreferences {
             ai_model: None,
             webhook_config: None,
             autostart_enabled: false,
+            stats_source: default_stats_source(),
+            account_sync_enabled: false,
             quick_action_items: vec![],
         }
     }
