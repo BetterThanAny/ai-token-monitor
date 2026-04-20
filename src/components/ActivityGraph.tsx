@@ -128,6 +128,46 @@ export function ActivityGraph({ daily }: Props) {
   const cellGap = 1;
   const labelW = 20;
 
+  if (prefs.stats_source === "account") {
+    return (
+      <div style={{
+        background: "var(--bg-card)",
+        borderRadius: "var(--radius-lg)",
+        padding: 16,
+        boxShadow: "var(--shadow-card)",
+        opacity: 0.5,
+        pointerEvents: "none",
+        position: "relative",
+        minHeight: 120,
+      }}>
+        <div style={{
+          fontSize: 12,
+          fontWeight: 700,
+          color: "var(--text-secondary)",
+          textTransform: "uppercase",
+          letterSpacing: "0.5px",
+          marginBottom: 10,
+        }}>
+          {t("activity.title")}
+        </div>
+        <div style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 12,
+          fontWeight: 600,
+          color: "var(--text-primary)",
+          textAlign: "center",
+          padding: 12,
+        }}>
+          {t("panels.account_mode_unavailable")}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={containerRef}
