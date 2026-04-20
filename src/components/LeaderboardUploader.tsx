@@ -22,9 +22,10 @@ export function LeaderboardUploader() {
   const { user } = useAuth();
   const { prefs } = useSettings();
   const optedIn = !!prefs.leaderboard_opted_in;
+  const accountSyncEnabled = !!prefs.account_sync_enabled;
 
-  // Stats hooks are always called (rules of hooks) but uploads are gated by
-  // `optedIn` and each provider's include flag inside `useSnapshotUploader`.
+  // Stats hooks always fire (rules of hooks); uploads are gated inside
+  // useSnapshotUploader by the opt-in flags and each provider's include flag.
   const { stats: claudeStats } = useTokenStats("claude");
   const { stats: codexStats } = useTokenStats("codex");
   const { stats: opencodeStats } = useTokenStats("opencode");
@@ -35,30 +36,35 @@ export function LeaderboardUploader() {
     stats: prefs.include_claude ? claudeStats : null,
     user,
     optedIn,
+    accountSyncEnabled,
     provider: "claude",
   });
   const codex = useSnapshotUploader({
     stats: prefs.include_codex ? codexStats : null,
     user,
     optedIn,
+    accountSyncEnabled,
     provider: "codex",
   });
   const opencode = useSnapshotUploader({
     stats: prefs.include_opencode ? opencodeStats : null,
     user,
     optedIn,
+    accountSyncEnabled,
     provider: "opencode",
   });
   const kimi = useSnapshotUploader({
     stats: prefs.include_kimi ? kimiStats : null,
     user,
     optedIn,
+    accountSyncEnabled,
     provider: "kimi",
   });
   const glm = useSnapshotUploader({
     stats: prefs.include_glm ? glmStats : null,
     user,
     optedIn,
+    accountSyncEnabled,
     provider: "glm",
   });
 
