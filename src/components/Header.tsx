@@ -33,7 +33,18 @@ export function Header({ stats, updater }: Props) {
 
   const handleStatsSourceChange = useCallback((next: "local" | "account") => {
     if (prefs.stats_source === next) return;
-    updatePrefs({ stats_source: next });
+    // Flipping to Account also enables the upload path for model rows, which
+    // is a separate opt-in from the public leaderboard. Without this the view
+    // would be permanently empty until the user manually turned on account
+    // sync somewhere else (there is no other UI for it). Flipping back to
+    // Local does NOT disable sync — data is already uploaded and keeping the
+    // flag on means ongoing days continue to populate the Account view if
+    // the user ever returns to it.
+    const patch: Partial<UserPreferences> = { stats_source: next };
+    if (next === "account" && !prefs.account_sync_enabled) {
+      patch.account_sync_enabled = true;
+    }
+    updatePrefs(patch);
     // First-visit 60-day backfill when flipping local -> account, once per
     // (user, provider). Uses the existing backfill registry populated by
     // LeaderboardUploader so we don't need a parallel trigger path.

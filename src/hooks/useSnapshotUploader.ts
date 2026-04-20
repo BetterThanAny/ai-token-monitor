@@ -8,7 +8,14 @@ import type { User } from "@supabase/supabase-js";
 interface UseSnapshotUploaderProps {
   stats: AllStats | null;
   user: User | null;
+  /** Opt-in to public leaderboard: gates the thin `sync_device_snapshots` payload. */
   optedIn: boolean;
+  /**
+   * Opt-in to cross-device account view: gates the per-model `sync_device_model_rows`
+   * payload. Decoupled from leaderboard so a user can see their own aggregated stats
+   * without appearing on the public board.
+   */
+  accountSyncEnabled: boolean;
   provider: LeaderboardProvider;
 }
 
@@ -192,7 +199,7 @@ function dispatchUploaded(provider: LeaderboardProvider, todayRow: RowPayload | 
  * and value-change skip, drops per-call ops to ~2 and call frequency by orders
  * of magnitude.
  */
-export function useSnapshotUploader({ stats, user, optedIn, provider }: UseSnapshotUploaderProps) {
+export function useSnapshotUploader({ stats, user, optedIn, accountSyncEnabled, provider }: UseSnapshotUploaderProps) {
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const throttleRetryRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -230,11 +237,12 @@ export function useSnapshotUploader({ stats, user, optedIn, provider }: UseSnaps
   const stateKey = user && deviceId ? `${user.id}:${provider}:${deviceId}` : null;
 
   // Auto upload: today only, 15min throttle, skipped if values unchanged.
-  // If a stats change lands inside the throttle window, we don't drop it —
-  // we defer it via `throttleRetryRef` so the very last observed value still
-  // makes it to Supabase when the floor expires.
+  // Activates whenever EITHER opt-in is on; each RPC fires conditionally inside.
+  // If a stats change lands inside the throttle window, we defer it via
+  // `throttleRetryRef` so the very last observed value still reaches Supabase.
+  const uploadsEnabled = optedIn || accountSyncEnabled;
   useEffect(() => {
-    if (!supabase || !user || !optedIn || !stats || !deviceId || !stateKey) return;
+    if (!supabase || !user || !uploadsEnabled || !stats || !deviceId || !stateKey) return;
 
     const attempt = async () => {
       throttleRetryRef.current = undefined;
@@ -259,22 +267,33 @@ export function useSnapshotUploader({ stats, user, optedIn, provider }: UseSnaps
         return;
       }
 
-      // Stale-date cleanup is intentionally skipped on the auto-upload path:
-      // a 60-day scan every 24h per (user × provider) was dominating Disk IO
-      // on the Nano instance. The 30-day cutoff inside sync_device_snapshots
-      // already self-prunes unused device entries, and manualBackfill still
-      // runs buildStaleDates when users trigger a full resync.
-      const ok = await callSyncRpc(provider, deviceId, [todayRow], []);
-      if (ok) {
-        state.lastUploadAt = now;
-        state.lastTodayPayload = fingerprint;
-        dispatchUploaded(provider, todayRow);
+      // Leaderboard thin payload — only if user opted into public leaderboard.
+      // Stale-date cleanup is intentionally skipped on the auto path: a 60-day
+      // scan every 24h per (user × provider) was dominating IO on Nano; the
+      // 30-day cutoff inside sync_device_snapshots prunes stale device rows,
+      // and manualBackfill still runs buildStaleDates on explicit resync.
+      if (optedIn) {
+        const ok = await callSyncRpc(provider, deviceId, [todayRow], []);
+        if (ok) {
+          state.lastUploadAt = now;
+          state.lastTodayPayload = fingerprint;
+          dispatchUploaded(provider, todayRow);
+        }
       }
 
-      const modelRows = buildModelRowsForDate(liveStats, today);
-      if (modelRows.length > 0) {
-        await callSyncModelRpc(provider, deviceId, modelRows);
-        // Non-fatal: even if model rows fail, leaderboard row already uploaded.
+      // Per-model rows for the Account view — only if user opted into account sync.
+      if (accountSyncEnabled) {
+        const modelRows = buildModelRowsForDate(liveStats, today);
+        if (modelRows.length > 0) {
+          const modelOk = await callSyncModelRpc(provider, deviceId, modelRows);
+          // If leaderboard was skipped (optedIn=false) but model rows went
+          // through, still advance the throttle state so we don't retry in
+          // a tight loop.
+          if (modelOk && !optedIn) {
+            state.lastUploadAt = now;
+            state.lastTodayPayload = fingerprint;
+          }
+        }
       }
     };
 
@@ -284,7 +303,7 @@ export function useSnapshotUploader({ stats, user, optedIn, provider }: UseSnaps
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [stats, user, optedIn, provider, deviceId, stateKey]);
+  }, [stats, user, optedIn, accountSyncEnabled, uploadsEnabled, provider, deviceId, stateKey]);
 
   // Clear any pending throttle retry when the uploader unmounts or loses its key
   useEffect(() => {
@@ -296,9 +315,16 @@ export function useSnapshotUploader({ stats, user, optedIn, provider }: UseSnaps
   // Explicit backfill entry point. Called by:
   //   1. Leaderboard first-visit auto-trigger (one-time, gated by localStorage flag)
   //   2. Manual "Upload my past data" button
+  //   3. First flip to Account view in Header (separate localStorage flag)
+  //
+  // Gates each RPC independently — if only accountSyncEnabled is on, the
+  // thin leaderboard payload is skipped but model rows still upload. Returns
+  // true only if EVERY attempted RPC succeeded; a partial failure returns
+  // false so the caller can surface it (fixes P1 #7 from code review).
   const manualBackfill = useCallback(
     async (days: number = BACKFILL_DAYS): Promise<boolean> => {
-      if (!supabase || !user || !optedIn || !stats || !deviceId || !stateKey) return false;
+      if (!supabase || !user || !stats || !deviceId || !stateKey) return false;
+      if (!optedIn && !accountSyncEnabled) return false;
       const today = toLocalDateStr(new Date());
       const start = new Date();
       start.setDate(start.getDate() - (days - 1));
@@ -314,23 +340,32 @@ export function useSnapshotUploader({ stats, user, optedIn, provider }: UseSnaps
           sessions: d.sessions,
         }));
 
-      const staleDates = buildStaleDates(stats, today);
-      const ok = await callSyncRpc(provider, deviceId, rows, staleDates);
-      const modelRows = buildModelRowsInRange(stats, startStr, today);
-      if (modelRows.length > 0) {
-        await callSyncModelRpc(provider, deviceId, modelRows);
+      let leaderboardOk = true;
+      if (optedIn) {
+        const staleDates = buildStaleDates(stats, today);
+        leaderboardOk = await callSyncRpc(provider, deviceId, rows, staleDates);
       }
-      if (ok) {
+
+      let modelOk = true;
+      if (accountSyncEnabled) {
+        const modelRows = buildModelRowsInRange(stats, startStr, today);
+        if (modelRows.length > 0) {
+          modelOk = await callSyncModelRpc(provider, deviceId, modelRows);
+        }
+      }
+
+      const allOk = leaderboardOk && modelOk;
+      if (allOk) {
         const state = getUploadState(stateKey);
         state.lastUploadAt = Date.now();
         state.lastCleanupAt = Date.now();
         const todayRow = rows.find((r) => r.date === today) ?? null;
         if (todayRow) state.lastTodayPayload = payloadFingerprint(todayRow);
-        dispatchUploaded(provider, todayRow);
+        if (optedIn) dispatchUploaded(provider, todayRow);
       }
-      return ok;
+      return allOk;
     },
-    [user, optedIn, stats, deviceId, provider, stateKey],
+    [user, optedIn, accountSyncEnabled, stats, deviceId, provider, stateKey],
   );
 
   return { manualBackfill, deviceId, ready: !!stateKey };
