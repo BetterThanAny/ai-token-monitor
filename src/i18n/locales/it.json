@@ -114,6 +114,9 @@
   "header.captureFailed": "Cattura fallita",
   "header.summaryCopied": "Riepilogo copiato!",
   "header.quickActions": "Azioni rapide",
+  "header.stats_source.local": "Local",
+  "header.stats_source.account": "Account",
+  "header.stats_source.needs_signin": "Sign in to sync stats across devices",
 
   "settings.title": "Impostazioni",
   "settings.tab.general": "Generali",

@@ -104,6 +104,9 @@
 
   "header.menu": "Daha Fazla",
   "header.quickActions": "Hızlı Eylemler",
+  "header.stats_source.local": "Local",
+  "header.stats_source.account": "Account",
+  "header.stats_source.needs_signin": "Sign in to sync stats across devices",
   "header.share": "Uygulamayı paylaş",
   "header.github": "GitHub reposunu görüntüle",
   "share.appMessage": "Claude Code ve Codex token kullanımınızı AI Token Monitor ile tek bakışta takip edin — ücretsiz macOS/Windows uygulaması!\nhttps://github.com/soulduse/ai-token-monitor",

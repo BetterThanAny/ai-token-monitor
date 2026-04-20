@@ -11,6 +11,7 @@ import type { UpdaterState } from "../hooks/useUpdater";
 import { formatTokens, formatCost, getTotalTokens, toLocalDateStr } from "../lib/format";
 import { useI18n } from "../i18n/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
+import { useAuth } from "../contexts/AuthContext";
 
 interface Props {
   stats?: AllStats | null;
@@ -26,6 +27,12 @@ export function Header({ stats, updater }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const t = useI18n();
   const { prefs, updatePrefs } = useSettings();
+  const { user } = useAuth();
+
+  const handleStatsSourceChange = useCallback((next: "local" | "account") => {
+    if (prefs.stats_source === next) return;
+    updatePrefs({ stats_source: next });
+  }, [prefs.stats_source, updatePrefs]);
 
   const toggleQuickAction = useCallback((key: string) => {
     const items = prefs.quick_action_items ?? [];
@@ -300,6 +307,64 @@ export function Header({ stats, updater }: Props) {
           <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
         </svg>
       </button>
+
+      {/* Stats source toggle: Local / Account */}
+      {user ? (
+        <div
+          role="group"
+          aria-label={t("header.stats_source.local") + " / " + t("header.stats_source.account")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            padding: 2,
+            borderRadius: 8,
+            background: "var(--bg-card)",
+            border: "1px solid rgba(128,128,128,0.15)",
+          }}
+        >
+          {(["local", "account"] as const).map((mode) => {
+            const active = prefs.stats_source === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => handleStatsSourceChange(mode)}
+                aria-pressed={active}
+                style={{
+                  background: active ? "var(--accent-purple)" : "transparent",
+                  color: active ? "#fff" : "var(--text-secondary)",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "3px 8px",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  lineHeight: 1.4,
+                  transition: "background 0.15s ease, color 0.15s ease",
+                }}
+              >
+                {t(`header.stats_source.${mode}`)}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <span
+          title={t("header.stats_source.needs_signin")}
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: "var(--text-secondary)",
+            padding: "3px 8px",
+            borderRadius: 6,
+            background: "var(--bg-card)",
+            border: "1px solid rgba(128,128,128,0.15)",
+            cursor: "help",
+          }}
+        >
+          {t("header.stats_source.local")}
+        </span>
+      )}
 
       {/* Actions menu (collapsed dropdown) */}
       <div ref={menuRef} style={{ position: "relative" }}>

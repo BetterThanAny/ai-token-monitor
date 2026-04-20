@@ -114,6 +114,9 @@
   "header.captureFailed": "擷取失敗",
   "header.summaryCopied": "摘要已複製！",
   "header.quickActions": "快捷操作",
+  "header.stats_source.local": "Local",
+  "header.stats_source.account": "Account",
+  "header.stats_source.needs_signin": "Sign in to sync stats across devices",
 
   "settings.title": "設定",
   "settings.tab.general": "一般",
