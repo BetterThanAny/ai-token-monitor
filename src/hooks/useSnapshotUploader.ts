@@ -62,6 +62,58 @@ interface RowPayload {
   sessions: number;
 }
 
+interface ModelRowPayload {
+  date: string;
+  model: string;
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+}
+
+function buildModelRowsForDate(stats: AllStats, date: string): ModelRowPayload[] {
+  const src = stats.daily_model_usage ?? [];
+  return src
+    .filter((d) => d.date === date)
+    .map((d) => ({
+      date: d.date,
+      model: d.model,
+      input: d.input_tokens,
+      output: d.output_tokens,
+      cache_read: d.cache_read_tokens,
+      cache_write: d.cache_write_tokens,
+    }));
+}
+
+function buildModelRowsInRange(stats: AllStats, startStr: string, today: string): ModelRowPayload[] {
+  const src = stats.daily_model_usage ?? [];
+  return src
+    .filter((d) => d.date >= startStr && d.date <= today)
+    .map((d) => ({
+      date: d.date,
+      model: d.model,
+      input: d.input_tokens,
+      output: d.output_tokens,
+      cache_read: d.cache_read_tokens,
+      cache_write: d.cache_write_tokens,
+    }));
+}
+
+async function callSyncModelRpc(
+  provider: LeaderboardProvider,
+  deviceId: string,
+  rows: ModelRowPayload[],
+): Promise<boolean> {
+  if (!supabase || rows.length === 0) return true; // nothing to do ≠ failure
+  const { error } = await supabase.rpc("sync_device_model_rows", {
+    p_provider: provider,
+    p_device_id: deviceId,
+    p_rows: rows,
+  });
+  if (error) console.warn("[snapshot] sync_device_model_rows failed", error.message);
+  return !error;
+}
+
 function buildTodayRow(stats: AllStats, today: string): RowPayload | null {
   const todayEntry = stats.daily.find((d) => d.date === today);
   if (!todayEntry) return null;
@@ -218,6 +270,12 @@ export function useSnapshotUploader({ stats, user, optedIn, provider }: UseSnaps
         state.lastTodayPayload = fingerprint;
         dispatchUploaded(provider, todayRow);
       }
+
+      const modelRows = buildModelRowsForDate(liveStats, today);
+      if (modelRows.length > 0) {
+        await callSyncModelRpc(provider, deviceId, modelRows);
+        // Non-fatal: even if model rows fail, leaderboard row already uploaded.
+      }
     };
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -258,6 +316,10 @@ export function useSnapshotUploader({ stats, user, optedIn, provider }: UseSnaps
 
       const staleDates = buildStaleDates(stats, today);
       const ok = await callSyncRpc(provider, deviceId, rows, staleDates);
+      const modelRows = buildModelRowsInRange(stats, startStr, today);
+      if (modelRows.length > 0) {
+        await callSyncModelRpc(provider, deviceId, modelRows);
+      }
       if (ok) {
         const state = getUploadState(stateKey);
         state.lastUploadAt = Date.now();
