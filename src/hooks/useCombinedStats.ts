@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useTokenStats } from "./useTokenStats";
+import { useStatsSource } from "./useStatsSource";
 import type { AllStats, DailyUsage, ModelUsage } from "../lib/types";
 
 interface UseCombinedStatsProps {
@@ -11,11 +11,11 @@ interface UseCombinedStatsProps {
 }
 
 export function useCombinedStats({ includeClaude, includeCodex, includeOpencode, includeKimi, includeGlm }: UseCombinedStatsProps) {
-  const claude = useTokenStats("claude");
-  const codex = useTokenStats("codex");
-  const opencode = useTokenStats("opencode");
-  const kimi = useTokenStats("kimi");
-  const glm = useTokenStats("glm");
+  const claude = useStatsSource("claude");
+  const codex = useStatsSource("codex");
+  const opencode = useStatsSource("opencode");
+  const kimi = useStatsSource("kimi");
+  const glm = useStatsSource("glm");
 
   const stats = useMemo<AllStats | null>(() => {
     const sources: (AllStats | null)[] = [];
