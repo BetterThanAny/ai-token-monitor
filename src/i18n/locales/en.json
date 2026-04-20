@@ -356,5 +356,7 @@
   "analytics.activity.Git Ops": "Git Ops",
   "analytics.activity.Planning": "Planning",
   "analytics.empty.projects": "No project data available. Only Claude Code sessions include project tracking.",
-  "analytics.empty.tools": "No tool usage data available. Only Claude Code sessions include tool tracking."
+  "analytics.empty.tools": "No tool usage data available. Only Claude Code sessions include tool tracking.",
+
+  "panels.account_mode_unavailable": "Not available in Account view — switch to Local"
 }

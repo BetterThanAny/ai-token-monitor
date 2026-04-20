@@ -350,5 +350,7 @@
   "analytics.activity.Git Ops": "Git 操作",
   "analytics.activity.Planning": "规划",
   "analytics.empty.projects": "暂无项目数据。仅 Claude Code 会话支持项目追踪。",
-  "analytics.empty.tools": "暂无工具使用数据。仅 Claude Code 会话支持工具追踪。"
+  "analytics.empty.tools": "暂无工具使用数据。仅 Claude Code 会话支持工具追踪。",
+
+  "panels.account_mode_unavailable": "Account 模式下不可用 — 切到 Local 查看"
 }
