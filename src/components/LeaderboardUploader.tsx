@@ -99,5 +99,32 @@ export function LeaderboardUploader() {
     return registerBackfillRunner(runners);
   }, [runners]);
 
+  // Auto-trigger first-ever 60-day backfill for Account view. Header used to
+  // fire this on toggle-click but that raced the stats-load: clicking flipped
+  // `stats_source` before Rust finished its first fetch_stats, so manualBackfill
+  // bailed on `!stats` and the flag was lost. Here we have the full ready-state
+  // for each provider, so we can wait until it's actually runnable.
+  useEffect(() => {
+    if (!user || !accountSyncEnabled) return;
+    const runOnce = (provider: LeaderboardProvider, runner?: BackfillRunner) => {
+      if (!runner) return;
+      const flag = `account_initial_backfill_done_${user.id}_${provider}`;
+      if (localStorage.getItem(flag)) return;
+      runner(60).then((ok) => {
+        if (ok) localStorage.setItem(flag, "1");
+      });
+    };
+    if (prefs.include_claude) runOnce("claude", runners.claude);
+    if (prefs.include_codex) runOnce("codex", runners.codex);
+    if (prefs.include_opencode) runOnce("opencode", runners.opencode);
+    if (prefs.include_kimi) runOnce("kimi", runners.kimi);
+    if (prefs.include_glm) runOnce("glm", runners.glm);
+  }, [
+    user?.id, accountSyncEnabled,
+    prefs.include_claude, prefs.include_codex, prefs.include_opencode,
+    prefs.include_kimi, prefs.include_glm,
+    runners,
+  ]);
+
   return null;
 }
