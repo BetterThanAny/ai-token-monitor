@@ -12,8 +12,7 @@ import { formatTokens, formatCost, getTotalTokens, toLocalDateStr } from "../lib
 import { useI18n } from "../i18n/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { useAuth } from "../contexts/AuthContext";
-import { getBackfillRunners } from "../lib/backfillRegistry";
-import type { LeaderboardProvider, UserPreferences } from "../lib/types";
+import type { UserPreferences } from "../lib/types";
 
 interface Props {
   stats?: AllStats | null;
@@ -40,29 +39,17 @@ export function Header({ stats, updater }: Props) {
     // Local does NOT disable sync — data is already uploaded and keeping the
     // flag on means ongoing days continue to populate the Account view if
     // the user ever returns to it.
+    //
+    // First-visit 60-day backfill is NOT triggered here anymore because this
+    // click lands before the Rust stats hook has populated — manualBackfill
+    // would bail on `!stats`. LeaderboardUploader now fires backfill once per
+    // (user, provider) as soon as its uploader becomes ready.
     const patch: Partial<UserPreferences> = { stats_source: next };
     if (next === "account" && !prefs.account_sync_enabled) {
       patch.account_sync_enabled = true;
     }
     updatePrefs(patch);
-    // First-visit 60-day backfill when flipping local -> account, once per
-    // (user, provider). Uses the existing backfill registry populated by
-    // LeaderboardUploader so we don't need a parallel trigger path.
-    if (next === "account" && user) {
-      const runners = getBackfillRunners();
-      const providers: LeaderboardProvider[] = ["claude", "codex", "opencode", "kimi", "glm"];
-      for (const provider of providers) {
-        if (!prefs[`include_${provider}` as keyof UserPreferences]) continue;
-        const flagKey = `account_initial_backfill_done_${user.id}_${provider}`;
-        if (localStorage.getItem(flagKey)) continue;
-        const run = runners[provider];
-        if (run) {
-          run(60);
-          localStorage.setItem(flagKey, "1");
-        }
-      }
-    }
-  }, [prefs, updatePrefs, user]);
+  }, [prefs.stats_source, prefs.account_sync_enabled, updatePrefs]);
 
   const toggleQuickAction = useCallback((key: string) => {
     const items = prefs.quick_action_items ?? [];
