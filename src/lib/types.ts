@@ -81,6 +81,7 @@ export interface UserPreferences {
   monthly_salary?: number;
   usage_alerts_enabled: boolean;
   usage_tracking_enabled: boolean;
+  usage_tracking_migrated?: boolean;
   ai_keys?: {
     gemini?: string;
     openai?: string;

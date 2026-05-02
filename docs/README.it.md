@@ -32,7 +32,6 @@ App per la barra di sistema di macOS e Windows che monitora in tempo reale l'uti
 - **Navigazione per periodo** — esplora i totali settimanali/mensili con le frecce `< >`
 - **Analisi per modello** — visualizzazione del rapporto Input/Output/Cache
 - **Efficienza della cache** — grafico a ciambella con il tasso di hit della cache
-- **Barra avvisi utilizzo** — sessione Claude Code di 5 ore + limiti settimanali in tempo reale (accesso Claude OAuth opzionale)
 
 ### Social e condivisione
 - **Classifica** — confronta l'utilizzo giornaliero/settimanale/mensile con altri sviluppatori (GitHub OAuth, opt-in)
@@ -89,7 +88,7 @@ npm run tauri build   # build di produzione
 
 | Scheda | Contenuto |
 |--------|-----------|
-| **Overview** | Riepilogo odierno, grafico 7 giorni, totali settimanali/mensili, heatmap 8 settimane, barra avvisi utilizzo |
+| **Overview** | Riepilogo odierno, grafico 7 giorni, totali settimanali/mensili, heatmap 8 settimane |
 | **Analytics** | Grafico attivita annuale (2D/3D), grafico 30 giorni, analisi per modello, efficienza cache |
 | **Leaderboard** | Classifica degli utenti, griglia TOP 10 a 7 giorni, badge, mini profili |
 | **Chat** | Chat in tempo reale con i membri della classifica — menzioni, risposte, immagini, traduzione AI |
@@ -110,7 +109,7 @@ Le impostazioni sono organizzate in quattro schede:
 
 | Scheda | Opzioni |
 |--------|---------|
-| **General** | Tema, lingua, aspetto, formato numerico, costo nella barra dei menu, avvio automatico, stipendio mensile, avvisi utilizzo, directory Claude/Codex, monitoraggio utilizzo Claude (OAuth) |
+| **General** | Tema, lingua, aspetto, formato numerico, costo nella barra dei menu, avvio automatico, stipendio mensile, directory Claude/Codex, monitoraggio utilizzo Claude (OAuth) |
 | **Account** | Accesso GitHub, opt-in classifica, link profilo |
 | **AI** | Chiavi API Gemini / OpenAI / Anthropic per la traduzione in chat (criptate localmente) |
 | **Webhooks** | URL webhook Discord / Slack / Telegram, soglie di avviso, finestre monitorate, notifiche di reset |
@@ -146,7 +145,7 @@ Dati condivisi: conteggio giornaliero dei token, costi, messaggi/sessioni. **Nes
 │  ├── Leaderboard + Grid + Badges   │
 │  ├── Chat + MentionAutocomplete    │
 │  ├── MiniProfile / Wrapped / Receipt│
-│  ├── SalaryComparator / UsageAlertBar│
+│  ├── SalaryComparator              │
 │  └── SettingsOverlay (4 tabs)      │
 ├────────────────────────────────────┤
 │  Backend (Tauri v2 / Rust)         │

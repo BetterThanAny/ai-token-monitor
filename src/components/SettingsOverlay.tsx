@@ -295,7 +295,9 @@ function GeneralTab({
       <SettingRow label={useI18n()("settings.usageTracking")}>
         <ToggleSwitch
           checked={prefs.usage_tracking_enabled}
-          onChange={(v) => updatePrefs({ usage_tracking_enabled: v })}
+          onChange={(v) =>
+            updatePrefs({ usage_tracking_enabled: v, usage_tracking_migrated: false })
+          }
         />
       </SettingRow>
 

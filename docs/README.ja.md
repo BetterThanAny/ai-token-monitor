@@ -32,7 +32,6 @@ macOS と Windows のシステムトレイで **Claude Code**、**Codex**、**Op
 - **期間ナビゲーション** — `< >` 矢印で週間/月間集計を過去までブラウズ
 - **モデル別分析** — Input/Output/Cache 比率の可視化
 - **キャッシュ効率** — キャッシュヒット率のドーナツチャート
-- **使用量アラートバー** — Claude Code の 5 時間セッション + 週間プラン上限をライブ表示（任意で Claude OAuth 連携）
 
 ### ソーシャル & 共有
 - **リーダーボード** — 日/週/月の使用量を他の開発者と比較（GitHub OAuth、オプトイン）
@@ -89,7 +88,7 @@ npm run tauri build   # プロダクションビルド
 
 | タブ | 内容 |
 |------|------|
-| **Overview** | 今日のサマリー、7 日間チャート、週間/月間集計、8 週間ヒートマップ、使用量アラートバー |
+| **Overview** | 今日のサマリー、7 日間チャート、週間/月間集計、8 週間ヒートマップ |
 | **Analytics** | 年間アクティビティグラフ（2D/3D）、30 日間チャート、モデル別分析、キャッシュ効率 |
 | **Leaderboard** | 使用量ランキング、7 日間 TOP 10 グリッド、バッジ、ミニプロフィール |
 | **Chat** | リーダーボードメンバーとのリアルタイムチャット — メンション、返信、画像、AI 翻訳 |
@@ -110,7 +109,7 @@ npm run tauri build   # プロダクションビルド
 
 | タブ | オプション |
 |------|-----------|
-| **General** | テーマ、言語、外観、数値フォーマット、メニューバーコスト、自動起動、月給、使用量アラート、Claude/Codex ディレクトリ、Claude 使用量追跡（OAuth） |
+| **General** | テーマ、言語、外観、数値フォーマット、メニューバーコスト、自動起動、月給、Claude/Codex ディレクトリ、Claude 使用量追跡（OAuth） |
 | **Account** | GitHub サインイン、リーダーボードオプトイン、プロフィールリンク |
 | **AI** | Gemini / OpenAI / Anthropic API キー（チャット翻訳、ローカル暗号化保存） |
 | **Webhooks** | Discord / Slack / Telegram の Webhook URL、閾値、監視ウィンドウ、リセット通知 |
@@ -146,7 +145,7 @@ npm run tauri build   # プロダクションビルド
 │  ├── Leaderboard + Grid + Badges   │
 │  ├── Chat + MentionAutocomplete    │
 │  ├── MiniProfile / Wrapped / Receipt│
-│  ├── SalaryComparator / UsageAlertBar│
+│  ├── SalaryComparator              │
 │  └── SettingsOverlay (4 タブ)      │
 ├────────────────────────────────────┤
 │  Backend (Tauri v2 / Rust)         │
