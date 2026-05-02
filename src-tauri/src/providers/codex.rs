@@ -31,6 +31,8 @@ struct IncrementalCache {
     computed_at: Instant,
     /// Per-file parsed entries keyed by dedup key (session_id:line_index)
     entries: HashMap<String, CodexEntry>,
+    /// Reverse index used to remove stale entries when a changed file shrinks or rewrites keys.
+    entry_keys_by_file: HashMap<PathBuf, HashSet<String>>,
     /// File metadata for mtime-based change detection
     file_meta: HashMap<PathBuf, (SystemTime, u64)>,
 }
@@ -124,6 +126,18 @@ enum ServiceTier {
     Standard,
     Fast,
 }
+
+type CodexSnapshotDedupKey = (
+    u64,
+    u64,
+    u64,
+    u64,
+    TokenUsageSource,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+    Vec<String>,
+);
 
 #[derive(Clone, Debug)]
 struct ServiceTierOverrideWindow {
@@ -539,7 +553,7 @@ impl CodexProvider {
         let mut pending_tool_names: Vec<String> = Vec::new();
         let mut pending_shell_commands: Vec<String> = Vec::new();
         // Track previous snapshot for deduplication of identical consecutive token_count events
-        let mut prev_snapshot: Option<(u64, u64, u64, u64)> = None;
+        let mut prev_snapshot: Option<CodexSnapshotDedupKey> = None;
 
         let reader = BufReader::with_capacity(64 * 1024, file);
         for line in reader.lines().map_while(Result::ok) {
@@ -584,11 +598,9 @@ impl CodexProvider {
                     }
                 }
                 Some("response_item") => {
-                    if let Some((tool_name, shell_command)) = extract_function_call(&value) {
+                    if let Some((tool_name, shell_commands)) = extract_function_call(&value) {
                         pending_tool_names.push(tool_name);
-                        if let Some(command) = shell_command {
-                            pending_shell_commands.push(command);
-                        }
+                        pending_shell_commands.extend(shell_commands);
                     }
                 }
                 Some("event_msg") => {
@@ -621,12 +633,28 @@ impl CodexProvider {
                                 current_service_tier = service_tier;
                             }
 
-                            // Skip duplicate consecutive snapshots
+                            let rate_limits = extract_codex_rate_limits(&value);
+
+                            // Skip only exact repeated token_count snapshots. Token totals alone
+                            // are not enough: two real adjacent requests can have identical usage.
+                            let timestamp = value
+                                .get("timestamp")
+                                .and_then(|v| v.as_str())
+                                .map(ToString::to_string);
+                            let rate_limits_fingerprint = value
+                                .pointer("/payload/rate_limits")
+                                .or_else(|| value.pointer("/payload/info/rate_limits"))
+                                .map(Value::to_string);
                             let snap = (
                                 usage.input_tokens,
                                 usage.output_tokens,
                                 usage.cached_tokens,
                                 usage.total_tokens,
+                                usage.source,
+                                timestamp,
+                                rate_limits_fingerprint,
+                                pending_tool_names.clone(),
+                                pending_shell_commands.clone(),
                             );
                             if prev_snapshot.as_ref() == Some(&snap) {
                                 continue;
@@ -642,7 +670,6 @@ impl CodexProvider {
                             }
 
                             let date = resolve_entry_date(path_date.as_deref(), &value);
-                            let rate_limits = extract_codex_rate_limits(&value);
 
                             let model = if current_model.is_empty() {
                                 "codex".to_string()
@@ -687,11 +714,16 @@ impl CodexProvider {
     fn parse_incremental(
         current_meta: &HashMap<PathBuf, (SystemTime, u64)>,
         cached_entries: &HashMap<String, CodexEntry>,
+        cached_entry_keys_by_file: &HashMap<PathBuf, HashSet<String>>,
         cached_meta: &HashMap<PathBuf, (SystemTime, u64)>,
         config_service_tier: Option<(ServiceTier, SystemTime)>,
         service_tier_overrides: &[ServiceTierOverrideWindow],
-    ) -> HashMap<String, CodexEntry> {
+    ) -> (
+        HashMap<String, CodexEntry>,
+        HashMap<PathBuf, HashSet<String>>,
+    ) {
         let mut entries = cached_entries.clone();
+        let mut entry_keys_by_file = cached_entry_keys_by_file.clone();
 
         let mut changed_files: Vec<&PathBuf> = Vec::new();
         for (path, (mtime, size)) in current_meta {
@@ -708,25 +740,35 @@ impl CodexProvider {
         let has_deleted = cached_meta.keys().any(|p| !current_meta.contains_key(p));
         if has_deleted {
             let mut fresh = HashMap::new();
+            let mut fresh_keys_by_file = HashMap::new();
             for path in current_meta.keys() {
-                fresh.extend(Self::parse_single_file(
+                let file_entries = Self::parse_single_file(
                     path,
                     config_service_tier.clone(),
                     service_tier_overrides,
-                ));
+                );
+                fresh_keys_by_file.insert(path.clone(), file_entries.keys().cloned().collect());
+                fresh.extend(file_entries);
             }
-            return fresh;
+            return (fresh, fresh_keys_by_file);
         }
 
         if !changed_files.is_empty() {
             let start = Instant::now();
             let count = changed_files.len();
             for path in &changed_files {
+                if let Some(old_keys) = entry_keys_by_file.remove(*path) {
+                    for key in old_keys {
+                        entries.remove(&key);
+                    }
+                }
+
                 let file_entries = Self::parse_single_file(
                     path,
                     config_service_tier.clone(),
                     service_tier_overrides,
                 );
+                entry_keys_by_file.insert((*path).clone(), file_entries.keys().cloned().collect());
                 entries.extend(file_entries);
             }
             eprintln!(
@@ -737,7 +779,7 @@ impl CodexProvider {
             );
         }
 
-        entries
+        (entries, entry_keys_by_file)
     }
 
     /// Build AllStats from parsed entries.
@@ -746,6 +788,7 @@ impl CodexProvider {
         let mut model_usage_map: HashMap<String, ModelUsage> = HashMap::new();
         let mut total_messages: u32 = 0;
         let mut first_date: Option<String> = None;
+        let mut all_session_ids: HashSet<String> = HashSet::new();
         let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
         let mut long_context_sessions: HashSet<(String, &'static str)> = HashSet::new();
         let mut project_map: HashMap<String, ProjectAcc> = HashMap::new();
@@ -795,6 +838,7 @@ impl CodexProvider {
                 .entry(entry.date.clone())
                 .or_default()
                 .insert(entry.session_id.clone());
+            all_session_ids.insert(entry.session_id.clone());
 
             let mu = model_usage_map
                 .entry(entry.model.clone())
@@ -859,7 +903,7 @@ impl CodexProvider {
         let mut daily: Vec<DailyUsage> = daily_map.into_values().collect();
         daily.sort_by(|a, b| a.date.cmp(&b.date));
 
-        let total_sessions = daily.iter().map(|d| d.sessions as u32).sum();
+        let total_sessions = all_session_ids.len() as u32;
         let analytics =
             build_analytics_from_maps(project_map, tool_map, shell_map, mcp_map, activity_map);
 
@@ -1003,7 +1047,7 @@ impl CodexProvider {
         let start = Instant::now();
         let current_meta = self.collect_file_meta();
 
-        let entries = if let Ok(mut cache) = STATS_CACHE.lock() {
+        let (entries, entry_keys_by_file) = if let Ok(mut cache) = STATS_CACHE.lock() {
             if let Some(ref mut cached) = *cache {
                 if cached.file_meta == current_meta {
                     // No files changed — refresh timestamp and return cached
@@ -1020,6 +1064,7 @@ impl CodexProvider {
                 Self::parse_incremental(
                     &current_meta,
                     &cached.entries,
+                    &cached.entry_keys_by_file,
                     &cached.file_meta,
                     self.config_service_tier.clone(),
                     &self.service_tier_overrides,
@@ -1033,18 +1078,21 @@ impl CodexProvider {
                 );
                 let full_start = Instant::now();
                 let mut entries = HashMap::new();
+                let mut entry_keys_by_file = HashMap::new();
                 for path in current_meta.keys() {
-                    entries.extend(Self::parse_single_file(
+                    let file_entries = Self::parse_single_file(
                         path,
                         self.config_service_tier.clone(),
                         &self.service_tier_overrides,
-                    ));
+                    );
+                    entry_keys_by_file.insert(path.clone(), file_entries.keys().cloned().collect());
+                    entries.extend(file_entries);
                 }
                 eprintln!(
                     "[PERF][Codex] Full parse completed in {:?}",
                     full_start.elapsed()
                 );
-                entries
+                (entries, entry_keys_by_file)
             }
         } else {
             return Err("Failed to acquire cache lock".to_string());
@@ -1057,6 +1105,7 @@ impl CodexProvider {
                 stats: stats.clone(),
                 computed_at: Instant::now(),
                 entries,
+                entry_keys_by_file,
                 file_meta: current_meta,
             });
         }
@@ -1293,19 +1342,22 @@ fn extract_client_name(value: &Value) -> Option<String> {
     }
 }
 
-fn extract_function_call(value: &Value) -> Option<(String, Option<String>)> {
+fn extract_function_call(value: &Value) -> Option<(String, Vec<String>)> {
     let payload = value.get("payload")?;
     if payload.get("type").and_then(|v| v.as_str()) != Some("function_call") {
         return None;
     }
     let raw_name = payload.get("name")?.as_str()?;
     let tool_name = normalize_codex_tool_name(raw_name);
-    let shell_command = if raw_name == "exec_command" {
-        payload.get("arguments").and_then(extract_exec_command_name)
+    let shell_commands = if raw_name == "exec_command" {
+        payload
+            .get("arguments")
+            .map(extract_exec_command_names)
+            .unwrap_or_default()
     } else {
-        None
+        Vec::new()
     };
-    Some((tool_name, shell_command))
+    Some((tool_name, shell_commands))
 }
 
 fn normalize_codex_tool_name(name: &str) -> String {
@@ -1322,27 +1374,50 @@ fn normalize_codex_tool_name(name: &str) -> String {
     }
 }
 
-fn extract_exec_command_name(arguments: &Value) -> Option<String> {
+fn extract_exec_command_names(arguments: &Value) -> Vec<String> {
     let parsed;
     let args = if let Some(s) = arguments.as_str() {
-        parsed = serde_json::from_str::<Value>(s).ok()?;
+        let Some(value) = serde_json::from_str::<Value>(s).ok() else {
+            return Vec::new();
+        };
+        parsed = value;
         &parsed
     } else {
         arguments
     };
     args.get("cmd")
         .and_then(|v| v.as_str())
-        .and_then(first_shell_word)
+        .map(extract_shell_commands)
+        .unwrap_or_default()
 }
 
-fn first_shell_word(command: &str) -> Option<String> {
-    let mut parts = command.split_whitespace();
-    let first = parts.next()?.trim_matches(|c: char| c == '\'' || c == '"');
-    if first.is_empty() {
-        None
-    } else {
-        Some(first.to_string())
+fn extract_shell_commands(command: &str) -> Vec<String> {
+    let mut commands = Vec::new();
+    for semi_part in command.split(';') {
+        for and_part in semi_part.split("&&") {
+            for or_part in and_part.split("||") {
+                for segment in or_part.split('|') {
+                    let trimmed = segment.trim().trim_start_matches('&').trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let first_token = trimmed
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("")
+                        .trim_matches(|c: char| c == '\'' || c == '"');
+                    if first_token.is_empty() {
+                        continue;
+                    }
+                    let basename = first_token.rsplit('/').next().unwrap_or(first_token);
+                    if !basename.is_empty() && basename != "cd" {
+                        commands.push(basename.to_string());
+                    }
+                }
+            }
+        }
     }
+    commands
 }
 
 fn extract_codex_rate_limits(value: &Value) -> Option<CodexRateLimitSnapshot> {
@@ -1888,6 +1963,30 @@ mod tests {
         }
     }
 
+    fn temp_jsonl_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "ai-token-monitor-codex-{name}-{}-{nanos}.jsonl",
+            std::process::id()
+        ))
+    }
+
+    fn codex_jsonl_with_token_events(events: &[(&str, u64, u64, u64)]) -> String {
+        let mut lines = vec![
+            r#"{"type":"session_meta","payload":{"id":"same-session","cwd":"/tmp/project","cli_version":"1.0.0"}}"#.to_string(),
+            r#"{"type":"turn_context","payload":{"model":"gpt-5.5"}}"#.to_string(),
+        ];
+        for (timestamp, input, output, total) in events {
+            lines.push(format!(
+                r#"{{"timestamp":"{timestamp}","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":{input},"output_tokens":{output},"cached_input_tokens":0,"total_tokens":{total}}}}}}}}}"#
+            ));
+        }
+        lines.join("\n")
+    }
+
     #[test]
     fn test_extract_date_from_path() {
         let path = PathBuf::from("/home/user/.codex/sessions/2026/03/24/rollout-abc123.jsonl");
@@ -2004,6 +2103,69 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_single_file_keeps_same_token_usage_at_different_timestamps() {
+        let path = temp_jsonl_path("same-token-usage");
+        std::fs::write(
+            &path,
+            codex_jsonl_with_token_events(&[
+                ("2026-05-02T10:00:00Z", 100, 50, 150),
+                ("2026-05-02T10:00:01Z", 100, 50, 150),
+            ]),
+        )
+        .unwrap();
+
+        let entries = CodexProvider::parse_single_file(&path, None, &[]);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_incremental_removes_stale_entries_for_changed_file() {
+        let path = temp_jsonl_path("changed-file");
+        std::fs::write(
+            &path,
+            codex_jsonl_with_token_events(&[("2026-05-02T10:00:00Z", 100, 50, 150)]),
+        )
+        .unwrap();
+
+        let metadata = std::fs::metadata(&path).unwrap();
+        let mut current_meta = HashMap::new();
+        current_meta.insert(
+            path.clone(),
+            (
+                metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                metadata.len(),
+            ),
+        );
+        let mut cached_meta = HashMap::new();
+        cached_meta.insert(path.clone(), (SystemTime::UNIX_EPOCH, 0));
+        let mut cached_entries = HashMap::new();
+        cached_entries.insert("stale:1".to_string(), test_entry());
+        cached_entries.insert("stale:2".to_string(), test_entry());
+        let mut cached_keys_by_file = HashMap::new();
+        cached_keys_by_file.insert(
+            path.clone(),
+            HashSet::from(["stale:1".to_string(), "stale:2".to_string()]),
+        );
+
+        let (entries, keys_by_file) = CodexProvider::parse_incremental(
+            &current_meta,
+            &cached_entries,
+            &cached_keys_by_file,
+            &cached_meta,
+            None,
+            &[],
+        );
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(entries.len(), 1);
+        assert!(!entries.contains_key("stale:1"));
+        assert!(!entries.contains_key("stale:2"));
+        assert_eq!(keys_by_file.get(&path).map(HashSet::len), Some(1));
+    }
+
+    #[test]
     fn test_extract_service_tier_from_turn_context() {
         let value: Value = serde_json::json!({
             "type": "turn_context",
@@ -2025,9 +2187,24 @@ mod tests {
             }
         });
 
-        let (tool, command) = extract_function_call(&value).unwrap();
+        let (tool, commands) = extract_function_call(&value).unwrap();
         assert_eq!(tool, "Bash");
-        assert_eq!(command.as_deref(), Some("cargo"));
+        assert_eq!(commands, vec!["cargo"]);
+    }
+
+    #[test]
+    fn test_extract_function_call_splits_shell_commands() {
+        let value: Value = serde_json::json!({
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"cd /tmp && /usr/bin/python3 script.py | npm test; git status\",\"workdir\":\"/tmp\"}"
+            }
+        });
+
+        let (_, commands) = extract_function_call(&value).unwrap();
+        assert_eq!(commands, vec!["python3", "npm", "git"]);
     }
 
     #[test]
@@ -2254,6 +2431,34 @@ memories = true
         assert_eq!(stats.daily.len(), 1);
         assert_eq!(stats.daily[0].messages, 2);
         assert_eq!(stats.daily[0].sessions, 1);
+    }
+
+    #[test]
+    fn test_build_stats_counts_total_sessions_uniquely_across_days() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-03-24".to_string(),
+                session_id: "session-a".to_string(),
+                total_tokens: 10,
+                ..test_entry()
+            },
+        );
+        entries.insert(
+            "session-a:2".to_string(),
+            CodexEntry {
+                date: "2026-03-25".to_string(),
+                session_id: "session-a".to_string(),
+                total_tokens: 20,
+                ..test_entry()
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        assert_eq!(stats.daily.len(), 2);
+        assert_eq!(stats.daily.iter().map(|d| d.sessions).sum::<u32>(), 2);
+        assert_eq!(stats.total_sessions, 1);
     }
 
     #[test]

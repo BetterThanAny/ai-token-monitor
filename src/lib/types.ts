@@ -133,8 +133,6 @@ export interface UserPreferences {
   salary_enabled: boolean;
   monthly_salary?: number;
   usage_alerts_enabled: boolean;
-  usage_tracking_enabled: boolean;
-  usage_tracking_migrated?: boolean;
   ai_keys?: {
     gemini?: string;
     openai?: string;
@@ -176,14 +174,4 @@ export interface ExtraUsage {
   monthly_limit: number;
   used_credits: number;
   utilization: number;
-}
-
-export interface OAuthUsage {
-  five_hour: UsageWindow | null;
-  seven_day: UsageWindow | null;
-  seven_day_sonnet: UsageWindow | null;
-  seven_day_opus: UsageWindow | null;
-  extra_usage: ExtraUsage | null;
-  fetched_at: string;
-  is_stale: boolean;
 }
