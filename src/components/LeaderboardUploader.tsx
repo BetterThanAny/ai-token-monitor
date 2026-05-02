@@ -23,13 +23,13 @@ export function LeaderboardUploader() {
   const { prefs } = useSettings();
   const optedIn = !!prefs.leaderboard_opted_in;
 
-  // Stats hooks are always called (rules of hooks) but uploads are gated by
-  // `optedIn` and each provider's include flag inside `useSnapshotUploader`.
-  const { stats: claudeStats } = useTokenStats("claude");
-  const { stats: codexStats } = useTokenStats("codex");
-  const { stats: opencodeStats } = useTokenStats("opencode");
-  const { stats: kimiStats } = useTokenStats("kimi");
-  const { stats: glmStats } = useTokenStats("glm");
+  // Stats hooks are always called (rules of hooks), but disabled providers do
+  // not invoke backend scans.
+  const { stats: claudeStats } = useTokenStats("claude", optedIn && prefs.include_claude);
+  const { stats: codexStats } = useTokenStats("codex", optedIn && prefs.include_codex);
+  const { stats: opencodeStats } = useTokenStats("opencode", optedIn && prefs.include_opencode);
+  const { stats: kimiStats } = useTokenStats("kimi", optedIn && prefs.include_kimi);
+  const { stats: glmStats } = useTokenStats("glm", optedIn && prefs.include_glm);
 
   const claude = useSnapshotUploader({
     stats: prefs.include_claude ? claudeStats : null,

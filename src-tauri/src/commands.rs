@@ -16,7 +16,6 @@ use crate::providers::pricing;
 use crate::providers::traits::TokenProvider;
 use crate::providers::types::{AiKeys, AllStats, UserPreferences};
 
-use tauri::Emitter;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use tauri::Manager;
 
@@ -420,10 +419,25 @@ pub fn get_preferences() -> UserPreferences {
         UserPreferences::default()
     };
 
+    let mut prefs_changed = false;
+
     // Migrate: if ai_keys exist in JSON file, move them to encrypted file
     if prefs.ai_keys.is_some() {
         save_ai_keys(&prefs.ai_keys);
         prefs.ai_keys = None;
+        prefs_changed = true;
+    }
+
+    // Older builds auto-enabled Claude OAuth usage tracking for existing users.
+    // Undo that implicit migration so network access only happens after an
+    // explicit current-version opt-in.
+    if prefs.usage_tracking_migrated {
+        prefs.usage_tracking_enabled = false;
+        prefs.usage_tracking_migrated = false;
+        prefs_changed = true;
+    }
+
+    if prefs_changed {
         if let Ok(json) = serde_json::to_string_pretty(&prefs) {
             let _ = fs::write(&path, &json);
         }
@@ -713,41 +727,8 @@ pub fn capture_window(_app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_oauth_usage() -> Option<crate::oauth_usage::OAuthUsage> {
-    crate::oauth_usage::get_cached_usage()
-}
-
-#[tauri::command]
-pub async fn refresh_oauth_usage(app: tauri::AppHandle) -> Option<crate::oauth_usage::OAuthUsage> {
-    // Throttle: if cache is fresh within 30 seconds, return it without hitting the API.
-    // Mirrors the frontend cooldown so rapid manual clicks cannot hammer the OAuth endpoint
-    // even if the UI gate is bypassed.
-    if crate::oauth_usage::is_cache_fresh(30) {
-        return crate::oauth_usage::get_cached_usage();
-    }
-    let result = crate::oauth_usage::fetch_and_cache_usage().await;
-    if result.is_some() {
-        let _ = app.emit("usage-updated", ());
-    }
-    result
-}
-
-#[tauri::command]
 pub fn get_pricing_table() -> pricing::PricingTable {
     pricing::get_pricing_table()
-}
-
-#[tauri::command]
-pub async fn enable_usage_tracking(app: tauri::AppHandle) -> Result<(), String> {
-    let mut prefs = get_preferences();
-    prefs.usage_tracking_enabled = true;
-    set_preferences(app.clone(), prefs)?;
-
-    // Immediately fetch so user sees data right away
-    if let Some(_) = crate::oauth_usage::fetch_and_cache_usage().await {
-        let _ = app.emit("usage-updated", ());
-    }
-    Ok(())
 }
 
 #[tauri::command]

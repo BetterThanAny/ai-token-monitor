@@ -5,7 +5,7 @@
 
 > **[한국어](docs/README.ko.md) | [日本語](docs/README.ja.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md) | [Türkçe](docs/README.tr.md) | [Italiano](docs/README.it.md)**
 
-A system tray app for macOS and Windows that tracks **Claude Code**, **Codex**, and **OpenCode** token usage, cost, and activity in real time — with a built-in leaderboard, chat, and webhook alerts.
+A system tray app for macOS and Windows that tracks **Claude Code**, **Codex**, and **OpenCode** token usage, cost, and activity in real time — with a built-in leaderboard, chat, and optional webhook alerts.
 
 <table>
   <tr>
@@ -60,7 +60,7 @@ A system tray app for macOS and Windows that tracks **Claude Code**, **Codex**, 
 
 ### Notifications & Alerts
 - **Tray cost** — today's cost shown next to the tray icon (macOS menu bar title, Windows tooltip)
-- **Webhook notifications** — Discord, Slack, and Telegram alerts when usage crosses thresholds or resets
+- **Webhook notifications** — Discord, Slack, and Telegram alerts when Claude OAuth usage tracking is enabled and usage crosses thresholds or resets
 - **Auto-updater** — in-app update notifications with download progress
 
 ### Customization
@@ -102,7 +102,7 @@ npm run tauri build   # production build
 
 | Tab | Content |
 |-----|---------|
-| **Overview** | Today's summary, 7-day chart, weekly/monthly totals, 8-week heatmap, usage alert bar |
+| **Overview** | Today's summary, 7-day chart, weekly/monthly totals, 8-week heatmap |
 | **Analytics** | Full-year activity graph (2D/3D), 30-day chart, model breakdown, cache efficiency |
 | **Leaderboard** | Rank against other users, 7-day TOP 10 grid, badges, mini profiles |
 | **Chat** | Realtime chat with leaderboard members — mentions, replies, images, AI translation |
@@ -123,7 +123,7 @@ Settings is organized into four tabs:
 
 | Tab | Options |
 |-----|---------|
-| **General** | Theme, language, appearance, number format, menu bar cost, launch on startup, monthly salary, usage alerts, Claude/Codex directories, Claude usage tracking (OAuth) |
+| **General** | Theme, language, appearance, number format, menu bar cost, launch on startup, monthly salary, Claude/Codex directories, optional Claude usage tracking (OAuth) |
 | **Account** | GitHub sign-in, leaderboard opt-in, profile links |
 | **AI** | Gemini / OpenAI / Anthropic API keys for chat translation (encrypted locally) |
 | **Webhooks** | Discord / Slack / Telegram webhook URLs, alert thresholds, monitored windows, reset notifications |
@@ -144,7 +144,7 @@ Shared data: daily token count, cost, messages/sessions. **No code or conversati
 | **Codex** | `~/.codex/sessions/**/*.jsonl` | Supports multiple roots. |
 | **OpenCode** | `~/.local/share/opencode/**/*.jsonl` | Per-model pricing from bundled registry. |
 
-**Network requests**: only when leaderboard/chat is opted in (sends aggregated data to Supabase) or when a webhook fires. Without these features, the app runs completely offline. AI translation keys, if set, call the provider you chose directly.
+**Network requests**: only when leaderboard/chat is opted in (sends aggregated data to Supabase), Claude OAuth usage tracking is explicitly enabled, a webhook fires, or AI translation keys are used. Without these features, the app runs completely offline.
 
 ## Architecture
 
@@ -159,7 +159,7 @@ Shared data: daily token count, cost, messages/sessions. **No code or conversati
 │  ├── Leaderboard + Grid + Badges   │
 │  ├── Chat + MentionAutocomplete    │
 │  ├── MiniProfile / Wrapped / Receipt│
-│  ├── SalaryComparator / UsageAlertBar│
+│  ├── SalaryComparator                 │
 │  └── SettingsOverlay (4 tabs)      │
 ├────────────────────────────────────┤
 │  Backend (Tauri v2 / Rust)         │
