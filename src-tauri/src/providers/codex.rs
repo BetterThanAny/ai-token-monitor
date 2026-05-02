@@ -85,6 +85,21 @@ fn calculate_cost(
 
 // --- Entry type ---
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TokenUsageSource {
+    Last,
+    TotalFallback,
+}
+
+#[derive(Clone, Copy)]
+struct TokenUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_tokens: u64,
+    total_tokens: u64,
+    source: TokenUsageSource,
+}
+
 #[derive(Clone)]
 struct CodexEntry {
     date: String,
@@ -94,6 +109,7 @@ struct CodexEntry {
     output_tokens: u64,
     cached_tokens: u64,
     total_tokens: u64,
+    usage_source: TokenUsageSource,
 }
 
 // --- Provider ---
@@ -210,19 +226,27 @@ impl CodexProvider {
                                 continue;
                             }
 
-                            let Some((input, output, cached, total)) = extract_token_usage(info)
-                            else {
+                            let Some(usage) = extract_token_usage(info) else {
                                 continue;
                             };
 
                             // Skip duplicate consecutive snapshots
-                            let snap = (input, output, cached, total);
+                            let snap = (
+                                usage.input_tokens,
+                                usage.output_tokens,
+                                usage.cached_tokens,
+                                usage.total_tokens,
+                            );
                             if prev_snapshot.as_ref() == Some(&snap) {
                                 continue;
                             }
                             prev_snapshot = Some(snap);
 
-                            if input == 0 && output == 0 && cached == 0 && total == 0 {
+                            if usage.input_tokens == 0
+                                && usage.output_tokens == 0
+                                && usage.cached_tokens == 0
+                                && usage.total_tokens == 0
+                            {
                                 continue;
                             }
 
@@ -241,10 +265,11 @@ impl CodexProvider {
                                     date,
                                     model,
                                     session_id: session_id.clone(),
-                                    input_tokens: input,
-                                    output_tokens: output,
-                                    cached_tokens: cached,
-                                    total_tokens: total,
+                                    input_tokens: usage.input_tokens,
+                                    output_tokens: usage.output_tokens,
+                                    cached_tokens: usage.cached_tokens,
+                                    total_tokens: usage.total_tokens,
+                                    usage_source: usage.source,
                                 },
                             );
                         }
@@ -316,7 +341,9 @@ impl CodexProvider {
 
         for entry in entries.values() {
             if let Some(family) = long_context_model_family(&entry.model) {
-                if entry.input_tokens > LONG_CONTEXT_THRESHOLD {
+                if entry.usage_source == TokenUsageSource::Last
+                    && entry.input_tokens > LONG_CONTEXT_THRESHOLD
+                {
                     long_context_sessions.insert((entry.session_id.clone(), family));
                 }
             }
@@ -574,12 +601,18 @@ fn extract_date_from_timestamp(value: &Value) -> Option<String> {
     }
 }
 
-/// Extract per-turn token usage from a token_count event's info field.
-/// Prefers `last_token_usage` (per-turn delta) over `total_token_usage` (cumulative).
-fn extract_token_usage(info: &Value) -> Option<(u64, u64, u64, u64)> {
-    let usage = info
-        .get("last_token_usage")
-        .or_else(|| info.get("total_token_usage"))?;
+/// Extract token usage from a token_count event's info field.
+///
+/// `last_token_usage` is the per-response/request usage and is the only source
+/// that can prove a prompt crossed the long-context threshold. `total_token_usage`
+/// is a cumulative fallback for older logs, so it is kept for cost accounting but
+/// must not trigger long-context pricing.
+fn extract_token_usage(info: &Value) -> Option<TokenUsage> {
+    let (usage, source) = if let Some(last) = info.get("last_token_usage") {
+        (last, TokenUsageSource::Last)
+    } else {
+        (info.get("total_token_usage")?, TokenUsageSource::TotalFallback)
+    };
 
     let input = usage
         .get("input_tokens")
@@ -598,7 +631,13 @@ fn extract_token_usage(info: &Value) -> Option<(u64, u64, u64, u64)> {
         .and_then(|v| v.as_u64())
         .unwrap_or(input + output);
 
-    Some((input, output, cached, total))
+    Some(TokenUsage {
+        input_tokens: input,
+        output_tokens: output,
+        cached_tokens: cached,
+        total_tokens: total,
+        source,
+    })
 }
 
 fn resolve_entry_date(path_date: Option<&str>, value: &Value) -> String {
@@ -656,11 +695,12 @@ mod tests {
                 "cached_input_tokens": 2
             }
         });
-        let (input, output, cached, total) = extract_token_usage(&info).unwrap();
-        assert_eq!(input, 20);
-        assert_eq!(output, 5);
-        assert_eq!(cached, 2);
-        assert_eq!(total, 25);
+        let usage = extract_token_usage(&info).unwrap();
+        assert_eq!(usage.input_tokens, 20);
+        assert_eq!(usage.output_tokens, 5);
+        assert_eq!(usage.cached_tokens, 2);
+        assert_eq!(usage.total_tokens, 25);
+        assert_eq!(usage.source, TokenUsageSource::Last);
     }
 
     #[test]
@@ -692,11 +732,12 @@ mod tests {
                 "cached_input_tokens": 10
             }
         });
-        let (input, output, cached, total) = extract_token_usage(&info).unwrap();
-        assert_eq!(input, 200);
-        assert_eq!(output, 100);
-        assert_eq!(cached, 10);
-        assert_eq!(total, 300);
+        let usage = extract_token_usage(&info).unwrap();
+        assert_eq!(usage.input_tokens, 200);
+        assert_eq!(usage.output_tokens, 100);
+        assert_eq!(usage.cached_tokens, 10);
+        assert_eq!(usage.total_tokens, 300);
+        assert_eq!(usage.source, TokenUsageSource::TotalFallback);
     }
 
     #[test]
@@ -711,8 +752,17 @@ mod tests {
         });
         let result = extract_token_usage(&info);
         assert!(result.is_some());
-        let (i, o, c, t) = result.unwrap();
-        assert_eq!((i, o, c, t), (0, 0, 0, 0));
+        let usage = result.unwrap();
+        assert_eq!(
+            (
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cached_tokens,
+                usage.total_tokens
+            ),
+            (0, 0, 0, 0)
+        );
+        assert_eq!(usage.source, TokenUsageSource::Last);
     }
 
     #[test]
@@ -780,6 +830,7 @@ mod tests {
                 output_tokens: 50,
                 cached_tokens: 25,
                 total_tokens: 150,
+                usage_source: TokenUsageSource::Last,
             },
         );
         entries.insert(
@@ -792,6 +843,7 @@ mod tests {
                 output_tokens: 25,
                 cached_tokens: 10,
                 total_tokens: 225,
+                usage_source: TokenUsageSource::Last,
             },
         );
 
@@ -815,6 +867,7 @@ mod tests {
                 output_tokens: 500_000,
                 cached_tokens: 200_000,
                 total_tokens: 1_500_000,
+                usage_source: TokenUsageSource::Last,
             },
         );
 
@@ -843,6 +896,7 @@ mod tests {
                 output_tokens: 0,
                 cached_tokens: 0,
                 total_tokens: LONG_CONTEXT_THRESHOLD,
+                usage_source: TokenUsageSource::Last,
             },
         );
         entries.insert(
@@ -855,6 +909,7 @@ mod tests {
                 output_tokens: 0,
                 cached_tokens: 0,
                 total_tokens: LONG_CONTEXT_THRESHOLD + 1,
+                usage_source: TokenUsageSource::Last,
             },
         );
 
@@ -864,6 +919,32 @@ mod tests {
 
         assert!((short.cost_usd - 1.36).abs() < 0.0001);
         assert!((long.cost_usd - 2.72001).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_total_usage_fallback_does_not_trigger_long_context_multiplier() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "fallback-total:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "fallback-total".to_string(),
+                input_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                output_tokens: 10_000,
+                cached_tokens: 0,
+                total_tokens: LONG_CONTEXT_THRESHOLD + 11_000,
+                usage_source: TokenUsageSource::TotalFallback,
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        let daily = &stats.daily[0];
+        // total_token_usage is cumulative fallback data. It can keep ordinary
+        // cost accounting alive for old logs, but it cannot prove a single
+        // prompt/context crossed 272K, so GPT-5.5 stays at short-context rates:
+        // 273K input * $5/MTok + 10K output * $30/MTok = $1.665.
+        assert!((daily.cost_usd - 1.665).abs() < 0.0001);
     }
 
     #[test]
@@ -879,6 +960,7 @@ mod tests {
                 output_tokens: 0,
                 cached_tokens: 0,
                 total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                usage_source: TokenUsageSource::Last,
             },
         );
         entries.insert(
@@ -891,6 +973,7 @@ mod tests {
                 output_tokens: 1_000,
                 cached_tokens: 0,
                 total_tokens: 2_000,
+                usage_source: TokenUsageSource::Last,
             },
         );
 
@@ -913,6 +996,7 @@ mod tests {
                 output_tokens: 0,
                 cached_tokens: 0,
                 total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                usage_source: TokenUsageSource::Last,
             },
         );
         entries.insert(
@@ -925,6 +1009,7 @@ mod tests {
                 output_tokens: 0,
                 cached_tokens: 0,
                 total_tokens: 1_000,
+                usage_source: TokenUsageSource::Last,
             },
         );
 
