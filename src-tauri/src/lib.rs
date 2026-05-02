@@ -844,9 +844,6 @@ pub fn run() {
             commands::copy_png_to_clipboard,
             commands::save_png_to_file,
             commands::get_pricing_table,
-            commands::get_oauth_usage,
-            commands::refresh_oauth_usage,
-            commands::enable_usage_tracking,
             commands::get_ai_keys,
             commands::test_webhook,
             ai_translate::translate_text,
@@ -993,22 +990,7 @@ pub fn run() {
             // Start file watcher
             start_file_watcher(app.handle().clone());
 
-            // Migrate existing users: auto-enable usage tracking if prefs file exists
-            {
-                let prefs_file = commands::prefs_path();
-                if prefs_file.exists() {
-                    let mut prefs = commands::get_preferences();
-                    if !prefs.usage_tracking_migrated {
-                        prefs.usage_tracking_enabled = true;
-                        prefs.usage_tracking_migrated = true;
-                        if let Ok(json) = serde_json::to_string_pretty(&prefs) {
-                            let _ = std::fs::write(&prefs_file, json);
-                        }
-                    }
-                }
-            }
-
-            // Start OAuth usage polling (5-minute interval, only when tracking enabled)
+            // Start OAuth usage polling for webhook/alert checks only after explicit opt-in.
             {
                 let handle = app.handle().clone();
                 thread::spawn(move || {
@@ -1017,7 +999,7 @@ pub fn run() {
                         let poll_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             let prefs = commands::get_preferences();
                             if prefs.usage_tracking_enabled {
-                                // Skip if cache was recently populated (e.g. by enable_usage_tracking)
+                                // Skip if cache was recently populated by another opt-in fetch.
                                 if !oauth_usage::is_cache_fresh(30) {
                                     if let Some(_) = rt.block_on(oauth_usage::fetch_and_cache_usage()) {
                                         let _ = handle.emit("usage-updated", ());

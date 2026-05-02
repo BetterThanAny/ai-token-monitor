@@ -11,11 +11,11 @@ interface UseCombinedStatsProps {
 }
 
 export function useCombinedStats({ includeClaude, includeCodex, includeOpencode, includeKimi, includeGlm }: UseCombinedStatsProps) {
-  const claude = useTokenStats("claude");
-  const codex = useTokenStats("codex");
-  const opencode = useTokenStats("opencode");
-  const kimi = useTokenStats("kimi");
-  const glm = useTokenStats("glm");
+  const claude = useTokenStats("claude", includeClaude);
+  const codex = useTokenStats("codex", includeCodex);
+  const opencode = useTokenStats("opencode", includeOpencode);
+  const kimi = useTokenStats("kimi", includeKimi);
+  const glm = useTokenStats("glm", includeGlm);
 
   const stats = useMemo<AllStats | null>(() => {
     const sources: (AllStats | null)[] = [];

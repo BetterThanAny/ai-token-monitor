@@ -47,13 +47,40 @@ pub fn get_cached_stats() -> Option<AllStats> {
 
 use super::pricing;
 
-fn calculate_cost(pricing: &pricing::CodexPricing, input: u64, output: u64, cached: u64) -> f64 {
+const LONG_CONTEXT_THRESHOLD: u64 = 272_000;
+const LONG_CONTEXT_INPUT_MULTIPLIER: f64 = 2.0;
+const LONG_CONTEXT_OUTPUT_MULTIPLIER: f64 = 1.5;
+
+fn long_context_model_family(model: &str) -> Option<&'static str> {
+    if model.contains("gpt-5.5-pro") {
+        Some("gpt-5.5-pro")
+    } else if model.contains("gpt-5.5") {
+        Some("gpt-5.5")
+    } else if model.contains("gpt-5.4-pro") {
+        Some("gpt-5.4-pro")
+    } else if model.contains("gpt-5.4-mini") || model.contains("gpt-5.4-nano") {
+        None
+    } else if model.contains("gpt-5.4") {
+        Some("gpt-5.4")
+    } else {
+        None
+    }
+}
+
+fn calculate_cost(
+    pricing: &pricing::CodexPricing,
+    input: u64,
+    output: u64,
+    cached: u64,
+    input_multiplier: f64,
+    output_multiplier: f64,
+) -> f64 {
     // OpenAI's input_tokens includes cached_input_tokens as a subset.
     // Subtract cached to avoid double-counting: charge uncached at full rate, cached at discounted rate.
     let uncached_input = input.saturating_sub(cached);
-    (uncached_input as f64 / 1_000_000.0) * pricing.input
-        + (output as f64 / 1_000_000.0) * pricing.output
-        + (cached as f64 / 1_000_000.0) * pricing.cached_input
+    (uncached_input as f64 / 1_000_000.0) * pricing.input * input_multiplier
+        + (output as f64 / 1_000_000.0) * pricing.output * output_multiplier
+        + (cached as f64 / 1_000_000.0) * pricing.cached_input * input_multiplier
 }
 
 // --- Entry type ---
@@ -285,6 +312,15 @@ impl CodexProvider {
         let mut total_messages: u32 = 0;
         let mut first_date: Option<String> = None;
         let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut long_context_sessions: HashSet<(String, &'static str)> = HashSet::new();
+
+        for entry in entries.values() {
+            if let Some(family) = long_context_model_family(&entry.model) {
+                if entry.input_tokens > LONG_CONTEXT_THRESHOLD {
+                    long_context_sessions.insert((entry.session_id.clone(), family));
+                }
+            }
+        }
 
         for entry in entries.values() {
             total_messages += 1;
@@ -294,11 +330,24 @@ impl CodexProvider {
             }
 
             let pricing = pricing::get_codex_pricing(&entry.model);
+            let is_long_context = match long_context_model_family(&entry.model) {
+                Some(family) => {
+                    long_context_sessions.contains(&(entry.session_id.clone(), family))
+                }
+                None => false,
+            };
+            let (input_multiplier, output_multiplier) = if is_long_context {
+                (LONG_CONTEXT_INPUT_MULTIPLIER, LONG_CONTEXT_OUTPUT_MULTIPLIER)
+            } else {
+                (1.0, 1.0)
+            };
             let cost = calculate_cost(
                 &pricing,
                 entry.input_tokens,
                 entry.output_tokens,
                 entry.cached_tokens,
+                input_multiplier,
+                output_multiplier,
             );
 
             let daily = daily_map
@@ -669,11 +718,13 @@ mod tests {
     #[test]
     fn test_pricing_models() {
         let o3 = pricing::get_codex_pricing("o3-2025-04-16");
-        assert!((o3.input - 0.40).abs() < 0.001);
-        assert!((o3.output - 1.60).abs() < 0.001);
+        assert!((o3.input - 2.00).abs() < 0.001);
+        assert!((o3.cached_input - 0.50).abs() < 0.001);
+        assert!((o3.output - 8.00).abs() < 0.001);
 
         let o4mini = pricing::get_codex_pricing("o4-mini-2025-04-16");
         assert!((o4mini.input - 1.10).abs() < 0.001);
+        assert!((o4mini.cached_input - 0.275).abs() < 0.001);
 
         let gpt41 = pricing::get_codex_pricing("gpt-4.1-2025-04-14");
         assert!((gpt41.input - 2.00).abs() < 0.001);
@@ -683,9 +734,19 @@ mod tests {
 
         let codex_mini = pricing::get_codex_pricing("codex-mini-latest");
         assert!((codex_mini.input - 1.50).abs() < 0.001);
+        assert!((codex_mini.cached_input - 0.375).abs() < 0.001);
 
         let gpt52codex = pricing::get_codex_pricing("gpt-5.2-codex");
-        assert!((gpt52codex.input - 1.25).abs() < 0.001);
+        assert!((gpt52codex.input - 1.75).abs() < 0.001);
+        assert!((gpt52codex.output - 14.00).abs() < 0.001);
+
+        let gpt52 = pricing::get_codex_pricing("gpt-5.2");
+        assert!((gpt52.input - 1.75).abs() < 0.001);
+        assert!((gpt52.output - 14.00).abs() < 0.001);
+
+        let gpt53spark = pricing::get_codex_pricing("gpt-5.3-codex-spark");
+        assert!((gpt53spark.input - 1.75).abs() < 0.001);
+        assert!((gpt53spark.output - 14.00).abs() < 0.001);
 
         let unknown = pricing::get_codex_pricing("some-future-model");
         assert!((unknown.input - 2.50).abs() < 0.001);
@@ -701,7 +762,7 @@ mod tests {
         // input=1M (includes 200K cached), output=500K, cached=200K
         // uncached_input = 1M - 200K = 800K
         // cost = (800K/1M)*1.0 + (500K/1M)*5.0 + (200K/1M)*0.5 = 0.8 + 2.5 + 0.1 = 3.4
-        let cost = calculate_cost(&pricing, 1_000_000, 500_000, 200_000);
+        let cost = calculate_cost(&pricing, 1_000_000, 500_000, 200_000, 1.0, 1.0);
         let expected = 0.8 + 2.5 + 0.1;
         assert!((cost - expected).abs() < 0.0001);
     }
@@ -739,5 +800,147 @@ mod tests {
         assert_eq!(stats.daily.len(), 1);
         assert_eq!(stats.daily[0].messages, 2);
         assert_eq!(stats.daily[0].sessions, 1);
+    }
+
+    #[test]
+    fn test_build_stats_applies_long_context_multiplier_to_gpt55_session() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: 1_000_000,
+                output_tokens: 500_000,
+                cached_tokens: 200_000,
+                total_tokens: 1_500_000,
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        let daily = &stats.daily[0];
+        // GPT-5.5 long-context standard pricing:
+        // 800K uncached input * $10/MTok + 200K cached input * $1/MTok
+        // + 500K output * $45/MTok = $30.70.
+        assert!((daily.cost_usd - 30.70).abs() < 0.0001);
+        assert_eq!(daily.input_tokens, 800_000);
+        assert_eq!(daily.cache_read_tokens, 200_000);
+        assert_eq!(stats.model_usage["gpt-5.5"].input_tokens, 800_000);
+        assert_eq!(stats.model_usage["gpt-5.5"].cache_read, 200_000);
+    }
+
+    #[test]
+    fn test_long_context_threshold_is_strictly_greater_than_272k() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "short-threshold:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "short-threshold".to_string(),
+                input_tokens: LONG_CONTEXT_THRESHOLD,
+                output_tokens: 0,
+                cached_tokens: 0,
+                total_tokens: LONG_CONTEXT_THRESHOLD,
+            },
+        );
+        entries.insert(
+            "long-threshold:1".to_string(),
+            CodexEntry {
+                date: "2026-05-03".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "long-threshold".to_string(),
+                input_tokens: LONG_CONTEXT_THRESHOLD + 1,
+                output_tokens: 0,
+                cached_tokens: 0,
+                total_tokens: LONG_CONTEXT_THRESHOLD + 1,
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        let short = stats.daily.iter().find(|d| d.date == "2026-05-02").unwrap();
+        let long = stats.daily.iter().find(|d| d.date == "2026-05-03").unwrap();
+
+        assert!((short.cost_usd - 1.36).abs() < 0.0001);
+        assert!((long.cost_usd - 2.72001).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_long_context_applies_to_all_entries_in_same_session_and_model_family() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                output_tokens: 0,
+                cached_tokens: 0,
+                total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+            },
+        );
+        entries.insert(
+            "session-a:2".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: 1_000,
+                output_tokens: 1_000,
+                cached_tokens: 0,
+                total_tokens: 2_000,
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        let daily = &stats.daily[0];
+        let expected = 2.73 + 0.01 + 0.045;
+        assert!((daily.cost_usd - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_long_context_does_not_bleed_across_model_families() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                output_tokens: 0,
+                cached_tokens: 0,
+                total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+            },
+        );
+        entries.insert(
+            "session-a:2".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.4".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: 1_000,
+                output_tokens: 0,
+                cached_tokens: 0,
+                total_tokens: 1_000,
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        let daily = &stats.daily[0];
+        let expected = 2.73 + 0.0025;
+        assert!((daily.cost_usd - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_long_context_model_matching_excludes_gpt54_mini_and_nano() {
+        assert_eq!(long_context_model_family("gpt-5.5"), Some("gpt-5.5"));
+        assert_eq!(long_context_model_family("gpt-5.5-pro"), Some("gpt-5.5-pro"));
+        assert_eq!(long_context_model_family("gpt-5.4"), Some("gpt-5.4"));
+        assert_eq!(long_context_model_family("gpt-5.4-pro"), Some("gpt-5.4-pro"));
+        assert_eq!(long_context_model_family("gpt-5.4-mini"), None);
+        assert_eq!(long_context_model_family("gpt-5.4-nano"), None);
     }
 }

@@ -5,14 +5,18 @@ import type { AllStats } from "../lib/types";
 
 export type StatsProvider = "claude" | "codex" | "opencode" | "kimi" | "glm";
 
-export function useTokenStats(provider: StatsProvider = "claude") {
+export function useTokenStats(provider: StatsProvider = "claude", enabled = true) {
   const [stats, setStats] = useState<AllStats | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const hasDataRef = useRef(false);
   const requestIdRef = useRef(0);
 
   const fetchStats = useCallback(async () => {
+    if (!enabled) {
+      return;
+    }
+
     const requestId = ++requestIdRef.current;
     try {
       const command = provider === "codex" ? "get_codex_stats" : provider === "opencode" ? "get_opencode_stats" : provider === "kimi" ? "get_kimi_stats" : provider === "glm" ? "get_glm_stats" : "get_all_stats";
@@ -31,9 +35,19 @@ export function useTokenStats(provider: StatsProvider = "claude") {
       if (requestId !== requestIdRef.current) return;
       setLoading(false);
     }
-  }, [provider]);
+  }, [provider, enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      hasDataRef.current = false;
+      setStats(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(!hasDataRef.current);
     fetchStats();
 
     // Listen for file watcher events

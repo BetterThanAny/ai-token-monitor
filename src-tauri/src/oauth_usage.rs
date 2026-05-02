@@ -40,8 +40,7 @@ static OAUTH_CACHE: Mutex<Option<CacheEntry>> = Mutex::new(None);
 static RATE_LIMIT_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// Flag to prevent concurrent fetch_and_cache_usage calls.
-/// This avoids duplicate keychain prompts when enable_usage_tracking
-/// and the polling loop race to call fetch simultaneously.
+/// This avoids duplicate keychain prompts when concurrent opt-in fetches race.
 static FETCH_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// RAII guard that resets FETCH_IN_PROGRESS to false when dropped.

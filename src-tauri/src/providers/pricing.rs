@@ -10,6 +10,10 @@ static PRICING: OnceLock<PricingConfig> = OnceLock::new();
 
 #[derive(Deserialize)]
 struct PricingConfig {
+    #[serde(default = "unknown_version")]
+    version: String,
+    #[serde(default = "unknown_last_updated")]
+    last_updated: String,
     claude: ProviderConfig,
     codex: ProviderConfig,
     #[serde(default)]
@@ -18,6 +22,14 @@ struct PricingConfig {
     kimi: Option<ProviderConfig>,
     #[serde(default)]
     glm: Option<ProviderConfig>,
+}
+
+fn unknown_version() -> String {
+    "unknown".to_string()
+}
+
+fn unknown_last_updated() -> String {
+    "unknown".to_string()
 }
 
 #[derive(Deserialize)]
@@ -84,11 +96,19 @@ pub struct GlmPricing {
 
 fn config() -> &'static PricingConfig {
     PRICING.get_or_init(|| {
+        let embedded_cfg: PricingConfig =
+            serde_json::from_str(EMBEDDED_PRICING).expect("embedded pricing.json must be valid");
+
         // Try loading from user's ~/.claude/pricing.json first
         if let Some(home) = dirs::home_dir() {
             let user_path = home.join(".claude").join("pricing.json");
             if let Ok(contents) = std::fs::read_to_string(&user_path) {
-                if let Ok(cfg) = serde_json::from_str(&contents) {
+                if !is_user_pricing_current(&contents, EMBEDDED_PRICING) {
+                    eprintln!(
+                        "[PRICING] Ignoring stale user pricing file {}; using embedded pricing data",
+                        user_path.display()
+                    );
+                } else if let Ok(cfg) = serde_json::from_str(&contents) {
                     eprintln!("[PRICING] Loaded from {}", user_path.display());
                     return cfg;
                 }
@@ -97,8 +117,32 @@ fn config() -> &'static PricingConfig {
 
         // Fallback to embedded
         eprintln!("[PRICING] Using embedded pricing data");
-        serde_json::from_str(EMBEDDED_PRICING).expect("embedded pricing.json must be valid")
+        embedded_cfg
     })
+}
+
+fn is_user_pricing_current(user_contents: &str, embedded_contents: &str) -> bool {
+    let user_version = pricing_version(user_contents);
+    let embedded_version = pricing_version(embedded_contents);
+    match (user_version, embedded_version) {
+        (Some(user), Some(embedded)) => user >= embedded,
+        _ => false,
+    }
+}
+
+fn pricing_version(contents: &str) -> Option<Vec<u32>> {
+    let raw: serde_json::Value = serde_json::from_str(contents).ok()?;
+    let version = raw.get("version")?.as_str()?;
+    let parsed: Vec<u32> = version
+        .split('.')
+        .map(str::parse::<u32>)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    if parsed.is_empty() {
+        None
+    } else {
+        Some(parsed)
+    }
 }
 
 fn find_pricing<'a>(provider: &'a ProviderConfig, model: &str) -> &'a PricingEntry {
@@ -259,11 +303,9 @@ fn deduplicated_rows(provider: &ProviderConfig, use_cached_input: bool) -> Vec<P
 
 pub fn get_pricing_table() -> PricingTable {
     let cfg = config();
-    // Read version/last_updated from the raw JSON
-    let raw: serde_json::Value = serde_json::from_str(EMBEDDED_PRICING).unwrap_or_default();
     PricingTable {
-        version: raw.get("version").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
-        last_updated: raw.get("last_updated").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+        version: cfg.version.clone(),
+        last_updated: cfg.last_updated.clone(),
         claude: deduplicated_rows(&cfg.claude, false),
         codex: deduplicated_rows(&cfg.codex, true),
         opencode: cfg.opencode.as_ref().map(|oc| deduplicated_rows(oc, false)).unwrap_or_default(),
@@ -287,6 +329,27 @@ mod tests {
         assert!(!cfg.kimi.unwrap().models.is_empty());
         assert!(cfg.glm.is_some());
         assert!(!cfg.glm.unwrap().models.is_empty());
+    }
+
+    #[test]
+    fn stale_user_pricing_does_not_override_embedded() {
+        let user = r#"{"version":"1.2.0"}"#;
+        let embedded = r#"{"version":"1.3.1"}"#;
+        assert!(!is_user_pricing_current(user, embedded));
+    }
+
+    #[test]
+    fn newer_user_pricing_can_override_embedded() {
+        let user = r#"{"version":"1.4.0"}"#;
+        let embedded = r#"{"version":"1.3.1"}"#;
+        assert!(is_user_pricing_current(user, embedded));
+    }
+
+    #[test]
+    fn unversioned_user_pricing_does_not_override_embedded() {
+        let user = r#"{"codex":{"models":[]}}"#;
+        let embedded = r#"{"version":"1.3.1"}"#;
+        assert!(!is_user_pricing_current(user, embedded));
     }
 
     #[test]
@@ -345,12 +408,21 @@ mod tests {
     fn codex_o4_mini_pricing() {
         let p = get_codex_pricing("o4-mini-2025-04-16");
         assert!((p.input - 1.10).abs() < 0.001);
+        assert!((p.cached_input - 0.275).abs() < 0.001);
+        assert!((p.output - 4.40).abs() < 0.001);
     }
 
     #[test]
     fn codex_gpt52_pricing() {
-        let p = get_codex_pricing("gpt-5.2-codex");
-        assert!((p.input - 1.25).abs() < 0.001);
+        let codex = get_codex_pricing("gpt-5.2-codex");
+        assert!((codex.input - 1.75).abs() < 0.001);
+        assert!((codex.cached_input - 0.175).abs() < 0.001);
+        assert!((codex.output - 14.00).abs() < 0.001);
+
+        let base = get_codex_pricing("gpt-5.2");
+        assert!((base.input - 1.75).abs() < 0.001);
+        assert!((base.cached_input - 0.175).abs() < 0.001);
+        assert!((base.output - 14.00).abs() < 0.001);
     }
 
     #[test]
@@ -390,5 +462,29 @@ mod tests {
         let p = get_codex_pricing("gpt-5.5-2026-04-23");
         assert!((p.input - 5.00).abs() < 0.001, "GPT-5.5 dated snapshot must match gpt-5.5, got input ${}", p.input);
         assert!((p.output - 30.00).abs() < 0.001);
+    }
+
+    #[test]
+    fn codex_legacy_o3_uses_current_standard_api_price() {
+        let p = get_codex_pricing("o3-2025-04-16");
+        assert!((p.input - 2.00).abs() < 0.001);
+        assert!((p.cached_input - 0.50).abs() < 0.001);
+        assert!((p.output - 8.00).abs() < 0.001);
+    }
+
+    #[test]
+    fn codex_mini_latest_uses_cached_input_price() {
+        let p = get_codex_pricing("codex-mini-latest");
+        assert!((p.input - 1.50).abs() < 0.001);
+        assert!((p.cached_input - 0.375).abs() < 0.001);
+        assert!((p.output - 6.00).abs() < 0.001);
+    }
+
+    #[test]
+    fn codex_spark_uses_gpt53_codex_api_equivalent_estimate() {
+        let p = get_codex_pricing("gpt-5.3-codex-spark");
+        assert!((p.input - 1.75).abs() < 0.001);
+        assert!((p.cached_input - 0.175).abs() < 0.001);
+        assert!((p.output - 14.00).abs() < 0.001);
     }
 }
