@@ -5,6 +5,7 @@ import type { LeaderboardProvider } from "../../lib/types";
 import { useBadgeData } from "../../hooks/useBadgeData";
 import { useShareImage } from "../../hooks/useShareImage";
 import { useI18n } from "../../i18n/I18nContext";
+import { supabaseBadgeUrl } from "../../lib/supabase";
 import { generateFlatBadgeSvg, generateCardBadgeSvg } from "../../lib/badgeSvgTemplate";
 import { BadgeCardPreview } from "./BadgeCardPreview";
 import { BadgeCompactPreview } from "./BadgeCompactPreview";
@@ -23,8 +24,6 @@ interface Props {
 type BadgeStyle = "leaderboard" | "card" | "compact";
 type CardTheme = "light" | "dark";
 type CompactStyle = "flat" | "flat-square";
-
-const SUPABASE_BADGE_URL = "https://giunmtxxvapcgrpxjopq.supabase.co/functions/v1/badge";
 
 export function BadgeOverlay({
   visible,
@@ -95,17 +94,20 @@ export function BadgeOverlay({
   }, [data, badgeStyle, compactStyle, cardTheme, showToast, t]);
 
   const getBadgeUrl = useCallback(() => {
-    return `${SUPABASE_BADGE_URL}/${userId}?provider=${provider}&period=${period}&style=${badgeStyle === "compact" ? compactStyle : "card"}`;
+    if (!supabaseBadgeUrl) return null;
+    return `${supabaseBadgeUrl}/${userId}?provider=${provider}&period=${period}&style=${badgeStyle === "compact" ? compactStyle : "card"}`;
   }, [userId, provider, period, badgeStyle, compactStyle]);
 
   const handleCopyMarkdown = useCallback(async () => {
     const url = getBadgeUrl();
+    if (!url) return;
     await writeText(`![AI Token Monitor Badge](${url})`);
     showToast(t("badge.copied"));
   }, [getBadgeUrl, showToast, t]);
 
   const handleCopyUrl = useCallback(async () => {
     const url = getBadgeUrl();
+    if (!url) return;
     await writeText(url);
     showToast(t("badge.copied"));
   }, [getBadgeUrl, showToast, t]);
@@ -121,6 +123,7 @@ export function BadgeOverlay({
   }, [savePng, showToast, t]);
 
   if (!visible || !data) return null;
+  const badgeUrl = getBadgeUrl();
 
   const pillToggle = (
     options: { key: string; label: string }[],
@@ -302,43 +305,45 @@ export function BadgeOverlay({
           {actionBtn(t("badge.copyImage"), handleCapture, <ShareIcon />)}
           {actionBtn(t("badge.savePng"), handleSavePng, <DownloadIcon />)}
           {actionBtn(t("badge.copySvg"), handleCopySvg, <CodeIcon />)}
-          {actionBtn(t("badge.copyMarkdown"), handleCopyMarkdown, <MarkdownIcon />)}
+          {badgeUrl && actionBtn(t("badge.copyMarkdown"), handleCopyMarkdown, <MarkdownIcon />)}
         </div>
 
         {/* Dynamic Badge URL section */}
-        <div
-          style={{
-            background: "rgba(255,255,255,0.1)",
-            borderRadius: 12,
-            padding: "12px 16px",
-            maxWidth: 400,
-            width: "100%",
-            border: "1px solid rgba(255,255,255,0.1)",
-          }}
-        >
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
-            {t("badge.urlSection")}
-          </div>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
-            {t("badge.urlDesc")}
-          </div>
+        {badgeUrl && (
           <div
             style={{
-              background: "rgba(0,0,0,0.3)",
-              borderRadius: 6,
-              padding: "8px 10px",
-              fontSize: 9,
-              fontFamily: "monospace",
-              color: "rgba(255,255,255,0.7)",
-              wordBreak: "break-all",
-              lineHeight: 1.4,
-              marginBottom: 8,
+              background: "rgba(255,255,255,0.1)",
+              borderRadius: 12,
+              padding: "12px 16px",
+              maxWidth: 400,
+              width: "100%",
+              border: "1px solid rgba(255,255,255,0.1)",
             }}
           >
-            {`![AI Token Monitor](${getBadgeUrl()})`}
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+              {t("badge.urlSection")}
+            </div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
+              {t("badge.urlDesc")}
+            </div>
+            <div
+              style={{
+                background: "rgba(0,0,0,0.3)",
+                borderRadius: 6,
+                padding: "8px 10px",
+                fontSize: 9,
+                fontFamily: "monospace",
+                color: "rgba(255,255,255,0.7)",
+                wordBreak: "break-all",
+                lineHeight: 1.4,
+                marginBottom: 8,
+              }}
+            >
+              {`![AI Token Monitor](${badgeUrl})`}
+            </div>
+            {actionBtn(t("badge.copyUrl"), handleCopyUrl, <LinkIcon />)}
           </div>
-          {actionBtn(t("badge.copyUrl"), handleCopyUrl, <LinkIcon />)}
-        </div>
+        )}
 
         {/* Toast */}
         {toast && (

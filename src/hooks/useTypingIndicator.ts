@@ -18,8 +18,9 @@ export function useTypingIndicator(userId: string | null, nickname: string | nul
 
   useEffect(() => {
     if (!supabase || !userId || !nickname || !enabled) return;
+    const client = supabase;
 
-    const channel = supabase.channel("chat_typing", {
+    const channel = client.channel("chat_typing", {
       config: { presence: { key: userId } },
     });
 
@@ -47,7 +48,7 @@ export function useTypingIndicator(userId: string | null, nickname: string | nul
     return () => {
       if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
       if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
+        client.removeChannel(channelRef.current);
         channelRef.current = null;
       }
     };

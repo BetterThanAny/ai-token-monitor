@@ -16,7 +16,7 @@ export function useUserActivity(userId: string | null) {
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    if (!userId) {
+    if (!supabase || !userId) {
       setDaily([]);
       setLoading(false);
       setError(false);
