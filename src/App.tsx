@@ -71,9 +71,6 @@ function AppContent() {
   const { stats, error, loading } = useCombinedStats({
     includeClaude: prefs.include_claude,
     includeCodex: prefs.include_codex,
-    includeOpencode: prefs.include_opencode,
-    includeKimi: prefs.include_kimi,
-    includeGlm: prefs.include_glm,
   });
   const t = useI18n();
   const { user, profile } = useAuth();

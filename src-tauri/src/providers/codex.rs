@@ -50,6 +50,8 @@ use super::pricing;
 const LONG_CONTEXT_THRESHOLD: u64 = 272_000;
 const LONG_CONTEXT_INPUT_MULTIPLIER: f64 = 2.0;
 const LONG_CONTEXT_OUTPUT_MULTIPLIER: f64 = 1.5;
+const GPT55_FAST_CREDIT_MULTIPLIER: f64 = 2.5;
+const GPT54_FAST_CREDIT_MULTIPLIER: f64 = 2.0;
 
 fn long_context_model_family(model: &str) -> Option<&'static str> {
     if model.contains("gpt-5.5-pro") {
@@ -64,6 +66,25 @@ fn long_context_model_family(model: &str) -> Option<&'static str> {
         Some("gpt-5.4")
     } else {
         None
+    }
+}
+
+fn codex_fast_credit_multiplier(model: &str, service_tier: ServiceTier) -> f64 {
+    if service_tier != ServiceTier::Fast {
+        return 1.0;
+    }
+
+    let model = model.to_ascii_lowercase();
+    if model.contains("gpt-5.5") && !model.contains("gpt-5.5-pro") {
+        GPT55_FAST_CREDIT_MULTIPLIER
+    } else if model.contains("gpt-5.4")
+        && !model.contains("gpt-5.4-pro")
+        && !model.contains("gpt-5.4-mini")
+        && !model.contains("gpt-5.4-nano")
+    {
+        GPT54_FAST_CREDIT_MULTIPLIER
+    } else {
+        1.0
     }
 }
 
@@ -91,6 +112,154 @@ enum TokenUsageSource {
     TotalFallback,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ServiceTier {
+    Standard,
+    Fast,
+}
+
+fn service_tier_from_str(value: &str) -> Option<ServiceTier> {
+    if value.eq_ignore_ascii_case("fast") {
+        Some(ServiceTier::Fast)
+    } else if value.eq_ignore_ascii_case("standard") {
+        Some(ServiceTier::Standard)
+    } else {
+        None
+    }
+}
+
+fn bool_from_config_value(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn quoted_config_value(value: &str) -> &str {
+    value.trim().trim_matches('"').trim_matches('\'').trim()
+}
+
+fn parse_codex_config_service_tier(contents: &str) -> Option<ServiceTier> {
+    let mut root_service_tier = None;
+    let mut fast_mode_feature = false;
+    let mut in_features = false;
+
+    for raw_line in contents.lines() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if line.starts_with('[') {
+            in_features = line == "[features]";
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+
+        if !in_features && key == "service_tier" {
+            root_service_tier = service_tier_from_str(quoted_config_value(value));
+        } else if in_features && key == "fast_mode" {
+            fast_mode_feature = bool_from_config_value(value).unwrap_or(false);
+        }
+    }
+
+    if root_service_tier == Some(ServiceTier::Fast) || fast_mode_feature {
+        Some(ServiceTier::Fast)
+    } else {
+        root_service_tier
+    }
+}
+
+fn codex_config_service_tier() -> Option<(ServiceTier, SystemTime)> {
+    let path = dirs::home_dir()?.join(".codex").join("config.toml");
+    let contents = fs::read_to_string(&path).ok()?;
+    let tier = parse_codex_config_service_tier(&contents)?;
+    let modified = fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    Some((tier, modified))
+}
+
+fn default_service_tier_for_path(
+    path: &Path,
+    config_service_tier: Option<(ServiceTier, SystemTime)>,
+) -> ServiceTier {
+    default_service_tier_after_timestamp(None, path, config_service_tier)
+}
+
+fn system_time_from_event_timestamp(value: &Value) -> Option<SystemTime> {
+    let timestamp = value.get("timestamp")?.as_str()?;
+    let utc_dt = timestamp.parse::<chrono::DateTime<chrono::Utc>>().ok()?;
+    let millis = utc_dt.timestamp_millis();
+    if millis < 0 {
+        return None;
+    }
+
+    Some(SystemTime::UNIX_EPOCH + Duration::from_millis(millis as u64))
+}
+
+fn default_service_tier_after_timestamp(
+    event_time: Option<SystemTime>,
+    path: &Path,
+    config_service_tier: Option<(ServiceTier, SystemTime)>,
+) -> ServiceTier {
+    match config_service_tier {
+        Some((ServiceTier::Fast, config_modified)) => event_time
+            .or_else(|| fs::metadata(path).and_then(|m| m.modified()).ok())
+            .map(|entry_time| entry_time >= config_modified)
+            .unwrap_or(false)
+            .then_some(ServiceTier::Fast)
+            .unwrap_or(ServiceTier::Standard),
+        Some((ServiceTier::Standard, _)) | None => ServiceTier::Standard,
+    }
+}
+
+fn default_service_tier_for_event(
+    value: &Value,
+    path: &Path,
+    config_service_tier: Option<(ServiceTier, SystemTime)>,
+) -> ServiceTier {
+    default_service_tier_after_timestamp(
+        system_time_from_event_timestamp(value),
+        path,
+        config_service_tier,
+    )
+}
+
+fn extract_service_tier(value: &Value) -> Option<ServiceTier> {
+    [
+        "/payload/service_tier",
+        "/payload/serviceTier",
+        "/payload/model_config/service_tier",
+        "/payload/config/service_tier",
+        "/payload/info/service_tier",
+        "/payload/info/serviceTier",
+        "/service_tier",
+        "/serviceTier",
+    ]
+    .iter()
+    .find_map(|pointer| value.pointer(pointer).and_then(|v| v.as_str()))
+    .and_then(service_tier_from_str)
+    .or_else(|| {
+        [
+            "/payload/fast_mode",
+            "/payload/fastMode",
+            "/payload/features/fast_mode",
+            "/payload/info/fast_mode",
+            "/fast_mode",
+        ]
+        .iter()
+        .find_map(|pointer| value.pointer(pointer).and_then(|v| v.as_bool()))
+        .and_then(|is_fast| is_fast.then_some(ServiceTier::Fast))
+    })
+}
+
 #[derive(Clone, Copy)]
 struct TokenUsage {
     input_tokens: u64,
@@ -110,6 +279,7 @@ struct CodexEntry {
     cached_tokens: u64,
     total_tokens: u64,
     usage_source: TokenUsageSource,
+    service_tier: ServiceTier,
 }
 
 // --- Provider ---
@@ -118,6 +288,7 @@ pub struct CodexProvider {
     #[allow(dead_code)]
     primary_dir: PathBuf,
     all_dirs: Vec<PathBuf>,
+    config_service_tier: Option<(ServiceTier, SystemTime)>,
 }
 
 impl CodexProvider {
@@ -140,7 +311,11 @@ impl CodexProvider {
             all_dirs.insert(0, primary.clone());
         }
 
-        Self { primary_dir: primary, all_dirs }
+        Self {
+            primary_dir: primary,
+            all_dirs,
+            config_service_tier: codex_config_service_tier(),
+        }
     }
 
     fn session_roots(&self) -> Vec<PathBuf> {
@@ -176,7 +351,10 @@ impl CodexProvider {
     }
 
     /// Parse a single JSONL file and return entries keyed by dedup key.
-    fn parse_single_file(path: &Path) -> HashMap<String, CodexEntry> {
+    fn parse_single_file(
+        path: &Path,
+        config_service_tier: Option<(ServiceTier, SystemTime)>,
+    ) -> HashMap<String, CodexEntry> {
         let mut entries = HashMap::new();
         let Ok(file) = fs::File::open(path) else {
             return entries;
@@ -192,6 +370,9 @@ impl CodexProvider {
             .unwrap_or("codex-session")
             .to_string();
         let mut current_model = String::new();
+        let mut current_service_tier =
+            default_service_tier_for_path(path, config_service_tier.clone());
+        let mut has_explicit_service_tier = false;
         let mut line_index: u32 = 0;
         // Track previous snapshot for deduplication of identical consecutive token_count events
         let mut prev_snapshot: Option<(u64, u64, u64, u64)> = None;
@@ -214,8 +395,29 @@ impl CodexProvider {
                     if let Some(model) = value.pointer("/payload/model").and_then(|v| v.as_str()) {
                         current_model = model.to_string();
                     }
+                    if let Some(service_tier) = extract_service_tier(&value) {
+                        current_service_tier = service_tier;
+                        has_explicit_service_tier = true;
+                    } else if !has_explicit_service_tier {
+                        current_service_tier = default_service_tier_for_event(
+                            &value,
+                            path,
+                            config_service_tier.clone(),
+                        );
+                    }
                 }
                 Some("event_msg") => {
+                    if let Some(service_tier) = extract_service_tier(&value) {
+                        current_service_tier = service_tier;
+                        has_explicit_service_tier = true;
+                    } else if !has_explicit_service_tier {
+                        current_service_tier = default_service_tier_for_event(
+                            &value,
+                            path,
+                            config_service_tier.clone(),
+                        );
+                    }
+
                     let payload_type = value.pointer("/payload/type").and_then(|v| v.as_str());
                     match payload_type {
                         Some("token_count") => {
@@ -229,6 +431,9 @@ impl CodexProvider {
                             let Some(usage) = extract_token_usage(info) else {
                                 continue;
                             };
+                            if let Some(service_tier) = extract_service_tier(info) {
+                                current_service_tier = service_tier;
+                            }
 
                             // Skip duplicate consecutive snapshots
                             let snap = (
@@ -270,6 +475,7 @@ impl CodexProvider {
                                     cached_tokens: usage.cached_tokens,
                                     total_tokens: usage.total_tokens,
                                     usage_source: usage.source,
+                                    service_tier: current_service_tier,
                                 },
                             );
                         }
@@ -288,6 +494,7 @@ impl CodexProvider {
         current_meta: &HashMap<PathBuf, (SystemTime, u64)>,
         cached_entries: &HashMap<String, CodexEntry>,
         cached_meta: &HashMap<PathBuf, (SystemTime, u64)>,
+        config_service_tier: Option<(ServiceTier, SystemTime)>,
     ) -> HashMap<String, CodexEntry> {
         let mut entries = cached_entries.clone();
 
@@ -307,7 +514,7 @@ impl CodexProvider {
         if has_deleted {
             let mut fresh = HashMap::new();
             for path in current_meta.keys() {
-                fresh.extend(Self::parse_single_file(path));
+                fresh.extend(Self::parse_single_file(path, config_service_tier.clone()));
             }
             return fresh;
         }
@@ -316,7 +523,7 @@ impl CodexProvider {
             let start = Instant::now();
             let count = changed_files.len();
             for path in &changed_files {
-                let file_entries = Self::parse_single_file(path);
+                let file_entries = Self::parse_single_file(path, config_service_tier.clone());
                 entries.extend(file_entries);
             }
             eprintln!(
@@ -339,17 +546,18 @@ impl CodexProvider {
         let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
         let mut long_context_sessions: HashSet<(String, &'static str)> = HashSet::new();
 
-        for entry in entries.values() {
-            if let Some(family) = long_context_model_family(&entry.model) {
-                if entry.usage_source == TokenUsageSource::Last
-                    && entry.input_tokens > LONG_CONTEXT_THRESHOLD
-                {
-                    long_context_sessions.insert((entry.session_id.clone(), family));
-                }
-            }
-        }
+        let mut ordered_entries: Vec<(&String, &CodexEntry)> = entries.iter().collect();
+        ordered_entries.sort_by(|(key_a, entry_a), (key_b, entry_b)| {
+            let line_a = dedup_key_line_index(key_a);
+            let line_b = dedup_key_line_index(key_b);
+            entry_a
+                .session_id
+                .cmp(&entry_b.session_id)
+                .then_with(|| line_a.cmp(&line_b))
+                .then_with(|| key_a.cmp(key_b))
+        });
 
-        for entry in entries.values() {
+        for (_, entry) in ordered_entries {
             total_messages += 1;
 
             if first_date.as_ref().map_or(true, |d| entry.date < *d) {
@@ -359,22 +567,35 @@ impl CodexProvider {
             let pricing = pricing::get_codex_pricing(&entry.model);
             let is_long_context = match long_context_model_family(&entry.model) {
                 Some(family) => {
-                    long_context_sessions.contains(&(entry.session_id.clone(), family))
+                    let key = (entry.session_id.clone(), family);
+                    let already_long_context = long_context_sessions.contains(&key);
+                    let triggers_long_context = entry.usage_source == TokenUsageSource::Last
+                        && entry.input_tokens > LONG_CONTEXT_THRESHOLD;
+
+                    if triggers_long_context {
+                        long_context_sessions.insert(key);
+                    }
+
+                    already_long_context || triggers_long_context
                 }
                 None => false,
             };
             let (input_multiplier, output_multiplier) = if is_long_context {
-                (LONG_CONTEXT_INPUT_MULTIPLIER, LONG_CONTEXT_OUTPUT_MULTIPLIER)
+                (
+                    LONG_CONTEXT_INPUT_MULTIPLIER,
+                    LONG_CONTEXT_OUTPUT_MULTIPLIER,
+                )
             } else {
                 (1.0, 1.0)
             };
+            let fast_multiplier = codex_fast_credit_multiplier(&entry.model, entry.service_tier);
             let cost = calculate_cost(
                 &pricing,
                 entry.input_tokens,
                 entry.output_tokens,
                 entry.cached_tokens,
-                input_multiplier,
-                output_multiplier,
+                input_multiplier * fast_multiplier,
+                output_multiplier * fast_multiplier,
             );
 
             let daily = daily_map
@@ -470,7 +691,12 @@ impl CodexProvider {
                 }
 
                 // Incremental parse
-                Self::parse_incremental(&current_meta, &cached.entries, &cached.file_meta)
+                Self::parse_incremental(
+                    &current_meta,
+                    &cached.entries,
+                    &cached.file_meta,
+                    self.config_service_tier.clone(),
+                )
             } else {
                 // First run — full parse
                 drop(cache);
@@ -481,7 +707,10 @@ impl CodexProvider {
                 let full_start = Instant::now();
                 let mut entries = HashMap::new();
                 for path in current_meta.keys() {
-                    entries.extend(Self::parse_single_file(path));
+                    entries.extend(Self::parse_single_file(
+                        path,
+                        self.config_service_tier.clone(),
+                    ));
                 }
                 eprintln!(
                     "[PERF][Codex] Full parse completed in {:?}",
@@ -611,7 +840,10 @@ fn extract_token_usage(info: &Value) -> Option<TokenUsage> {
     let (usage, source) = if let Some(last) = info.get("last_token_usage") {
         (last, TokenUsageSource::Last)
     } else {
-        (info.get("total_token_usage")?, TokenUsageSource::TotalFallback)
+        (
+            info.get("total_token_usage")?,
+            TokenUsageSource::TotalFallback,
+        )
     };
 
     let input = usage
@@ -644,6 +876,12 @@ fn resolve_entry_date(path_date: Option<&str>, value: &Value) -> String {
     extract_date_from_timestamp(value)
         .or_else(|| path_date.map(ToString::to_string))
         .unwrap_or_else(|| "1970-01-01".to_string())
+}
+
+fn dedup_key_line_index(key: &str) -> u32 {
+    key.rsplit_once(':')
+        .and_then(|(_, line)| line.parse::<u32>().ok())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -766,6 +1004,65 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_service_tier_from_turn_context() {
+        let value: Value = serde_json::json!({
+            "type": "turn_context",
+            "payload": {
+                "service_tier": "fast"
+            }
+        });
+        assert_eq!(extract_service_tier(&value), Some(ServiceTier::Fast));
+    }
+
+    #[test]
+    fn test_parse_codex_config_service_tier() {
+        let config = r#"
+model = "gpt-5.5"
+service_tier = "fast"
+
+[features]
+fast_mode = true
+"#;
+        assert_eq!(
+            parse_codex_config_service_tier(config),
+            Some(ServiceTier::Fast)
+        );
+
+        let standard = r#"
+service_tier = "standard"
+
+[features]
+memories = true
+"#;
+        assert_eq!(
+            parse_codex_config_service_tier(standard),
+            Some(ServiceTier::Standard)
+        );
+    }
+
+    #[test]
+    fn test_config_fast_fallback_uses_event_timestamp() {
+        let path = PathBuf::from("/tmp/nonexistent-codex-session.jsonl");
+        let config_modified = SystemTime::UNIX_EPOCH + Duration::from_secs(60);
+        let config_tier = Some((ServiceTier::Fast, config_modified));
+        let before_config: Value = serde_json::json!({
+            "timestamp": "1970-01-01T00:00:30.000Z"
+        });
+        let after_config: Value = serde_json::json!({
+            "timestamp": "1970-01-01T00:01:30.000Z"
+        });
+
+        assert_eq!(
+            default_service_tier_for_event(&before_config, &path, config_tier),
+            ServiceTier::Standard
+        );
+        assert_eq!(
+            default_service_tier_for_event(&after_config, &path, config_tier),
+            ServiceTier::Fast
+        );
+    }
+
+    #[test]
     fn test_pricing_models() {
         let o3 = pricing::get_codex_pricing("o3-2025-04-16");
         assert!((o3.input - 2.00).abs() < 0.001);
@@ -831,6 +1128,7 @@ mod tests {
                 cached_tokens: 25,
                 total_tokens: 150,
                 usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
             },
         );
         entries.insert(
@@ -844,6 +1142,7 @@ mod tests {
                 cached_tokens: 10,
                 total_tokens: 225,
                 usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
             },
         );
 
@@ -852,6 +1151,54 @@ mod tests {
         assert_eq!(stats.daily.len(), 1);
         assert_eq!(stats.daily[0].messages, 2);
         assert_eq!(stats.daily[0].sessions, 1);
+    }
+
+    #[test]
+    fn test_build_stats_applies_fast_multiplier_to_gpt55_session() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "fast-session:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "fast-session".to_string(),
+                input_tokens: 100_000,
+                output_tokens: 10_000,
+                cached_tokens: 10_000,
+                total_tokens: 110_000,
+                usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Fast,
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        let daily = &stats.daily[0];
+        let standard_cost = 0.45 + 0.005 + 0.30;
+        assert!((daily.cost_usd - (standard_cost * 2.5)).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_fast_multiplier_is_limited_to_supported_codex_models() {
+        assert_eq!(
+            codex_fast_credit_multiplier("gpt-5.5", ServiceTier::Fast),
+            GPT55_FAST_CREDIT_MULTIPLIER
+        );
+        assert_eq!(
+            codex_fast_credit_multiplier("gpt-5.4", ServiceTier::Fast),
+            GPT54_FAST_CREDIT_MULTIPLIER
+        );
+        assert_eq!(
+            codex_fast_credit_multiplier("gpt-5.4-mini", ServiceTier::Fast),
+            1.0
+        );
+        assert_eq!(
+            codex_fast_credit_multiplier("gpt-5.5-pro", ServiceTier::Fast),
+            1.0
+        );
+        assert_eq!(
+            codex_fast_credit_multiplier("gpt-5.5", ServiceTier::Standard),
+            1.0
+        );
     }
 
     #[test]
@@ -868,6 +1215,7 @@ mod tests {
                 cached_tokens: 200_000,
                 total_tokens: 1_500_000,
                 usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
             },
         );
 
@@ -887,16 +1235,17 @@ mod tests {
     fn test_long_context_threshold_is_strictly_greater_than_272k() {
         let mut entries = HashMap::new();
         entries.insert(
-            "short-threshold:1".to_string(),
+            "exact-threshold:1".to_string(),
             CodexEntry {
                 date: "2026-05-02".to_string(),
                 model: "gpt-5.5".to_string(),
-                session_id: "short-threshold".to_string(),
+                session_id: "exact-threshold".to_string(),
                 input_tokens: LONG_CONTEXT_THRESHOLD,
                 output_tokens: 0,
                 cached_tokens: 0,
                 total_tokens: LONG_CONTEXT_THRESHOLD,
                 usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
             },
         );
         entries.insert(
@@ -910,14 +1259,15 @@ mod tests {
                 cached_tokens: 0,
                 total_tokens: LONG_CONTEXT_THRESHOLD + 1,
                 usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
             },
         );
 
         let stats = CodexProvider::build_stats(&entries);
-        let short = stats.daily.iter().find(|d| d.date == "2026-05-02").unwrap();
+        let exact = stats.daily.iter().find(|d| d.date == "2026-05-02").unwrap();
         let long = stats.daily.iter().find(|d| d.date == "2026-05-03").unwrap();
 
-        assert!((short.cost_usd - 1.36).abs() < 0.0001);
+        assert!((exact.cost_usd - 1.36).abs() < 0.0001);
         assert!((long.cost_usd - 2.72001).abs() < 0.0001);
     }
 
@@ -935,6 +1285,7 @@ mod tests {
                 cached_tokens: 0,
                 total_tokens: LONG_CONTEXT_THRESHOLD + 11_000,
                 usage_source: TokenUsageSource::TotalFallback,
+                service_tier: ServiceTier::Standard,
             },
         );
 
@@ -948,7 +1299,47 @@ mod tests {
     }
 
     #[test]
-    fn test_long_context_applies_to_all_entries_in_same_session_and_model_family() {
+    fn test_long_context_does_not_reprice_entries_before_first_trigger() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: 1_000,
+                output_tokens: 1_000,
+                cached_tokens: 0,
+                total_tokens: 2_000,
+                usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
+            },
+        );
+        entries.insert(
+            "session-a:2".to_string(),
+            CodexEntry {
+                date: "2026-05-03".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                output_tokens: 0,
+                cached_tokens: 0,
+                total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        let before = stats.daily.iter().find(|d| d.date == "2026-05-02").unwrap();
+        let trigger = stats.daily.iter().find(|d| d.date == "2026-05-03").unwrap();
+
+        assert!((before.cost_usd - 0.035).abs() < 0.0001);
+        assert!((trigger.cost_usd - 2.73).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_long_context_applies_after_trigger_in_same_session_and_model_family() {
         let mut entries = HashMap::new();
         entries.insert(
             "session-a:1".to_string(),
@@ -961,6 +1352,7 @@ mod tests {
                 cached_tokens: 0,
                 total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
                 usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
             },
         );
         entries.insert(
@@ -974,6 +1366,7 @@ mod tests {
                 cached_tokens: 0,
                 total_tokens: 2_000,
                 usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
             },
         );
 
@@ -997,6 +1390,7 @@ mod tests {
                 cached_tokens: 0,
                 total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
                 usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
             },
         );
         entries.insert(
@@ -1010,6 +1404,7 @@ mod tests {
                 cached_tokens: 0,
                 total_tokens: 1_000,
                 usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
             },
         );
 
@@ -1022,9 +1417,15 @@ mod tests {
     #[test]
     fn test_long_context_model_matching_excludes_gpt54_mini_and_nano() {
         assert_eq!(long_context_model_family("gpt-5.5"), Some("gpt-5.5"));
-        assert_eq!(long_context_model_family("gpt-5.5-pro"), Some("gpt-5.5-pro"));
+        assert_eq!(
+            long_context_model_family("gpt-5.5-pro"),
+            Some("gpt-5.5-pro")
+        );
         assert_eq!(long_context_model_family("gpt-5.4"), Some("gpt-5.4"));
-        assert_eq!(long_context_model_family("gpt-5.4-pro"), Some("gpt-5.4-pro"));
+        assert_eq!(
+            long_context_model_family("gpt-5.4-pro"),
+            Some("gpt-5.4-pro")
+        );
         assert_eq!(long_context_model_family("gpt-5.4-mini"), None);
         assert_eq!(long_context_model_family("gpt-5.4-nano"), None);
     }

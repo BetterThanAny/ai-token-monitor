@@ -5,7 +5,7 @@
 
 > **[한국어](docs/README.ko.md) | [日本語](docs/README.ja.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md) | [Türkçe](docs/README.tr.md) | [Italiano](docs/README.it.md)**
 
-A system tray app for macOS and Windows that tracks **Claude Code**, **Codex**, and **OpenCode** token usage, cost, and activity in real time — with a built-in leaderboard, chat, and optional webhook alerts.
+A system tray app for macOS and Windows that tracks **Claude Code** and **Codex** token usage, cost, and activity in real time — with a built-in leaderboard, chat, and optional webhook alerts.
 
 <table>
   <tr>
@@ -37,8 +37,8 @@ A system tray app for macOS and Windows that tracks **Claude Code**, **Codex**, 
 ## Features
 
 ### Tracking & Visualization
-- **Real-time token tracking** — parses session JSONL files from Claude Code, Codex, and OpenCode for accurate usage stats
-- **Multi-provider support** — switch between Claude / Codex / OpenCode sources, with per-provider cost models
+- **Real-time token tracking** — parses session JSONL files from Claude Code and Codex for accurate usage stats
+- **Multi-provider support** — switch between Claude / Codex sources, with per-provider cost models
 - **Multiple config directories** — aggregate work + personal accounts by adding several Claude/Codex roots
 - **Daily chart** — 7/30 day token or cost bar chart with Y-axis labels
 - **Activity graph** — GitHub-style contribution heatmap with 2D/3D toggle and year navigation
@@ -77,7 +77,7 @@ A system tray app for macOS and Windows that tracks **Claude Code**, **Codex**, 
 - [Node.js](https://nodejs.org/) 18+
 - [Rust](https://rustup.rs/) toolchain
 - [Tauri CLI v2](https://v2.tauri.app/start/prerequisites/)
-- [Claude Code](https://claude.ai/claude-code), [Codex](https://openai.com/index/introducing-codex/), or [OpenCode](https://opencode.ai) installed and used at least once
+- [Claude Code](https://claude.ai/claude-code) or [Codex](https://openai.com/index/introducing-codex/) installed and used at least once
 
 ### Build
 
@@ -141,7 +141,6 @@ Shared data: daily token count, cost, messages/sessions. **No code or conversati
 |----------|------|-------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | Session/tool-call counts from `~/.claude/stats-cache.json`. Supports multiple roots. |
 | **Codex** | `~/.codex/sessions/**/*.jsonl` | Supports multiple roots. |
-| **OpenCode** | `~/.local/share/opencode/**/*.jsonl` | Per-model pricing from bundled registry. |
 
 **Network requests**: only when leaderboard/chat is opted in (sends aggregated data to Supabase), Claude OAuth usage tracking is explicitly enabled, a webhook fires, or AI translation keys are used. Without these features, the app runs completely offline.
 
@@ -162,7 +161,7 @@ Shared data: daily token count, cost, messages/sessions. **No code or conversati
 │  └── SettingsOverlay (4 tabs)      │
 ├────────────────────────────────────┤
 │  Backend (Tauri v2 / Rust)         │
-│  ├── JSONL session parsers (Claude/Codex/OpenCode)│
+│  ├── JSONL session parsers (Claude/Codex)│
 │  ├── File watcher (notify)         │
 │  ├── Tray icon + cost display      │
 │  ├── Auto-updater                  │

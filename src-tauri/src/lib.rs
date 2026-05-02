@@ -92,29 +92,54 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
 
     if monitored.five_hour {
         if let Some(w) = &usage.five_hour {
-            windows_to_check.push(("Session (5h)", w.utilization, stable_window_id("5h", &w.resets_at), Some(w.resets_at.clone())));
+            windows_to_check.push((
+                "Session (5h)",
+                w.utilization,
+                stable_window_id("5h", &w.resets_at),
+                Some(w.resets_at.clone()),
+            ));
         }
     }
     if monitored.seven_day {
         if let Some(w) = &usage.seven_day {
-            windows_to_check.push(("Weekly", w.utilization, stable_window_id("7d", &w.resets_at), Some(w.resets_at.clone())));
+            windows_to_check.push((
+                "Weekly",
+                w.utilization,
+                stable_window_id("7d", &w.resets_at),
+                Some(w.resets_at.clone()),
+            ));
         }
     }
     if monitored.seven_day_sonnet {
         if let Some(w) = &usage.seven_day_sonnet {
-            windows_to_check.push(("Weekly Sonnet", w.utilization, stable_window_id("7d-sonnet", &w.resets_at), Some(w.resets_at.clone())));
+            windows_to_check.push((
+                "Weekly Sonnet",
+                w.utilization,
+                stable_window_id("7d-sonnet", &w.resets_at),
+                Some(w.resets_at.clone()),
+            ));
         }
     }
     if monitored.seven_day_opus {
         if let Some(w) = &usage.seven_day_opus {
-            windows_to_check.push(("Weekly Opus", w.utilization, stable_window_id("7d-opus", &w.resets_at), Some(w.resets_at.clone())));
+            windows_to_check.push((
+                "Weekly Opus",
+                w.utilization,
+                stable_window_id("7d-opus", &w.resets_at),
+                Some(w.resets_at.clone()),
+            ));
         }
     }
     if monitored.extra_usage {
         if let Some(w) = &usage.extra_usage {
             if w.is_enabled {
                 // Extra usage resets monthly; use monthly_limit as part of ID
-                windows_to_check.push(("Extra Usage", w.utilization, format!("extra:{}", w.monthly_limit), None));
+                windows_to_check.push((
+                    "Extra Usage",
+                    w.utilization,
+                    format!("extra:{}", w.monthly_limit),
+                    None,
+                ));
             }
         }
     }
@@ -161,7 +186,10 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
 
             if was_active
                 && has_webhooks
-                && webhook_config.as_ref().map(|c| c.notify_on_reset).unwrap_or(false)
+                && webhook_config
+                    .as_ref()
+                    .map(|c| c.notify_on_reset)
+                    .unwrap_or(false)
             {
                 webhook_alerts.push(webhooks::WebhookAlertType::ResetCompleted {
                     window_name: name.to_string(),
@@ -200,7 +228,10 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
         // OS notification (only for five_hour to avoid spam, or if it's the highest alert)
         if *name == "Session (5h)" || os_notification.is_none() {
             let body = if highest >= 90 {
-                format!("{} usage at {:.0}% — may be throttled soon", name, utilization)
+                format!(
+                    "{} usage at {:.0}% — may be throttled soon",
+                    name, utilization
+                )
             } else {
                 format!("{} usage at {:.0}%", name, utilization)
             };
@@ -246,7 +277,6 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
     }
 }
 
-
 pub fn update_tray_title(app_handle: &tauri::AppHandle) {
     let prefs_path = dirs::home_dir()
         .unwrap_or_default()
@@ -274,31 +304,7 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
             0.0
         };
 
-        let opencode_cost = if prefs.include_opencode {
-            providers::opencode::get_cached_stats()
-                .and_then(|s| s.daily.iter().find(|d| d.date == today).map(|d| d.cost_usd))
-                .unwrap_or(0.0)
-        } else {
-            0.0
-        };
-
-        let kimi_cost = if prefs.include_kimi {
-            providers::kimi::get_cached_stats()
-                .and_then(|s| s.daily.iter().find(|d| d.date == today).map(|d| d.cost_usd))
-                .unwrap_or(0.0)
-        } else {
-            0.0
-        };
-
-        let glm_cost = if prefs.include_glm {
-            providers::glm::get_cached_stats()
-                .and_then(|s| s.daily.iter().find(|d| d.date == today).map(|d| d.cost_usd))
-                .unwrap_or(0.0)
-        } else {
-            0.0
-        };
-
-        let today_cost = claude_cost + codex_cost + opencode_cost + kimi_cost + glm_cost;
+        let today_cost = claude_cost + codex_cost;
         let cost_str = if today_cost >= 1.0 {
             format!("${:.0}", today_cost)
         } else {
@@ -323,9 +329,17 @@ fn get_all_watch_dirs() -> Vec<PathBuf> {
     let prefs = commands::get_preferences();
     let home = dirs::home_dir().unwrap_or_default();
     let expand = |d: &str| -> PathBuf {
-        if let Some(rest) = d.strip_prefix("~/") { home.join(rest) } else { PathBuf::from(d) }
+        if let Some(rest) = d.strip_prefix("~/") {
+            home.join(rest)
+        } else {
+            PathBuf::from(d)
+        }
     };
-    let mut dirs: Vec<PathBuf> = prefs.config_dirs.iter().map(|d| expand(d).join("projects")).collect();
+    let mut dirs: Vec<PathBuf> = prefs
+        .config_dirs
+        .iter()
+        .map(|d| expand(d).join("projects"))
+        .collect();
 
     // Add Codex session directories from preferences
     // Always include ~/.codex because CodexProvider::new() unconditionally prepends it
@@ -338,32 +352,12 @@ fn get_all_watch_dirs() -> Vec<PathBuf> {
         dirs.push(expanded.join("sessions"));
         dirs.push(expanded.join("archived_sessions"));
     }
-    let default_canonical = default_codex.canonicalize().unwrap_or_else(|_| default_codex.clone());
+    let default_canonical = default_codex
+        .canonicalize()
+        .unwrap_or_else(|_| default_codex.clone());
     if !codex_seen.contains(&default_canonical) {
         dirs.push(default_codex.join("sessions"));
         dirs.push(default_codex.join("archived_sessions"));
-    }
-
-    // Add OpenCode data directory
-    let opencode_provider = providers::opencode::OpenCodeProvider::new();
-    if opencode_provider.is_available() {
-        dirs.push(opencode_provider.data_dir.clone());
-    }
-
-    // Add Kimi session directory
-    let kimi_sessions = home.join(".kimi").join("sessions");
-    if kimi_sessions.exists() {
-        dirs.push(kimi_sessions);
-    }
-
-    // Add GLM session directories (future)
-    let glm_sessions = home.join(".glm").join("sessions");
-    if glm_sessions.exists() {
-        dirs.push(glm_sessions);
-    }
-    let zhipu_sessions = home.join(".zhipu").join("sessions");
-    if zhipu_sessions.exists() {
-        dirs.push(zhipu_sessions);
     }
 
     dirs
@@ -432,28 +426,19 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                     );
                     providers::claude_code::invalidate_stats_cache();
                     providers::codex::invalidate_stats_cache();
-                    providers::opencode::invalidate_stats_cache();
-                    providers::kimi::invalidate_stats_cache();
-                    providers::glm::invalidate_stats_cache();
                     let _ = app_handle.emit("stats-updated", ());
                     // Re-parse in background so the tray reflects new data even when the
                     // popup is closed (get_all_stats is only called by the frontend).
                     let app_for_refresh = app_handle.clone();
                     thread::spawn(move || {
                         let prefs = commands::get_preferences();
-                        let provider = providers::claude_code::ClaudeCodeProvider::new(prefs.config_dirs.clone());
+                        let provider = providers::claude_code::ClaudeCodeProvider::new(
+                            prefs.config_dirs.clone(),
+                        );
                         let _ = provider.fetch_stats();
                         if prefs.include_codex {
-                            let _ = providers::codex::CodexProvider::new(prefs.codex_dirs.clone()).fetch_stats();
-                        }
-                        if prefs.include_opencode {
-                            let _ = providers::opencode::OpenCodeProvider::new().fetch_stats();
-                        }
-                        if prefs.include_kimi {
-                            let _ = providers::kimi::KimiProvider::new().fetch_stats();
-                        }
-                        if prefs.include_glm {
-                            let _ = providers::glm::GlmProvider::new().fetch_stats();
+                            let _ = providers::codex::CodexProvider::new(prefs.codex_dirs.clone())
+                                .fetch_stats();
                         }
                         update_tray_title(&app_for_refresh);
                     });
@@ -474,9 +459,6 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                         watched_dirs = new_watch;
                         providers::claude_code::invalidate_stats_cache();
                         providers::codex::invalidate_stats_cache();
-                        providers::opencode::invalidate_stats_cache();
-                        providers::kimi::invalidate_stats_cache();
-                        providers::glm::invalidate_stats_cache();
                         let _ = app_handle.emit("stats-updated", ());
                     }
                     update_tray_title(&app_handle);
@@ -512,8 +494,7 @@ fn is_fullscreen_space() -> bool {
     use objc::{msg_send, sel, sel_impl};
     unsafe {
         #[allow(deprecated)]
-        let ns_app: cocoa::base::id =
-            msg_send![objc::class!(NSApplication), sharedApplication];
+        let ns_app: cocoa::base::id = msg_send![objc::class!(NSApplication), sharedApplication];
         let options: u64 = msg_send![ns_app, currentSystemPresentationOptions];
         // NSApplicationPresentationFullScreen = 1 << 10
         (options & (1 << 10)) != 0
@@ -695,7 +676,6 @@ fn show_window_native(window: &tauri::WebviewWindow) {
     }
 }
 
-
 #[tauri::command]
 fn get_home_dir() -> Option<String> {
     dirs::home_dir().map(|p| p.to_string_lossy().to_string())
@@ -722,7 +702,10 @@ fn show_window(window: tauri::WebviewWindow) {
 
 #[tauri::command]
 fn get_pending_deep_link() -> Option<String> {
-    PENDING_DEEP_LINK.lock().ok().and_then(|mut guard| guard.take())
+    PENDING_DEEP_LINK
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.take())
 }
 
 #[tauri::command]
@@ -764,7 +747,10 @@ fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
         std::process::Command::new("cmd")
             .args([
                 "/C",
-                &format!("ping -n 2 127.0.0.1 >nul && start \"\" \"{}\"", exe.display()),
+                &format!(
+                    "ping -n 2 127.0.0.1 >nul && start \"\" \"{}\"",
+                    exe.display()
+                ),
             ])
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -795,7 +781,10 @@ pub fn run() {
             // deep-link 플러그인의 onOpenUrl에 도달하지 않을 수 있으므로
             // 여기서 직접 프론트엔드에 emit한다.
             if let Some(url) = args.iter().find(|a| a.contains("auth/callback")) {
-                eprintln!("[SINGLE-INSTANCE] OAuth callback detected, emitting to frontend: {}", url);
+                eprintln!(
+                    "[SINGLE-INSTANCE] OAuth callback detected, emitting to frontend: {}",
+                    url
+                );
                 DEEP_LINK_EMITTED.store(true, Ordering::SeqCst);
                 let _ = app.emit("deep-link-auth", url.clone());
                 return;
@@ -820,12 +809,6 @@ pub fn run() {
             commands::get_all_stats,
             commands::get_codex_stats,
             commands::is_codex_available,
-            commands::get_opencode_stats,
-            commands::is_opencode_available,
-            commands::get_kimi_stats,
-            commands::is_kimi_available,
-            commands::get_glm_stats,
-            commands::is_glm_available,
             commands::get_preferences,
             commands::set_preferences,
             commands::get_stable_device_id,
@@ -930,17 +913,22 @@ pub fn run() {
                 match event {
                     tauri::WindowEvent::Focused(focused) => {
                         if !focused {
-                            if DIALOG_OPEN.load(Ordering::Relaxed) { return; }
+                            if DIALOG_OPEN.load(Ordering::Relaxed) {
+                                return;
+                            }
                             let win = win_clone.clone();
                             std::thread::spawn(move || {
                                 std::thread::sleep(std::time::Duration::from_millis(200));
-                                if win.is_focused().unwrap_or(true) { return; }
+                                if win.is_focused().unwrap_or(true) {
+                                    return;
+                                }
                                 // Grace period: ignore focus-loss immediately after show
                                 let now_ms = SystemTime::now()
                                     .duration_since(UNIX_EPOCH)
                                     .map(|d| d.as_millis() as u64)
                                     .unwrap_or(0);
-                                if now_ms.saturating_sub(LAST_SHOWN_MS.load(Ordering::SeqCst)) < 400 {
+                                if now_ms.saturating_sub(LAST_SHOWN_MS.load(Ordering::SeqCst)) < 400
+                                {
                                     return;
                                 }
                                 // All AppKit calls must run on the main thread
@@ -996,23 +984,26 @@ pub fn run() {
                 thread::spawn(move || {
                     let rt = tauri::async_runtime::handle();
                     loop {
-                        let poll_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            let prefs = commands::get_preferences();
-                            if prefs.usage_tracking_enabled {
-                                // Skip if cache was recently populated by another opt-in fetch.
-                                if !oauth_usage::is_cache_fresh(30) {
-                                    if let Some(_) = rt.block_on(oauth_usage::fetch_and_cache_usage()) {
-                                        let _ = handle.emit("usage-updated", ());
-                                        if prefs.usage_alerts_enabled {
-                                            check_and_fire_alerts(&handle);
+                        let poll_result =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                let prefs = commands::get_preferences();
+                                if prefs.usage_tracking_enabled {
+                                    // Skip if cache was recently populated by another opt-in fetch.
+                                    if !oauth_usage::is_cache_fresh(30) {
+                                        if let Some(_) =
+                                            rt.block_on(oauth_usage::fetch_and_cache_usage())
+                                        {
+                                            let _ = handle.emit("usage-updated", ());
+                                            if prefs.usage_alerts_enabled {
+                                                check_and_fire_alerts(&handle);
+                                            }
                                         }
                                     }
+                                    thread::sleep(std::time::Duration::from_secs(300));
+                                } else {
+                                    thread::sleep(std::time::Duration::from_secs(5));
                                 }
-                                thread::sleep(std::time::Duration::from_secs(300));
-                            } else {
-                                thread::sleep(std::time::Duration::from_secs(5));
-                            }
-                        }));
+                            }));
 
                         if let Err(panic_info) = poll_result {
                             let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {

@@ -3,7 +3,7 @@
   "app.subtitle": "Rastreador de uso de AI Coding",
   "app.loading": "Cargando...",
   "app.error.title": "No se encontraron estadísticas",
-  "app.error.description": "Asegúrate de que Claude Code, Codex u OpenCode esté instalado y se haya utilizado al menos una vez.",
+  "app.error.description": "Asegúrate de que Claude Code o Codex esté instalado y se haya utilizado al menos una vez.",
 
   "tab.overview": "Resumen",
   "tab.analytics": "Análisis",
@@ -13,9 +13,6 @@
   "sources.title": "Fuentes",
   "sources.claude": "Claude",
   "sources.codex": "Codex",
-  "sources.opencode": "OpenCode",
-  "sources.kimi": "Kimi",
-  "sources.glm": "GLM",
   "sources.summary.count": "{{active}} de {{total}} activas",
   "sources.open": "Abrir menú de fuentes",
 

@@ -5,7 +5,7 @@
 
 > **[English](../README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Türkçe](README.tr.md) | [Italiano](README.it.md)**
 
-macOS と Windows のシステムトレイで **Claude Code**、**Codex**、**OpenCode** のトークン使用量・コスト・アクティビティをリアルタイムに追跡するアプリです。リーダーボード、チャット、Webhook 通知まで 1 画面で確認できます。
+macOS と Windows のシステムトレイで **Claude Code** と **Codex** のトークン使用量・コスト・アクティビティをリアルタイムに追跡するアプリです。リーダーボード、チャット、Webhook 通知まで 1 画面で確認できます。
 
 | Overview | Analytics | Leaderboard |
 |:---:|:---:|:---:|
@@ -24,8 +24,8 @@ macOS と Windows のシステムトレイで **Claude Code**、**Codex**、**Op
 ## 主な機能
 
 ### 追跡 & 可視化
-- **リアルタイムトークン追跡** — Claude Code / Codex / OpenCode のセッション JSONL を直接パースして正確に集計
-- **マルチプロバイダー対応** — Claude / Codex / OpenCode を切替、プロバイダー別の価格モデルを適用
+- **リアルタイムトークン追跡** — Claude Code / Codex のセッション JSONL を直接パースして正確に集計
+- **マルチプロバイダー対応** — Claude / Codex を切替、プロバイダー別の価格モデルを適用
 - **複数の設定ディレクトリ** — 仕事用 + 個人用アカウントを同時に集計できるよう Claude/Codex ルートを複数追加可能
 - **日別チャート** — 7/30 日間のトークンまたはコストの棒グラフ（Y 軸ラベル付き）
 - **アクティビティグラフ** — GitHub スタイルのコントリビューションヒートマップ（2D/3D 切替、年ナビゲーション）
@@ -64,7 +64,7 @@ macOS と Windows のシステムトレイで **Claude Code**、**Codex**、**Op
 - [Node.js](https://nodejs.org/) 18+
 - [Rust](https://rustup.rs/) ツールチェイン
 - [Tauri CLI v2](https://v2.tauri.app/start/prerequisites/)
-- [Claude Code](https://claude.ai/claude-code)、[Codex](https://openai.com/index/introducing-codex/)、または [OpenCode](https://opencode.ai) のいずれかがインストール済みで、1 回以上使用していること
+- [Claude Code](https://claude.ai/claude-code) または [Codex](https://openai.com/index/introducing-codex/) のいずれかがインストール済みで、1 回以上使用していること
 
 ### ビルド
 
@@ -128,7 +128,6 @@ npm run tauri build   # プロダクションビルド
 |------------|------|------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | `~/.claude/stats-cache.json` からセッション/ツール呼び出し数を補足。複数ルート対応。 |
 | **Codex** | `~/.codex/sessions/**/*.jsonl` | 複数ルート対応。 |
-| **OpenCode** | `~/.local/share/opencode/**/*.jsonl` | 内蔵プライシングレジストリでモデル別コスト計算。 |
 
 **ネットワークリクエスト**：リーダーボード/チャットをオプトインした場合のみ Supabase に集計データを送信し、Webhook 発火時に外部へ送信します。これらの機能を使わなければ、アプリは完全にオフラインで動作します。AI 翻訳キーを設定した場合のみ、該当プロバイダーへ直接リクエストが送信されます。
 
@@ -149,7 +148,7 @@ npm run tauri build   # プロダクションビルド
 │  └── SettingsOverlay (4 タブ)      │
 ├────────────────────────────────────┤
 │  Backend (Tauri v2 / Rust)         │
-│  ├── JSONL セッションパーサー (Claude/Codex/OpenCode)│
+│  ├── JSONL セッションパーサー (Claude/Codex)│
 │  ├── ファイル監視 (notify)         │
 │  ├── トレイアイコン + コスト表示   │
 │  ├── 自動アップデーター            │

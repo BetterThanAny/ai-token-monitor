@@ -11,7 +11,6 @@ interface Props {
 const PROVIDER_GRADIENTS: Record<string, string> = {
   claude: "linear-gradient(135deg, #7C5CFC, #5A3DE6)",
   codex: "linear-gradient(135deg, #0ea5e9, #0284c7)",
-  opencode: "linear-gradient(135deg, #d97706, #b45309)",
 };
 
 function getRankDisplay(rank: number): string {

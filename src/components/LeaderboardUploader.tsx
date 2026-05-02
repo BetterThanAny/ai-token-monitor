@@ -27,9 +27,6 @@ export function LeaderboardUploader() {
   // not invoke backend scans.
   const { stats: claudeStats } = useTokenStats("claude", optedIn && prefs.include_claude);
   const { stats: codexStats } = useTokenStats("codex", optedIn && prefs.include_codex);
-  const { stats: opencodeStats } = useTokenStats("opencode", optedIn && prefs.include_opencode);
-  const { stats: kimiStats } = useTokenStats("kimi", optedIn && prefs.include_kimi);
-  const { stats: glmStats } = useTokenStats("glm", optedIn && prefs.include_glm);
 
   const claude = useSnapshotUploader({
     stats: prefs.include_claude ? claudeStats : null,
@@ -43,49 +40,19 @@ export function LeaderboardUploader() {
     optedIn,
     provider: "codex",
   });
-  const opencode = useSnapshotUploader({
-    stats: prefs.include_opencode ? opencodeStats : null,
-    user,
-    optedIn,
-    provider: "opencode",
-  });
-  const kimi = useSnapshotUploader({
-    stats: prefs.include_kimi ? kimiStats : null,
-    user,
-    optedIn,
-    provider: "kimi",
-  });
-  const glm = useSnapshotUploader({
-    stats: prefs.include_glm ? glmStats : null,
-    user,
-    optedIn,
-    provider: "glm",
-  });
 
   const runners = useMemo<Partial<Record<LeaderboardProvider, BackfillRunner>>>(
     () => ({
       claude: prefs.include_claude && claude.ready ? claude.manualBackfill : undefined,
       codex: prefs.include_codex && codex.ready ? codex.manualBackfill : undefined,
-      opencode: prefs.include_opencode && opencode.ready ? opencode.manualBackfill : undefined,
-      kimi: prefs.include_kimi && kimi.ready ? kimi.manualBackfill : undefined,
-      glm: prefs.include_glm && glm.ready ? glm.manualBackfill : undefined,
     }),
     [
       prefs.include_claude,
       prefs.include_codex,
-      prefs.include_opencode,
-      prefs.include_kimi,
-      prefs.include_glm,
       claude.ready,
       codex.ready,
-      opencode.ready,
-      kimi.ready,
-      glm.ready,
       claude.manualBackfill,
       codex.manualBackfill,
-      opencode.manualBackfill,
-      kimi.manualBackfill,
-      glm.manualBackfill,
     ],
   );
 

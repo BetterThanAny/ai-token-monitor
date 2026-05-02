@@ -5,7 +5,7 @@
 
 > **[English](../README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Türkçe](README.tr.md)**
 
-App per la barra di sistema di macOS e Windows che monitora in tempo reale l'utilizzo dei token, i costi e l'attività di **Claude Code**, **Codex** e **OpenCode**, con classifica, chat e notifiche webhook integrate.
+App per la barra di sistema di macOS e Windows che monitora in tempo reale l'utilizzo dei token, i costi e l'attività di **Claude Code** e **Codex**, con classifica, chat e notifiche webhook integrate.
 
 | Overview | Analytics | Leaderboard |
 |:---:|:---:|:---:|
@@ -24,8 +24,8 @@ App per la barra di sistema di macOS e Windows che monitora in tempo reale l'uti
 ## Funzionalita
 
 ### Monitoraggio e visualizzazione
-- **Monitoraggio token in tempo reale** — analizza i file JSONL delle sessioni di Claude Code, Codex e OpenCode per statistiche d'uso precise
-- **Supporto multi-provider** — passa liberamente tra Claude / Codex / OpenCode, con modelli di costo specifici per provider
+- **Monitoraggio token in tempo reale** — analizza i file JSONL delle sessioni di Claude Code e Codex per statistiche d'uso precise
+- **Supporto multi-provider** — passa liberamente tra Claude / Codex, con modelli di costo specifici per provider
 - **Directory di configurazione multiple** — aggrega account di lavoro e personali registrando piu percorsi root di Claude/Codex
 - **Grafico giornaliero** — grafico a barre dei token o dei costi su 7/30 giorni con etichette sull'asse Y
 - **Grafico attivita** — heatmap dei contributi in stile GitHub con vista 2D/3D e navigazione per anno
@@ -64,7 +64,7 @@ App per la barra di sistema di macOS e Windows che monitora in tempo reale l'uti
 - [Node.js](https://nodejs.org/) 18+
 - Toolchain [Rust](https://rustup.rs/)
 - [Tauri CLI v2](https://v2.tauri.app/start/prerequisites/)
-- [Claude Code](https://claude.ai/claude-code), [Codex](https://openai.com/index/introducing-codex/) o [OpenCode](https://opencode.ai) installato e utilizzato almeno una volta
+- [Claude Code](https://claude.ai/claude-code) o [Codex](https://openai.com/index/introducing-codex/) installato e utilizzato almeno una volta
 
 ### Build
 
@@ -128,7 +128,6 @@ Dati condivisi: conteggio giornaliero dei token, costi, messaggi/sessioni. **Nes
 |----------|----------|------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | Conteggi sessioni/chiamate strumenti da `~/.claude/stats-cache.json`. Supporta root multiple. |
 | **Codex** | `~/.codex/sessions/**/*.jsonl` | Supporta root multiple. |
-| **OpenCode** | `~/.local/share/opencode/**/*.jsonl` | Costi per modello dal registro prezzi integrato. |
 
 **Richieste di rete**: solo quando classifica/chat sono attivati (invio dati aggregati a Supabase) o quando scatta un webhook. Senza queste funzionalita, l'app funziona completamente offline. Le chiavi di traduzione AI, se configurate, inviano richieste direttamente al provider scelto.
 
@@ -149,7 +148,7 @@ Dati condivisi: conteggio giornaliero dei token, costi, messaggi/sessioni. **Nes
 │  └── SettingsOverlay (4 tabs)      │
 ├────────────────────────────────────┤
 │  Backend (Tauri v2 / Rust)         │
-│  ├── JSONL session parsers (Claude/Codex/OpenCode)│
+│  ├── JSONL session parsers (Claude/Codex)│
 │  ├── File watcher (notify)         │
 │  ├── Tray icon + cost display      │
 │  ├── Auto-updater                  │

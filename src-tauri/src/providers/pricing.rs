@@ -16,12 +16,6 @@ struct PricingConfig {
     last_updated: String,
     claude: ProviderConfig,
     codex: ProviderConfig,
-    #[serde(default)]
-    opencode: Option<ProviderConfig>,
-    #[serde(default)]
-    kimi: Option<ProviderConfig>,
-    #[serde(default)]
-    glm: Option<ProviderConfig>,
 }
 
 fn unknown_version() -> String {
@@ -70,26 +64,6 @@ pub struct CodexPricing {
     pub input: f64,
     pub output: f64,
     pub cached_input: f64,
-}
-
-pub struct OpenCodePricing {
-    pub input: f64,
-    pub output: f64,
-    pub cache_read: f64,
-    pub cache_write: f64,
-}
-
-pub struct KimiPricing {
-    pub input: f64,
-    pub output: f64,
-    pub cache_read: f64,
-}
-
-#[allow(dead_code)]
-pub struct GlmPricing {
-    pub input: f64,
-    pub output: f64,
-    pub cache_read: f64,
 }
 
 // --- Loading ---
@@ -170,8 +144,38 @@ pub fn get_claude_pricing(model: &str) -> ClaudePricing {
         output: entry.output,
         cache_read: entry.cache_read,
         cache_write_5m: entry.cache_write,
-        cache_write_1h: if entry.cache_write_1h > 0.0 { entry.cache_write_1h } else { entry.cache_write },
+        cache_write_1h: if entry.cache_write_1h > 0.0 {
+            entry.cache_write_1h
+        } else {
+            entry.cache_write
+        },
     }
+}
+
+pub fn get_claude_pricing_for_speed(
+    model: &str,
+    speed: Option<&str>,
+    service_tier: Option<&str>,
+) -> ClaudePricing {
+    let mut pricing = get_claude_pricing(model);
+    if is_claude_fast_mode(model, speed, service_tier) {
+        pricing.input = 30.0;
+        pricing.output = 150.0;
+        pricing.cache_read = 3.0;
+        pricing.cache_write_5m = 37.5;
+        pricing.cache_write_1h = 60.0;
+    }
+    pricing
+}
+
+pub fn is_claude_fast_mode(model: &str, speed: Option<&str>, service_tier: Option<&str>) -> bool {
+    let model = model.to_ascii_lowercase();
+    if !model.contains("opus-4-6") {
+        return false;
+    }
+
+    speed.is_some_and(|s| s.eq_ignore_ascii_case("fast"))
+        || service_tier.is_some_and(|s| s.eq_ignore_ascii_case("fast"))
 }
 
 pub fn get_codex_pricing(model: &str) -> CodexPricing {
@@ -180,69 +184,6 @@ pub fn get_codex_pricing(model: &str) -> CodexPricing {
         input: entry.input,
         output: entry.output,
         cached_input: entry.cached_input,
-    }
-}
-
-pub fn get_kimi_pricing(model: &str) -> KimiPricing {
-    let cfg = config();
-    if let Some(ref kimi) = cfg.kimi {
-        let entry = find_pricing(kimi, model);
-        return KimiPricing {
-            input: entry.input,
-            output: entry.output,
-            cache_read: entry.cache_read,
-        };
-    }
-    // Fallback defaults
-    KimiPricing { input: 0.60, output: 2.00, cache_read: 0.0 }
-}
-
-#[allow(dead_code)]
-pub fn get_glm_pricing(model: &str) -> GlmPricing {
-    let cfg = config();
-    if let Some(ref glm) = cfg.glm {
-        let entry = find_pricing(glm, model);
-        return GlmPricing {
-            input: entry.input,
-            output: entry.output,
-            cache_read: entry.cache_read,
-        };
-    }
-    // Fallback defaults
-    GlmPricing { input: 0.50, output: 1.00, cache_read: 0.0 }
-}
-
-pub fn get_opencode_pricing(model: &str) -> OpenCodePricing {
-    let cfg = config();
-    // Use dedicated opencode pricing if available, otherwise try to match
-    // against claude or codex pricing tables based on model name.
-    if let Some(ref oc) = cfg.opencode {
-        let entry = find_pricing(oc, model);
-        return OpenCodePricing {
-            input: entry.input,
-            output: entry.output,
-            cache_read: entry.cache_read,
-            cache_write: entry.cache_write,
-        };
-    }
-
-    // Fallback: try claude pricing first (for claude-* models), then codex
-    if model.contains("claude") || model.contains("sonnet") || model.contains("opus") || model.contains("haiku") {
-        let entry = find_pricing(&cfg.claude, model);
-        OpenCodePricing {
-            input: entry.input,
-            output: entry.output,
-            cache_read: entry.cache_read,
-            cache_write: entry.cache_write,
-        }
-    } else {
-        let entry = find_pricing(&cfg.codex, model);
-        OpenCodePricing {
-            input: entry.input,
-            output: entry.output,
-            cache_read: entry.cached_input,
-            cache_write: 0.0,
-        }
     }
 }
 
@@ -263,12 +204,6 @@ pub struct PricingTable {
     pub last_updated: String,
     pub claude: Vec<PricingRow>,
     pub codex: Vec<PricingRow>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub opencode: Vec<PricingRow>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub kimi: Vec<PricingRow>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub glm: Vec<PricingRow>,
 }
 
 fn format_price(val: f64) -> String {
@@ -287,14 +222,26 @@ fn deduplicated_rows(provider: &ProviderConfig, use_cached_input: bool) -> Vec<P
     let mut rows = Vec::new();
     let mut seen_labels = std::collections::HashSet::new();
     for entry in &provider.models {
-        let label = if entry.label.is_empty() { &entry.match_pattern } else { &entry.label };
+        let label = if entry.label.is_empty() {
+            &entry.match_pattern
+        } else {
+            &entry.label
+        };
         if seen_labels.insert(label.to_string()) {
             rows.push(PricingRow {
                 model: label.to_string(),
                 input: format_price(entry.input),
                 output: format_price(entry.output),
-                cache_read: format_price(if use_cached_input { entry.cached_input } else { entry.cache_read }),
-                cache_write: if use_cached_input { "—".to_string() } else { format_price(entry.cache_write) },
+                cache_read: format_price(if use_cached_input {
+                    entry.cached_input
+                } else {
+                    entry.cache_read
+                }),
+                cache_write: if use_cached_input {
+                    "—".to_string()
+                } else {
+                    format_price(entry.cache_write)
+                },
             });
         }
     }
@@ -308,9 +255,6 @@ pub fn get_pricing_table() -> PricingTable {
         last_updated: cfg.last_updated.clone(),
         claude: deduplicated_rows(&cfg.claude, false),
         codex: deduplicated_rows(&cfg.codex, true),
-        opencode: cfg.opencode.as_ref().map(|oc| deduplicated_rows(oc, false)).unwrap_or_default(),
-        kimi: cfg.kimi.as_ref().map(|k| deduplicated_rows(k, false)).unwrap_or_default(),
-        glm: cfg.glm.as_ref().map(|g| deduplicated_rows(g, false)).unwrap_or_default(),
     }
 }
 
@@ -323,12 +267,6 @@ mod tests {
         let cfg: PricingConfig = serde_json::from_str(EMBEDDED_PRICING).unwrap();
         assert!(!cfg.claude.models.is_empty());
         assert!(!cfg.codex.models.is_empty());
-        assert!(cfg.opencode.is_some());
-        assert!(!cfg.opencode.unwrap().models.is_empty());
-        assert!(cfg.kimi.is_some());
-        assert!(!cfg.kimi.unwrap().models.is_empty());
-        assert!(cfg.glm.is_some());
-        assert!(!cfg.glm.unwrap().models.is_empty());
     }
 
     #[test]
@@ -361,23 +299,42 @@ mod tests {
         assert!((p.cache_write_1h - 10.0).abs() < 0.001);
     }
 
+    #[test]
+    fn claude_opus_46_fast_pricing() {
+        let p =
+            get_claude_pricing_for_speed("claude-opus-4-6-20260320", Some("fast"), Some("fast"));
+        assert!((p.input - 30.0).abs() < 0.001);
+        assert!((p.output - 150.0).abs() < 0.001);
+        assert!((p.cache_read - 3.0).abs() < 0.001);
+        assert!((p.cache_write_5m - 37.5).abs() < 0.001);
+        assert!((p.cache_write_1h - 60.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn claude_fast_flag_does_not_apply_to_unsupported_models() {
+        let p = get_claude_pricing_for_speed("claude-opus-4-7", Some("fast"), Some("fast"));
+        assert!((p.input - 5.0).abs() < 0.001);
+        assert!((p.output - 25.0).abs() < 0.001);
+    }
+
     // Regression guard: "opus-4-7" must match its own entry, not fall through
     // to the "opus-4" substring and get billed at Opus 4.1 rates ($15/$75).
     #[test]
     fn claude_opus_47_not_billed_as_41() {
         let p = get_claude_pricing("claude-opus-4-7-20260416");
-        assert!((p.input - 5.0).abs() < 0.001, "Opus 4.7 input must be $5/MTok, got ${}", p.input);
-        assert!((p.output - 25.0).abs() < 0.001, "Opus 4.7 output must be $25/MTok, got ${}", p.output);
+        assert!(
+            (p.input - 5.0).abs() < 0.001,
+            "Opus 4.7 input must be $5/MTok, got ${}",
+            p.input
+        );
+        assert!(
+            (p.output - 25.0).abs() < 0.001,
+            "Opus 4.7 output must be $25/MTok, got ${}",
+            p.output
+        );
         assert!((p.cache_read - 0.50).abs() < 0.001);
         assert!((p.cache_write_5m - 6.25).abs() < 0.001);
         assert!((p.cache_write_1h - 10.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn opencode_opus_47_not_billed_as_41() {
-        let p = get_opencode_pricing("anthropic/claude-opus-4-7-20260416");
-        assert!((p.input - 5.0).abs() < 0.001, "Opencode Opus 4.7 input must be $5/MTok, got ${}", p.input);
-        assert!((p.output - 25.0).abs() < 0.001);
     }
 
     #[test]
@@ -436,23 +393,32 @@ mod tests {
     #[test]
     fn codex_gpt55_not_billed_as_gpt54() {
         let p = get_codex_pricing("gpt-5.5");
-        assert!((p.input - 5.00).abs() < 0.001, "GPT-5.5 input must be $5/MTok, got ${}", p.input);
-        assert!((p.output - 30.00).abs() < 0.001, "GPT-5.5 output must be $30/MTok, got ${}", p.output);
+        assert!(
+            (p.input - 5.00).abs() < 0.001,
+            "GPT-5.5 input must be $5/MTok, got ${}",
+            p.input
+        );
+        assert!(
+            (p.output - 30.00).abs() < 0.001,
+            "GPT-5.5 output must be $30/MTok, got ${}",
+            p.output
+        );
         assert!((p.cached_input - 0.50).abs() < 0.001);
     }
 
     #[test]
     fn codex_gpt55_pro_not_billed_as_gpt54() {
         let p = get_codex_pricing("gpt-5.5-pro");
-        assert!((p.input - 30.00).abs() < 0.001, "GPT-5.5 Pro input must be $30/MTok, got ${}", p.input);
-        assert!((p.output - 180.00).abs() < 0.001, "GPT-5.5 Pro output must be $180/MTok, got ${}", p.output);
-    }
-
-    #[test]
-    fn opencode_gpt55_not_billed_as_gpt54() {
-        let p = get_opencode_pricing("openai/gpt-5.5");
-        assert!((p.input - 5.00).abs() < 0.001, "Opencode GPT-5.5 input must be $5/MTok, got ${}", p.input);
-        assert!((p.output - 30.00).abs() < 0.001);
+        assert!(
+            (p.input - 30.00).abs() < 0.001,
+            "GPT-5.5 Pro input must be $30/MTok, got ${}",
+            p.input
+        );
+        assert!(
+            (p.output - 180.00).abs() < 0.001,
+            "GPT-5.5 Pro output must be $180/MTok, got ${}",
+            p.output
+        );
     }
 
     // Regression guard: dated snapshot IDs (e.g. gpt-5.5-2026-04-23) must
@@ -460,7 +426,11 @@ mod tests {
     #[test]
     fn codex_gpt55_dated_snapshot_resolves_correctly() {
         let p = get_codex_pricing("gpt-5.5-2026-04-23");
-        assert!((p.input - 5.00).abs() < 0.001, "GPT-5.5 dated snapshot must match gpt-5.5, got input ${}", p.input);
+        assert!(
+            (p.input - 5.00).abs() < 0.001,
+            "GPT-5.5 dated snapshot must match gpt-5.5, got input ${}",
+            p.input
+        );
         assert!((p.output - 30.00).abs() < 0.001);
     }
 
