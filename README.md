@@ -5,23 +5,20 @@
 
 > **[한국어](docs/README.ko.md) | [日本語](docs/README.ja.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md) | [Türkçe](docs/README.tr.md) | [Italiano](docs/README.it.md)**
 
-A system tray app for macOS and Windows that tracks **Claude Code** and **Codex** token usage, cost, and activity in real time — with a built-in leaderboard, chat, and optional webhook alerts.
+A system tray app for macOS and Windows that tracks **Claude Code** and **Codex** token usage, cost, and activity in real time — with optional webhook alerts.
 
 <table>
   <tr>
-    <th width="33%">Overview</th>
-    <th width="33%">Analytics</th>
-    <th width="33%">Leaderboard</th>
+    <th width="50%">Overview</th>
+    <th width="50%">Analytics</th>
   </tr>
   <tr>
     <td><img src="docs/screenshots/overview.png" width="280" /></td>
     <td><img src="docs/screenshots/analytics.png" width="280" /></td>
-    <td><img src="docs/screenshots/leaderboard.png" width="280" /></td>
   </tr>
   <tr>
     <td align="center">Today's usage, 7-day chart, weekly/monthly totals</td>
     <td align="center">Activity graph, 30-day trends, model breakdown</td>
-    <td align="center">Compare usage with other developers</td>
   </tr>
 </table>
 
@@ -47,11 +44,6 @@ A system tray app for macOS and Windows that tracks **Claude Code** and **Codex*
 - **Cache efficiency** — donut chart showing cache hit ratio
 
 ### Social & Sharing
-- **Leaderboard** — compare daily/weekly/monthly usage with other developers (GitHub OAuth, opt-in)
-- **7-day TOP 10 grid** — at-a-glance ranking history
-- **Mini profile** — activity heatmap, streaks, external profile links
-- **Badges** — card / compact / flat-square styles, export as PNG / SVG / Markdown, or embed a live badge URL in your GitHub README
-- **Chat** — in-app chat for leaderboard members with mentions, replies, image attachments, unread counter, typing indicators, and AI translation
 - **AI Report (Wrapped)** — monthly/yearly recap card with top model, busiest day, and streaks
 - **Receipt view** — receipt-style usage summary for today / week / month / all-time
 - **Salary comparator** — see your monthly AI spend as a share of your salary (lattes / Netflix / chicken)
@@ -67,7 +59,6 @@ A system tray app for macOS and Windows that tracks **Claude Code** and **Codex*
 - **10 languages** — English, 한국어, 日本語, 简体中文, 繁體中文, Français, Español, Deutsch, Türkçe, Italiano
 - **Compact / full number format** — `377.0K` vs `377,000`
 - **Launch on startup** — optional auto-start on boot
-- **AI translation** — bring your own Gemini / OpenAI / Anthropic API key to translate chat messages (keys are encrypted locally)
 - **Auto-hide window** — hides when clicking outside
 
 ## Install from Source
@@ -95,7 +86,7 @@ npm run tauri build   # production build
 
 1. Launch the app — an icon appears in the system tray (macOS menu bar / Windows taskbar)
 2. Click the icon to open the dashboard
-3. Switch between **Overview**, **Analytics**, **Leaderboard**, and **Chat** tabs
+3. Switch between **Overview** and **Analytics** tabs
 
 ### Tabs
 
@@ -103,37 +94,16 @@ npm run tauri build   # production build
 |-----|---------|
 | **Overview** | Today's summary, 7-day chart, weekly/monthly totals, 8-week heatmap |
 | **Analytics** | Full-year activity graph (2D/3D), 30-day chart, model breakdown, cache efficiency |
-| **Leaderboard** | Rank against other users, 7-day TOP 10 grid, badges, mini profiles |
-| **Chat** | Realtime chat with leaderboard members — mentions, replies, images, AI translation |
-
-### Header actions
-
-The header exposes a **share** button, a **⋯ more** dropdown, and a **⚙ settings** button. The more menu contains:
-
-- **GitHub repository** — open the repo in your browser
-- **AI Report** — see your monthly/yearly recap
-- **Receipt** — receipt-style usage summary
-- **Share app** — copy a recommendation message + repo link
-- **Capture screenshot** — copy the current view to the clipboard
 
 ### Settings
 
-Settings is organized into four tabs:
+Settings is organized into three tabs:
 
 | Tab | Options |
 |-----|---------|
-| **General** | Theme, language, appearance, number format, menu bar cost, launch on startup, monthly salary, Claude/Codex directories, optional Claude usage tracking (OAuth) |
-| **Account** | GitHub sign-in, leaderboard opt-in, profile links |
-| **AI** | Gemini / OpenAI / Anthropic API keys for chat translation (encrypted locally) |
+| **General** | Theme, language, appearance, number format, menu bar cost, launch on startup, monthly salary, optional Claude usage tracking |
+| **Account** | Claude/Codex config directories |
 | **Webhooks** | Discord / Slack / Telegram webhook URLs, alert thresholds, monitored windows, reset notifications |
-
-### Leaderboard & chat
-
-1. Enable **Share Usage Data** in Settings → Account
-2. Click **Sign in with GitHub**
-3. See your rank in the **Leaderboard** tab and join the **Chat** tab
-
-Shared data: daily token count, cost, messages/sessions. **No code or conversation content is shared.**
 
 ## Data Sources
 
@@ -142,7 +112,7 @@ Shared data: daily token count, cost, messages/sessions. **No code or conversati
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | Session/tool-call counts from `~/.claude/stats-cache.json`. Supports multiple roots. |
 | **Codex** | `~/.codex/sessions/**/*.jsonl` | Supports multiple roots. |
 
-**Network requests**: only when leaderboard/chat is opted in (sends aggregated data to Supabase), Claude OAuth usage tracking is explicitly enabled, a webhook fires, or AI translation keys are used. Without these features, the app runs completely offline.
+**Network requests**: core usage tracking runs locally. Network requests occur when webhook alerts are sent, the updater checks releases, or you open external links from the app.
 
 ## Architecture
 
@@ -150,15 +120,13 @@ Shared data: daily token count, cost, messages/sessions. **No code or conversati
 ┌────────────────────────────────────┐
 │  Frontend (React 19 + Vite)        │
 │  ├── PopoverShell / Header         │
-│  ├── TabBar (4 tabs)               │
+│  ├── TabBar (2 tabs)               │
 │  ├── TodaySummary / DailyChart     │
 │  ├── ActivityGraph (2D/3D) / Heatmap│
 │  ├── ModelBreakdown / CacheEfficiency│
-│  ├── Leaderboard + Grid + Badges   │
-│  ├── Chat + MentionAutocomplete    │
-│  ├── MiniProfile / Wrapped / Receipt│
+│  ├── Wrapped / Receipt             │
 │  ├── SalaryComparator                 │
-│  └── SettingsOverlay (4 tabs)      │
+│  └── SettingsOverlay (3 tabs)      │
 ├────────────────────────────────────┤
 │  Backend (Tauri v2 / Rust)         │
 │  ├── JSONL session parsers (Claude/Codex)│
@@ -169,9 +137,7 @@ Shared data: daily token count, cost, messages/sessions. **No code or conversati
 │  └── Preferences + encrypted secrets│
 ├────────────────────────────────────┤
 │  External services (opt-in)        │
-│  ├── Supabase (leaderboard + chat) │
-│  ├── Discord / Slack / Telegram    │
-│  └── Gemini / OpenAI / Anthropic   │
+│  └── Discord / Slack / Telegram    │
 └────────────────────────────────────┘
 ```
 

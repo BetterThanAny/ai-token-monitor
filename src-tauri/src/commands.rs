@@ -1,4 +1,3 @@
-use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
@@ -405,14 +404,6 @@ fn derive_encryption_key() -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn bytes_to_hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(&mut out, "{:02x}", byte);
-    }
-    out
-}
-
 fn encrypt_data(plaintext: &[u8]) -> Option<String> {
     let key = derive_encryption_key();
     let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
@@ -548,24 +539,6 @@ fn clear_usage_tracking_migration_marker(prefs: &mut UserPreferences) -> bool {
 #[tauri::command]
 pub fn get_ai_keys() -> Option<AiKeys> {
     load_ai_keys()
-}
-
-#[tauri::command]
-pub fn get_stable_device_id(user_id: String) -> Result<String, String> {
-    let trimmed = user_id.trim();
-    if trimmed.is_empty() {
-        return Err("Missing user_id".to_string());
-    }
-
-    let machine_id = get_machine_id();
-    let mut hasher = Sha256::new();
-    hasher.update(APP_SALT);
-    hasher.update(b":device-id:");
-    hasher.update(trimmed.as_bytes());
-    hasher.update(b":");
-    hasher.update(machine_id.as_bytes());
-    let digest = hasher.finalize();
-    Ok(bytes_to_hex(&digest[..16]))
 }
 
 #[tauri::command]

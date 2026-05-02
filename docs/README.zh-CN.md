@@ -5,12 +5,12 @@
 
 > **[English](../README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [繁體中文](README.zh-TW.md) | [Türkçe](README.tr.md) | [Italiano](README.it.md)**
 
-一款 macOS 和 Windows 系统托盘应用,可实时追踪 **Claude Code** 和 **Codex** 的令牌使用量、费用和活动,并内置排行榜、聊天和 Webhook 提醒。
+一款 macOS 和 Windows 系统托盘应用,可实时追踪 **Claude Code** 和 **Codex** 的令牌使用量、费用和活动,并支持可选 Webhook 提醒。
 
-| 概览 | 分析 | 排行榜 |
-|:---:|:---:|:---:|
-| <img src="screenshots/overview.png" width="280" /> | <img src="screenshots/analytics.png" width="280" /> | <img src="screenshots/leaderboard.png" width="280" /> |
-| 今日使用量、7 天图表、周/月汇总 | 活动图、30 天趋势、模型分析 | 与其他开发者比较使用量 |
+| 概览 | 分析 |
+| :---: | :---: |
+| <img src="screenshots/overview.png" width="280" /> | <img src="screenshots/analytics.png" width="280" /> |
+| 今日使用量、7 天图表、周/月汇总 | 活动图、30 天趋势、模型分析 |
 
 ## 下载
 
@@ -34,11 +34,6 @@
 - **缓存效率** — 缓存命中率环形图
 
 ### 社交与分享
-- **排行榜** — 与其他开发者比较日/周/月使用量(GitHub OAuth,需主动开启)
-- **7 天 TOP 10 网格** — 直观展示排名历史
-- **迷你个人资料** — 活动热力图、连续使用天数、外部资料链接
-- **徽章** — Card / Compact / Flat Square 样式,可导出为 PNG / SVG / Markdown 或动态 URL,嵌入到 GitHub README 中
-- **聊天** — 面向排行榜成员的应用内聊天,支持提及、回复、图片附件、未读徽章、正在输入提示以及 AI 翻译
 - **AI 报告 (Wrapped)** — 月度/年度回顾卡片(最常用模型、最忙碌的一天、连续记录)
 - **收据视图** — 今日 / 本周 / 本月 / 全部 的收据式使用摘要
 - **薪资对比** — 将 AI 支出换算为月薪占比(拿铁 / Netflix / 炸鸡)
@@ -54,7 +49,6 @@
 - **10 种语言** — English, 한국어, 日本語, 简体中文, 繁體中文, Français, Español, Deutsch, Türkçe, Italiano
 - **数字格式** — 紧凑(`377.0K`)/ 完整(`377,000`)切换
 - **开机自启** — 可选开机自动启动
-- **AI 翻译** — 添加 Gemini / OpenAI / Anthropic API 密钥后可翻译聊天消息(密钥在本地加密存储)
 - **自动隐藏** — 点击窗口外自动隐藏
 
 ## 从源码安装
@@ -82,7 +76,7 @@ npm run tauri build   # 生产构建
 
 1. 启动应用后,系统托盘(macOS 菜单栏 / Windows 任务栏)中会出现图标
 2. 点击图标打开使用量仪表板
-3. 在 **概览**、**分析**、**排行榜** 和 **聊天** 标签之间切换
+3. 在 **概览** 和 **分析** 标签之间切换
 
 ### 标签说明
 
@@ -90,37 +84,16 @@ npm run tauri build   # 生产构建
 |------|------|
 | **概览** | 今日摘要、7 天图表、周/月汇总、8 周热力图 |
 | **分析** | 全年活动图(2D/3D)、30 天图表、模型分析、缓存效率 |
-| **排行榜** | 使用量排名、7 天 TOP 10 网格、徽章、迷你个人资料 |
-| **聊天** | 与排行榜成员实时聊天 — 提及、回复、图片、AI 翻译 |
-
-### 顶栏操作
-
-顶栏包含 **分享按钮**、**⋯ 菜单** 和 **⚙ 设置** 按钮。菜单包含以下项:
-
-- **查看 GitHub 仓库** — 在浏览器中打开仓库
-- **我的 AI 报告** — 月度/年度回顾卡片
-- **收据** — 收据式使用摘要
-- **分享此应用** — 复制推荐消息 + 仓库链接到剪贴板
-- **截图到剪贴板** — 将当前视图复制到剪贴板
 
 ### 设置
 
-设置分为 4 个标签:
+设置分为 3 个标签:
 
 | 标签 | 选项 |
 |------|------|
-| **常规** | 主题、语言、外观、数字格式、菜单栏费用、开机自启、月薪、Claude/Codex 目录、Claude 用量追踪(OAuth) |
-| **账户** | GitHub 登录、排行榜共享、个人资料链接 |
-| **AI** | Gemini / OpenAI / Anthropic API 密钥(聊天翻译,本地加密存储) |
+| **常规** | 主题、语言、外观、数字格式、菜单栏费用、开机自启、月薪、可选 Claude 用量追踪 |
+| **账户** | Claude/Codex 配置目录 |
 | **Webhooks** | Discord / Slack / Telegram Webhook URL、提醒阈值、监控窗口、重置通知 |
-
-### 排行榜与聊天
-
-1. 在 设置 → 账户 中启用 "共享使用数据"
-2. 点击 "使用 GitHub 登录"
-3. 在排行榜标签查看排名,在聊天标签参与对话
-
-共享的数据:每日令牌总量、费用、消息/会话数。**不共享代码或对话内容。**
 
 ## 数据源
 
@@ -129,23 +102,18 @@ npm run tauri build   # 生产构建
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | 从 `~/.claude/stats-cache.json` 补充会话/工具调用数。支持多根目录。 |
 | **Codex** | `~/.codex/sessions/**/*.jsonl` | 支持多根目录。 |
 
-**网络请求**:仅在开启排行榜/聊天时(向 Supabase 发送汇总数据)或 Webhook 触发时才会发起网络请求。不使用这些功能时,应用完全离线运行。配置 AI 翻译密钥后,才会直接向相应提供商发送请求。
-
 ## 架构
 
 ```
 ┌────────────────────────────────────┐
 │  前端 (React 19 + Vite)            │
 │  ├── PopoverShell / Header         │
-│  ├── TabBar (4 标签)               │
+│  ├── TabBar (2 tabs)               │
 │  ├── TodaySummary / DailyChart     │
 │  ├── ActivityGraph (2D/3D) / Heatmap│
 │  ├── ModelBreakdown / CacheEfficiency│
-│  ├── Leaderboard + Grid + Badges   │
-│  ├── Chat + MentionAutocomplete    │
-│  ├── MiniProfile / Wrapped / Receipt│
 │  ├── SalaryComparator              │
-│  └── SettingsOverlay (4 标签)      │
+│  └── SettingsOverlay (3 tabs)      │
 ├────────────────────────────────────┤
 │  后端 (Tauri v2 / Rust)            │
 │  ├── JSONL 会话解析器 (Claude/Codex)│
@@ -156,9 +124,7 @@ npm run tauri build   # 生产构建
 │  └── 偏好设置 + 加密密钥           │
 ├────────────────────────────────────┤
 │  外部服务 (可选)                   │
-│  ├── Supabase (排行榜 + 聊天)      │
-│  ├── Discord / Slack / Telegram    │
-│  └── Gemini / OpenAI / Anthropic   │
+│  └── Discord / Slack / Telegram    │
 └────────────────────────────────────┘
 ```
 

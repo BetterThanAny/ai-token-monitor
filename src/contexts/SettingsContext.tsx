@@ -15,8 +15,6 @@ interface SettingsContextType {
 const defaultPrefs: UserPreferences = {
   number_format: "compact",
   show_tray_cost: true,
-  leaderboard_opted_in: false,
-  device_id: undefined,
   include_claude: true,
   include_codex: false,
   theme: "github",

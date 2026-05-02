@@ -165,9 +165,6 @@ pub struct AllStats {
 pub struct UserPreferences {
     pub number_format: String,
     pub show_tray_cost: bool,
-    pub leaderboard_opted_in: bool,
-    #[serde(default)]
-    pub device_id: Option<String>,
     #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default = "default_color_mode")]
@@ -194,8 +191,6 @@ pub struct UserPreferences {
     pub usage_tracking_migrated: bool,
     #[serde(default)]
     pub ai_keys: Option<AiKeys>,
-    #[serde(default)]
-    pub ai_model: Option<String>,
     #[serde(default)]
     pub webhook_config: Option<WebhookConfig>,
     #[serde(default)]
@@ -322,8 +317,6 @@ impl Default for UserPreferences {
         Self {
             number_format: "compact".to_string(),
             show_tray_cost: true,
-            leaderboard_opted_in: false,
-            device_id: None,
             theme: default_theme(),
             color_mode: default_color_mode(),
             language: default_language(),
@@ -337,7 +330,6 @@ impl Default for UserPreferences {
             usage_tracking_enabled: false,
             usage_tracking_migrated: false,
             ai_keys: None,
-            ai_model: None,
             webhook_config: None,
             autostart_enabled: false,
             quick_action_items: vec![],

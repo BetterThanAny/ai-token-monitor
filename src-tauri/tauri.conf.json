@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.github.com https://github.com https://objects.githubusercontent.com"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'"
     },
     "macOSPrivateApi": true
   },
@@ -62,14 +62,6 @@
     }
   },
   "plugins": {
-    "deep-link": {
-      "mobile": [],
-      "desktop": {
-        "schemes": [
-          "ai-token-monitor"
-        ]
-      }
-    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY5ODM1N0M5RUJBODQ0NTgKUldSWVJLanJ5VmVEK1dOZjg0WWVySGZJaFVPNTJpNjFwOEhlRXZ5Z2t5bzNoYUdEZ2tsaG1QekwK",
       "endpoints": [
