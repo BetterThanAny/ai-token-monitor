@@ -130,16 +130,24 @@ function refresh(notifyReconnect: boolean) {
   }
 }
 
+function handleVisibilityChange() {
+  if (document.hidden) {
+    teardown();
+  } else if (shouldBeActive()) {
+    setup(true);
+  }
+}
+
 function installVisibilityHandler() {
   if (visibilityHandlerInstalled) return;
   visibilityHandlerInstalled = true;
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      teardown();
-    } else if (shouldBeActive()) {
-      setup(true);
-    }
-  });
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+}
+
+function uninstallVisibilityHandler() {
+  if (!visibilityHandlerInstalled) return;
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+  visibilityHandlerInstalled = false;
 }
 
 export function setChatChannelUser(nextUserId: string | null) {
@@ -164,6 +172,7 @@ export function subscribeChatChannel(handlers: ChatChannelHandlers): () => void 
     subscribers.delete(handlers);
     if (subscribers.size === 0) {
       teardown();
+      uninstallVisibilityHandler();
     }
   };
 }

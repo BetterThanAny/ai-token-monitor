@@ -84,10 +84,15 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
     let mut windows_to_check: Vec<(&str, f64, String, Option<String>)> = Vec::new();
 
     // Truncate resets_at to hour to avoid spurious resets from second-level drift
-    fn stable_window_id(name: &str, resets_at: &str) -> String {
-        // Take first 13 chars of ISO timestamp (e.g. "2026-04-03T11") for hour-level stability
-        let truncated = &resets_at[..resets_at.len().min(13)];
-        format!("{}:{}", name, truncated)
+    fn stable_window_id(name: &str, resets_at: Option<&str>) -> String {
+        match resets_at {
+            Some(resets_at) => {
+                // Take first 13 chars of ISO timestamp (e.g. "2026-04-03T11") for hour-level stability
+                let truncated = &resets_at[..resets_at.len().min(13)];
+                format!("{}:{}", name, truncated)
+            }
+            None => format!("{}:unknown-reset", name),
+        }
     }
 
     if monitored.five_hour {
@@ -95,8 +100,8 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
             windows_to_check.push((
                 "Session (5h)",
                 w.utilization,
-                stable_window_id("5h", &w.resets_at),
-                Some(w.resets_at.clone()),
+                stable_window_id("5h", w.resets_at.as_deref()),
+                w.resets_at.clone(),
             ));
         }
     }
@@ -105,8 +110,8 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
             windows_to_check.push((
                 "Weekly",
                 w.utilization,
-                stable_window_id("7d", &w.resets_at),
-                Some(w.resets_at.clone()),
+                stable_window_id("7d", w.resets_at.as_deref()),
+                w.resets_at.clone(),
             ));
         }
     }
@@ -115,8 +120,8 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
             windows_to_check.push((
                 "Weekly Sonnet",
                 w.utilization,
-                stable_window_id("7d-sonnet", &w.resets_at),
-                Some(w.resets_at.clone()),
+                stable_window_id("7d-sonnet", w.resets_at.as_deref()),
+                w.resets_at.clone(),
             ));
         }
     }
@@ -125,8 +130,8 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
             windows_to_check.push((
                 "Weekly Opus",
                 w.utilization,
-                stable_window_id("7d-opus", &w.resets_at),
-                Some(w.resets_at.clone()),
+                stable_window_id("7d-opus", w.resets_at.as_deref()),
+                w.resets_at.clone(),
             ));
         }
     }
@@ -808,6 +813,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_all_stats,
             commands::get_codex_stats,
+            commands::get_account_states,
             commands::is_codex_available,
             commands::get_preferences,
             commands::set_preferences,
@@ -989,7 +995,9 @@ pub fn run() {
                                 let prefs = commands::get_preferences();
                                 if prefs.usage_tracking_enabled {
                                     // Skip if cache was recently populated by another opt-in fetch.
-                                    if !oauth_usage::is_cache_fresh(30) {
+                                    if !oauth_usage::is_cache_fresh(
+                                        oauth_usage::USAGE_REFRESH_INTERVAL_SECS,
+                                    ) {
                                         if let Some(_) =
                                             rt.block_on(oauth_usage::fetch_and_cache_usage())
                                         {
@@ -999,7 +1007,9 @@ pub fn run() {
                                             }
                                         }
                                     }
-                                    thread::sleep(std::time::Duration::from_secs(300));
+                                    thread::sleep(std::time::Duration::from_secs(
+                                        oauth_usage::USAGE_REFRESH_INTERVAL_SECS,
+                                    ));
                                 } else {
                                     thread::sleep(std::time::Duration::from_secs(5));
                                 }

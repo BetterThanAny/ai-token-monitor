@@ -11,7 +11,9 @@ use crate::providers::claude_code::ClaudeCodeProvider;
 use crate::providers::codex::CodexProvider;
 use crate::providers::pricing;
 use crate::providers::traits::TokenProvider;
-use crate::providers::types::{AiKeys, AllStats, UserPreferences};
+use crate::providers::types::{
+    AccountState, AiKeys, AllStats, BalanceInfo, LimitWindowStatus, UserPreferences,
+};
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use tauri::Manager;
@@ -59,6 +61,165 @@ pub async fn get_codex_stats(app: tauri::AppHandle) -> Result<AllStats, String> 
         crate::update_tray_title(&app);
     }
     result
+}
+
+#[tauri::command]
+pub async fn get_account_states() -> Result<Vec<AccountState>, String> {
+    let prefs = get_preferences();
+    let mut states = Vec::new();
+
+    match crate::oauth_usage::get_statusline_rate_limits_usage() {
+        Ok(Some(usage)) => {
+            states.push(claude_usage_to_account_state_with_source(
+                usage,
+                "claude_statusline_rate_limits",
+            ));
+        }
+        Err(error) => {
+            states.push(empty_claude_account_state(error));
+        }
+        Ok(None) => {
+            let usage = if prefs.usage_tracking_enabled {
+                crate::oauth_usage::fetch_and_cache_usage().await
+            } else {
+                crate::oauth_usage::get_cached_usage()
+            };
+            if let Some(usage) = usage {
+                let mut state = claude_usage_to_account_state(usage);
+                if state.is_stale {
+                    if let Some(error) = crate::oauth_usage::get_last_error() {
+                        state.diagnostics.push(error);
+                    }
+                }
+                states.push(state);
+            } else if prefs.usage_tracking_enabled || prefs.include_claude {
+                let diagnostic = if prefs.usage_tracking_enabled {
+                    crate::oauth_usage::get_last_error()
+                        .unwrap_or_else(|| "Claude OAuth usage data is not available.".to_string())
+                } else {
+                    "Claude usage tracking is disabled and no cached quota data is available."
+                        .to_string()
+                };
+                states.push(empty_claude_account_state(diagnostic));
+            }
+        }
+    }
+
+    let codex_dirs = prefs.codex_dirs.clone();
+    let state = tauri::async_runtime::spawn_blocking(move || {
+        let provider = CodexProvider::new(codex_dirs);
+        if !provider.is_available() {
+            return Ok(None);
+        }
+        provider.fetch_account_state()
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    if let Some(state) = state {
+        states.push(state);
+    }
+
+    Ok(states)
+}
+
+fn claude_usage_to_account_state(usage: crate::oauth_usage::OAuthUsage) -> AccountState {
+    claude_usage_to_account_state_with_source(usage, "anthropic_oauth_usage")
+}
+
+fn claude_usage_to_account_state_with_source(
+    usage: crate::oauth_usage::OAuthUsage,
+    source: &str,
+) -> AccountState {
+    let mut limit_windows = Vec::new();
+
+    if let Some(window) = usage.five_hour {
+        limit_windows.push(claude_limit_window("Claude 5h", window, source));
+    }
+    if let Some(window) = usage.seven_day {
+        limit_windows.push(claude_limit_window("Claude 7d", window, source));
+    }
+    if let Some(window) = usage.seven_day_sonnet {
+        limit_windows.push(claude_limit_window("Claude Sonnet 7d", window, source));
+    }
+    if let Some(window) = usage.seven_day_opus {
+        limit_windows.push(claude_limit_window("Claude Opus 7d", window, source));
+    }
+
+    let balance = usage.extra_usage.and_then(|extra| {
+        if !extra.is_enabled {
+            return None;
+        }
+        let remaining = (extra.monthly_limit - extra.used_credits).max(0.0);
+        Some(BalanceInfo {
+            balance: Some(remaining),
+            used: Some(extra.used_credits),
+            total: Some(extra.monthly_limit),
+            remaining: Some(remaining),
+            unit: "usd".to_string(),
+            currency: Some("USD".to_string()),
+            expires_at: None,
+            is_unlimited: false,
+            status: usage_status(extra.utilization),
+        })
+    });
+
+    AccountState {
+        provider: "claude".to_string(),
+        fetched_at: Some(usage.fetched_at),
+        is_stale: usage.is_stale,
+        limit_windows,
+        rate_limits: Vec::new(),
+        balance,
+        client_distribution: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn empty_claude_account_state(diagnostic: String) -> AccountState {
+    AccountState {
+        provider: "claude".to_string(),
+        fetched_at: None,
+        is_stale: false,
+        limit_windows: Vec::new(),
+        rate_limits: Vec::new(),
+        balance: None,
+        client_distribution: Vec::new(),
+        diagnostics: vec![diagnostic],
+    }
+}
+
+fn claude_limit_window(
+    name: &str,
+    window: crate::oauth_usage::UsageWindow,
+    source: &str,
+) -> LimitWindowStatus {
+    LimitWindowStatus {
+        name: name.to_string(),
+        used_percent: Some(window.utilization),
+        used: None,
+        total: None,
+        remaining: None,
+        unit: "percent".to_string(),
+        window_minutes: None,
+        starts_at: None,
+        ends_at: None,
+        resets_at: window.resets_at,
+        status: usage_status(window.utilization),
+        source: source.to_string(),
+    }
+}
+
+fn usage_status(utilization: f64) -> String {
+    if utilization >= 100.0 {
+        "exhausted".to_string()
+    } else if utilization >= 90.0 {
+        "critical".to_string()
+    } else if utilization >= 70.0 {
+        "warning".to_string()
+    } else {
+        "ok".to_string()
+    }
 }
 
 #[tauri::command]

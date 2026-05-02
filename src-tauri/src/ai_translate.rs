@@ -60,14 +60,13 @@ async fn call_gemini(key: &str, model: &str, prompt: &str) -> Result<String, Str
     );
     let body = json!({ "contents": [{ "parts": [{ "text": prompt }] }] });
     let data = post_json(&url, &[], &body, "Gemini").await?;
-    extract_text(&data, &["candidates", "0", "content", "parts", "0", "text"])
-        .or_else(|_| {
-            // Gemini uses array indexing in serde_json Value
-            data["candidates"][0]["content"]["parts"][0]["text"]
-                .as_str()
-                .map(|s| s.trim().to_string())
-                .ok_or_else(|| "Gemini returned no text".to_string())
-        })
+    extract_text(&data, &["candidates", "0", "content", "parts", "0", "text"]).or_else(|_| {
+        // Gemini uses array indexing in serde_json Value
+        data["candidates"][0]["content"]["parts"][0]["text"]
+            .as_str()
+            .map(|s| s.trim().to_string())
+            .ok_or_else(|| "Gemini returned no text".to_string())
+    })
 }
 
 async fn call_openai(key: &str, model: &str, prompt: &str) -> Result<String, String> {
@@ -82,7 +81,8 @@ async fn call_openai(key: &str, model: &str, prompt: &str) -> Result<String, Str
         &[("Authorization", auth.as_str())],
         &body,
         "OpenAI",
-    ).await?;
+    )
+    .await?;
     data["choices"][0]["message"]["content"]
         .as_str()
         .map(|s| s.trim().to_string())
@@ -104,7 +104,8 @@ async fn call_anthropic(key: &str, model: &str, prompt: &str) -> Result<String, 
         ],
         &body,
         "Anthropic",
-    ).await?;
+    )
+    .await?;
     data["content"][0]["text"]
         .as_str()
         .map(|s| s.trim().to_string())
@@ -118,15 +119,26 @@ fn build_detect_prompt(text: &str) -> String {
     )
 }
 
-async fn call_model(keys: &crate::providers::types::AiKeys, model: &str, prompt: &str) -> Result<String, String> {
+async fn call_model(
+    keys: &crate::providers::types::AiKeys,
+    model: &str,
+    prompt: &str,
+) -> Result<String, String> {
     if model.starts_with("gemini") {
         let key = keys.gemini.as_deref().ok_or("Gemini API key not set")?;
         call_gemini(key, model, prompt).await
-    } else if model.starts_with("gpt") || model.starts_with("o1") || model.starts_with("o3") || model.starts_with("o4") {
+    } else if model.starts_with("gpt")
+        || model.starts_with("o1")
+        || model.starts_with("o3")
+        || model.starts_with("o4")
+    {
         let key = keys.openai.as_deref().ok_or("OpenAI API key not set")?;
         call_openai(key, model, prompt).await
     } else if model.starts_with("claude") {
-        let key = keys.anthropic.as_deref().ok_or("Anthropic API key not set")?;
+        let key = keys
+            .anthropic
+            .as_deref()
+            .ok_or("Anthropic API key not set")?;
         call_anthropic(key, model, prompt).await
     } else {
         Err(format!("Unknown model provider for model: {}", model))
@@ -134,10 +146,7 @@ async fn call_model(keys: &crate::providers::types::AiKeys, model: &str, prompt:
 }
 
 #[tauri::command]
-pub async fn translate_reply(
-    text: String,
-    original_message: String,
-) -> Result<String, String> {
+pub async fn translate_reply(text: String, original_message: String) -> Result<String, String> {
     if text.len() > 2000 {
         return Err("Text too long for translation".to_string());
     }
