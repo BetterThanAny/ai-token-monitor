@@ -214,13 +214,15 @@ function ClientRows({ clients }: { clients: Array<{ provider: string; client: Cl
     .sort((a, b) => b.client.requests - a.client.requests)
     .slice(0, MAX_CLIENTS);
   const maxRequests = items[0]?.client.requests ?? 0;
+  const rowKey = (provider: string, client: ClientUsage) =>
+    `${provider}:${client.name}:${client.requests}:${client.tokens}:${client.cost_usd}`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
       {items.map(({ provider, client }) => {
         const width = maxRequests > 0 ? (client.requests / maxRequests) * 100 : 0;
         return (
-          <div key={`${provider}:${client.name}`} style={{ display: "grid", gridTemplateColumns: "88px 1fr 64px", gap: 8, alignItems: "center" }}>
+          <div key={rowKey(provider, client)} style={{ display: "grid", gridTemplateColumns: "88px 1fr 64px", gap: 8, alignItems: "center" }}>
             <span style={{
               color: "var(--text-primary)",
               fontSize: 12,

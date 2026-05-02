@@ -17,8 +17,9 @@ export function useProfileLinks(userId: string | null, isMe: boolean) {
 
   // Fetch links from profiles table
   useEffect(() => {
-    if (!userId) {
+    if (!supabase || !userId) {
       setLinks([]);
+      setLoading(false);
       return;
     }
 
@@ -44,7 +45,7 @@ export function useProfileLinks(userId: string | null, isMe: boolean) {
 
   // Save links to Supabase
   const saveLinks = useCallback(async (newLinks: ProfileLink[]) => {
-    if (!userId || !isMe) return;
+    if (!supabase || !userId || !isMe) return;
     setLinks(newLinks);
     await supabase
       .from("profiles")

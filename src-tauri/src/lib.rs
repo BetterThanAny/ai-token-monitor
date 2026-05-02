@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// When true, the window will not auto-hide on focus loss (e.g. during dialog).
 static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
@@ -25,6 +25,7 @@ static PENDING_DEEP_LINK: Mutex<Option<String>> = Mutex::new(None);
 /// Set to true when the single-instance callback has already emitted the deep-link URL,
 /// so the setup block doesn't store a duplicate into PENDING_DEEP_LINK.
 static DEEP_LINK_EMITTED: AtomicBool = AtomicBool::new(false);
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
@@ -46,6 +47,26 @@ struct AlertState {
 }
 
 static ALERT_STATE: Mutex<Option<AlertState>> = Mutex::new(None);
+
+fn request_shutdown() {
+    SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+}
+
+fn is_shutdown_requested() -> bool {
+    SHUTDOWN_REQUESTED.load(Ordering::SeqCst)
+}
+
+fn interruptible_sleep(duration: Duration) -> bool {
+    let started = Instant::now();
+    while started.elapsed() < duration {
+        if is_shutdown_requested() {
+            return false;
+        }
+        let remaining = duration.saturating_sub(started.elapsed());
+        thread::sleep(remaining.min(Duration::from_secs(1)));
+    }
+    true
+}
 
 /// Check OAuth usage thresholds and fire OS notifications + webhooks for newly crossed thresholds.
 fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
@@ -399,16 +420,17 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
 
         // Adaptive debounce: escalate during burst activity
         let mut recent_triggers: Vec<std::time::Instant> = Vec::new();
-        let base_debounce = std::time::Duration::from_secs(2);
-        let burst_debounce = std::time::Duration::from_secs(10);
+        let base_debounce = Duration::from_secs(2);
+        let burst_debounce = Duration::from_secs(10);
+        let watch_refresh_interval = Duration::from_secs(60);
+        let mut last_watch_refresh = Instant::now();
 
-        loop {
-            match rx.recv_timeout(std::time::Duration::from_secs(60)) {
+        while !is_shutdown_requested() {
+            match rx.recv_timeout(Duration::from_secs(1)) {
                 Ok(()) => {
                     // Detect burst: count triggers in last 10 seconds
-                    let now = std::time::Instant::now();
-                    recent_triggers
-                        .retain(|t| now.duration_since(*t) < std::time::Duration::from_secs(10));
+                    let now = Instant::now();
+                    recent_triggers.retain(|t| now.duration_since(*t) < Duration::from_secs(10));
                     recent_triggers.push(now);
 
                     let debounce = if recent_triggers.len() >= 3 {
@@ -418,7 +440,7 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                     };
 
                     // Debounce: drain events for the debounce duration
-                    loop {
+                    while !is_shutdown_requested() {
                         match rx.recv_timeout(debounce) {
                             Ok(()) => continue,
                             Err(mpsc::RecvTimeoutError::Timeout) => break,
@@ -436,6 +458,9 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                     // popup is closed (get_all_stats is only called by the frontend).
                     let app_for_refresh = app_handle.clone();
                     thread::spawn(move || {
+                        if is_shutdown_requested() {
+                            return;
+                        }
                         let prefs = commands::get_preferences();
                         let provider = providers::claude_code::ClaudeCodeProvider::new(
                             prefs.config_dirs.clone(),
@@ -449,6 +474,10 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                     });
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if last_watch_refresh.elapsed() < watch_refresh_interval {
+                        continue;
+                    }
+                    last_watch_refresh = Instant::now();
                     // Re-read watch dirs and update if changed
                     let new_watch: Vec<PathBuf> = get_all_watch_dirs()
                         .into_iter()
@@ -716,6 +745,7 @@ fn get_pending_deep_link() -> Option<String> {
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     eprintln!("[CMD] quit_app called");
+    request_shutdown();
     app.exit(0);
 }
 
@@ -727,6 +757,7 @@ fn quit_app(app: tauri::AppHandle) {
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
     eprintln!("[CMD] restart_app called");
+    request_shutdown();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
 
     #[cfg(target_os = "macos")]
@@ -779,6 +810,8 @@ fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    SHUTDOWN_REQUESTED.store(false, Ordering::SeqCst);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // Windows에서 deep link는 새 프로세스의 CLI arg로 전달되며,
@@ -989,7 +1022,7 @@ pub fn run() {
                 let handle = app.handle().clone();
                 thread::spawn(move || {
                     let rt = tauri::async_runtime::handle();
-                    loop {
+                    while !is_shutdown_requested() {
                         let poll_result =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 let prefs = commands::get_preferences();
@@ -1007,11 +1040,11 @@ pub fn run() {
                                             }
                                         }
                                     }
-                                    thread::sleep(std::time::Duration::from_secs(
+                                    let _ = interruptible_sleep(Duration::from_secs(
                                         oauth_usage::USAGE_REFRESH_INTERVAL_SECS,
                                     ));
                                 } else {
-                                    thread::sleep(std::time::Duration::from_secs(5));
+                                    let _ = interruptible_sleep(Duration::from_secs(5));
                                 }
                             }));
 
@@ -1024,7 +1057,7 @@ pub fn run() {
                                 "unknown panic".to_string()
                             };
                             eprintln!("[OAUTH-POLL] panic caught, will retry: {}", msg);
-                            thread::sleep(std::time::Duration::from_secs(30));
+                            let _ = interruptible_sleep(Duration::from_secs(30));
                         }
                     }
                 });
