@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::traits::TokenProvider;
 use super::types::{
@@ -22,6 +22,8 @@ struct IncrementalCache {
     computed_at: Instant,
     /// All parsed entries keyed by dedup key (message_id:request_id)
     entries: HashMap<String, SessionEntry>,
+    /// Reverse index used to remove stale entries when a changed file shrinks or rewrites keys.
+    entry_keys_by_file: HashMap<PathBuf, HashSet<String>>,
     /// File metadata for change detection: path → (modified_time, size)
     file_meta: HashMap<PathBuf, (SystemTime, u64)>,
 }
@@ -70,75 +72,6 @@ fn calculate_cost(
         + (cache_write_1h as f64 / 1_000_000.0) * pricing.cache_write_1h
         + (web_search_requests as f64) * 0.01
 }
-
-// --- Persistent disk cache for historical month data ---
-
-/// Cache version — bump when the stored format changes to force a full rebuild.
-/// v1 (missing/0): dates stored as UTC strings (bug)
-/// v2: dates stored as local-timezone strings (correct)
-/// v3: total_tokens now includes cache tokens; cache TTL-aware cost calculation
-/// v5: Claude fast-mode pricing is included in stored historical cost data
-const CACHE_VERSION: u32 = 5;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DiskCache {
-    #[serde(default)]
-    version: u32,
-    months: HashMap<String, MonthData>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MonthData {
-    daily: Vec<DailyUsage>,
-    model_usage: HashMap<String, ModelUsage>,
-    total_messages: u32,
-}
-
-fn disk_cache_path(claude_dir: &PathBuf) -> PathBuf {
-    claude_dir.join("ai-token-monitor-cache.json")
-}
-
-/// Load disk cache, returning None if missing or built with an older version.
-/// An outdated cache is also deleted so it gets rebuilt cleanly on next save.
-fn load_disk_cache(claude_dir: &PathBuf) -> Option<DiskCache> {
-    let path = disk_cache_path(claude_dir);
-    let content = fs::read_to_string(&path).ok()?;
-    let cache: DiskCache = serde_json::from_str(&content).ok()?;
-    if cache.version < CACHE_VERSION {
-        let _ = fs::remove_file(&path);
-        return None;
-    }
-    Some(cache)
-}
-
-fn save_disk_cache(claude_dir: &PathBuf, cache: &DiskCache) {
-    let path = disk_cache_path(claude_dir);
-    if let Ok(content) = serde_json::to_string(cache) {
-        let _ = fs::write(&path, content);
-    }
-}
-
-fn current_month_str() -> String {
-    chrono::Local::now().format("%Y-%m").to_string()
-}
-
-fn prev_month_str() -> String {
-    let now = chrono::Local::now();
-    use chrono::Datelike;
-    let year = now.year();
-    let month = now.month();
-    if month == 1 {
-        format!("{}-12", year - 1)
-    } else {
-        format!("{}-{:02}", year, month - 1)
-    }
-}
-
-fn date_to_month(date: &str) -> String {
-    date.get(..7).unwrap_or(date).to_string()
-}
-
-// ---
 
 pub struct ClaudeCodeProvider {
     primary_dir: PathBuf,
@@ -222,9 +155,14 @@ impl ClaudeCodeProvider {
     fn parse_incremental(
         current_meta: &HashMap<PathBuf, (SystemTime, u64)>,
         cached_entries: &HashMap<String, SessionEntry>,
+        cached_entry_keys_by_file: &HashMap<PathBuf, HashSet<String>>,
         cached_meta: &HashMap<PathBuf, (SystemTime, u64)>,
-    ) -> HashMap<String, SessionEntry> {
+    ) -> (
+        HashMap<String, SessionEntry>,
+        HashMap<PathBuf, HashSet<String>>,
+    ) {
         let mut entries = cached_entries.clone();
+        let mut entry_keys_by_file = cached_entry_keys_by_file.clone();
 
         let mut changed_files: Vec<&PathBuf> = Vec::new();
         for (path, (mtime, size)) in current_meta {
@@ -241,17 +179,27 @@ impl ClaudeCodeProvider {
         let has_deleted = cached_meta.keys().any(|p| !current_meta.contains_key(p));
         if has_deleted {
             let mut fresh = HashMap::new();
+            let mut fresh_keys_by_file = HashMap::new();
             for path in current_meta.keys() {
-                fresh.extend(Self::parse_single_file(path));
+                let file_entries = Self::parse_single_file(path);
+                fresh_keys_by_file.insert(path.clone(), file_entries.keys().cloned().collect());
+                fresh.extend(file_entries);
             }
-            return fresh;
+            return (fresh, fresh_keys_by_file);
         }
 
         let changed_count = changed_files.len();
         if changed_count > 0 {
             let start = Instant::now();
             for path in &changed_files {
+                if let Some(old_keys) = entry_keys_by_file.remove(*path) {
+                    for key in old_keys {
+                        entries.remove(&key);
+                    }
+                }
+
                 let file_entries = Self::parse_single_file(path);
+                entry_keys_by_file.insert((*path).clone(), file_entries.keys().cloned().collect());
                 entries.extend(file_entries);
             }
             eprintln!(
@@ -262,15 +210,17 @@ impl ClaudeCodeProvider {
             );
         }
 
-        entries
+        (entries, entry_keys_by_file)
     }
 
-    /// Build AllStats from parsed entries, merging with disk cache for historical months.
+    /// Build AllStats from parsed entries.
     fn build_stats(&self, entries: &HashMap<String, SessionEntry>) -> AllStats {
         let mut daily_map: HashMap<String, DailyUsage> = HashMap::new();
         let mut model_usage_map: HashMap<String, ModelUsage> = HashMap::new();
         let mut total_messages: u32 = 0;
         let mut first_date: Option<String> = None;
+        let mut all_session_ids: HashSet<String> = HashSet::new();
+        let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
 
         for entry in entries.values() {
             total_messages += 1;
@@ -317,7 +267,11 @@ impl ClaudeCodeProvider {
             daily.cache_write_tokens += entry.cache_creation_input_tokens;
 
             if !entry.session_id.is_empty() {
-                // session_id tracking is only used for counting here
+                all_session_ids.insert(entry.session_id.clone());
+                daily_session_ids
+                    .entry(entry.date.clone())
+                    .or_default()
+                    .insert(entry.session_id.clone());
             }
 
             let mu = model_usage_map
@@ -337,6 +291,12 @@ impl ClaudeCodeProvider {
         }
 
         // Count sessions and tool calls from stats-cache.json
+        for (date, session_ids) in &daily_session_ids {
+            if let Some(daily) = daily_map.get_mut(date) {
+                daily.sessions = session_ids.len() as u32;
+            }
+        }
+
         if let Ok(cache) = self.parse_stats_cache() {
             for activity in &cache.daily_activity {
                 if let Some(daily) = daily_map.get_mut(&activity.date) {
@@ -346,40 +306,9 @@ impl ClaudeCodeProvider {
             }
         }
 
-        // Merge with disk cache for historical months
-        let disk_cache = load_disk_cache(&self.primary_dir).unwrap_or(DiskCache {
-            version: CACHE_VERSION,
-            months: HashMap::new(),
-        });
-        for month_data in disk_cache.months.values() {
-            total_messages += month_data.total_messages;
-            for d in &month_data.daily {
-                if first_date.as_ref().map_or(true, |fd| d.date < *fd) {
-                    first_date = Some(d.date.clone());
-                }
-                daily_map.entry(d.date.clone()).or_insert_with(|| d.clone());
-            }
-            for (model, mu) in &month_data.model_usage {
-                let existing = model_usage_map
-                    .entry(model.clone())
-                    .or_insert_with(|| ModelUsage {
-                        input_tokens: 0,
-                        output_tokens: 0,
-                        cache_read: 0,
-                        cache_write: 0,
-                        cost_usd: 0.0,
-                    });
-                existing.input_tokens += mu.input_tokens;
-                existing.output_tokens += mu.output_tokens;
-                existing.cache_read += mu.cache_read;
-                existing.cache_write += mu.cache_write;
-                existing.cost_usd += mu.cost_usd;
-            }
-        }
-
         let mut daily: Vec<DailyUsage> = daily_map.into_values().collect();
         daily.sort_by(|a, b| a.date.cmp(&b.date));
-        let total_sessions = daily.iter().map(|d| d.sessions as u32).sum::<u32>();
+        let total_sessions = all_session_ids.len() as u32;
 
         // Build analytics data from entries
         let analytics = build_analytics(entries);
@@ -406,7 +335,6 @@ impl ClaudeCodeProvider {
 #[derive(Clone)]
 struct SessionEntry {
     date: String,
-    timestamp: String,
     model: String,
     session_id: String,
     message_id: String,
@@ -607,7 +535,6 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
 
     Some(SessionEntry {
         date,
-        timestamp: timestamp.to_string(),
         model,
         session_id,
         message_id,
@@ -862,97 +789,6 @@ fn classify_activity(tool_names: &[String], bash_commands: &[String]) -> String 
     "Conversation".to_string()
 }
 
-/// Aggregate session entries into daily and model maps (for disk cache building).
-fn aggregate_entries(
-    entries: &[&SessionEntry],
-) -> (
-    HashMap<String, DailyUsage>,
-    HashMap<String, ModelUsage>,
-    u32,
-    Option<String>,
-) {
-    let mut daily_map: HashMap<String, DailyUsage> = HashMap::new();
-    let mut model_usage_map: HashMap<String, ModelUsage> = HashMap::new();
-    let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut total_messages: u32 = 0;
-    let mut first_date: Option<String> = None;
-
-    for entry in entries {
-        total_messages += 1;
-
-        if first_date.as_ref().map_or(true, |d| entry.date < *d) {
-            first_date = Some(entry.date.clone());
-        }
-
-        let pricing = pricing_for_entry(entry);
-        let cost = calculate_cost(
-            &pricing,
-            entry.input_tokens,
-            entry.output_tokens,
-            entry.cache_read_input_tokens,
-            entry.cache_creation_5m_tokens,
-            entry.cache_creation_1h_tokens,
-            entry.web_search_requests,
-        );
-        let total_tokens = entry.input_tokens
-            + entry.output_tokens
-            + entry.cache_read_input_tokens
-            + entry.cache_creation_input_tokens;
-
-        let daily = daily_map
-            .entry(entry.date.clone())
-            .or_insert_with(|| DailyUsage {
-                date: entry.date.clone(),
-                tokens: HashMap::new(),
-                cost_usd: 0.0,
-                messages: 0,
-                sessions: 0,
-                tool_calls: 0,
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
-            });
-        *daily.tokens.entry(entry.model.clone()).or_insert(0) += total_tokens;
-        daily.cost_usd += cost;
-        daily.messages += 1;
-        daily.input_tokens += entry.input_tokens;
-        daily.output_tokens += entry.output_tokens;
-        daily.cache_read_tokens += entry.cache_read_input_tokens;
-        daily.cache_write_tokens += entry.cache_creation_input_tokens;
-
-        if !entry.session_id.is_empty() {
-            daily_session_ids
-                .entry(entry.date.clone())
-                .or_default()
-                .insert(entry.session_id.clone());
-        }
-
-        let mu = model_usage_map
-            .entry(entry.model.clone())
-            .or_insert_with(|| ModelUsage {
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read: 0,
-                cache_write: 0,
-                cost_usd: 0.0,
-            });
-        mu.input_tokens += entry.input_tokens;
-        mu.output_tokens += entry.output_tokens;
-        mu.cache_read += entry.cache_read_input_tokens;
-        mu.cache_write += entry.cache_creation_input_tokens;
-        mu.cost_usd += cost;
-    }
-
-    for (date, session_ids) in &daily_session_ids {
-        if let Some(daily) = daily_map.get_mut(date) {
-            daily.sessions = session_ids.len() as u32;
-        }
-    }
-
-    (daily_map, model_usage_map, total_messages, first_date)
-}
-
 impl TokenProvider for ClaudeCodeProvider {
     fn name(&self) -> &str {
         "Claude Code"
@@ -1026,7 +862,7 @@ impl ClaudeCodeProvider {
         let current_meta = self.collect_file_meta();
 
         // Check if any files actually changed since last computation
-        let entries = if let Ok(mut cache) = STATS_CACHE.lock() {
+        let (entries, entry_keys_by_file) = if let Ok(mut cache) = STATS_CACHE.lock() {
             if let Some(ref mut cached) = *cache {
                 if cached.file_meta == current_meta {
                     // No files changed — refresh timestamp and return cached stats
@@ -1040,7 +876,12 @@ impl ClaudeCodeProvider {
                 }
 
                 // Incremental parse — only changed files
-                Self::parse_incremental(&current_meta, &cached.entries, &cached.file_meta)
+                Self::parse_incremental(
+                    &current_meta,
+                    &cached.entries,
+                    &cached.entry_keys_by_file,
+                    &cached.file_meta,
+                )
             } else {
                 // First run — full parse
                 drop(cache);
@@ -1049,79 +890,16 @@ impl ClaudeCodeProvider {
                     current_meta.len()
                 );
                 let full_start = Instant::now();
-
-                // Check disk cache for historical months to speed up cold start
-                let mut disk_cache = load_disk_cache(&self.primary_dir).unwrap_or(DiskCache {
-                    version: CACHE_VERSION,
-                    months: HashMap::new(),
-                });
-                let has_historical = !disk_cache.months.is_empty();
-
-                let current_month = current_month_str();
                 let mut entries = HashMap::new();
-
-                // Only skip historical files when the disk cache covers up to the previous
-                // month. If the previous month is absent (e.g. the month just rolled over),
-                // a full parse is required so that month's data is not lost.
-                let prev_month = prev_month_str();
-                let only_current = has_historical && disk_cache.months.contains_key(&prev_month);
-
-                if only_current {
-                    // Fast path: disk cache is complete — only parse current-month files
-                    for (path, (_, _)) in &current_meta {
-                        if let Ok(metadata) = fs::metadata(path) {
-                            if let Ok(modified) = metadata.modified() {
-                                let modified_date: chrono::DateTime<chrono::Local> =
-                                    modified.into();
-                                let file_month = modified_date.format("%Y-%m").to_string();
-                                if file_month < current_month {
-                                    continue;
-                                }
-                            }
-                        }
-                        entries.extend(Self::parse_single_file(path));
-                    }
-                } else {
-                    // Full parse: either no cache yet, or the cache is missing some months
-                    for path in current_meta.keys() {
-                        entries.extend(Self::parse_single_file(path));
-                    }
-
-                    // Split off historical entries, persist any months missing from cache
-                    let mut current_entries = HashMap::new();
-                    let mut month_buckets: HashMap<String, Vec<SessionEntry>> = HashMap::new();
-                    for (key, entry) in entries {
-                        let month = date_to_month(&entry.date);
-                        if month >= current_month {
-                            current_entries.insert(key, entry);
-                        } else if !disk_cache.months.contains_key(&month) {
-                            month_buckets.entry(month).or_default().push(entry);
-                        }
-                        // Entries for months already in disk_cache are dropped here;
-                        // build_stats will merge them from disk_cache.
-                    }
-
-                    if !month_buckets.is_empty() {
-                        for (month, month_data) in &month_buckets {
-                            let refs: Vec<&SessionEntry> = month_data.iter().collect();
-                            let (daily_map, model_map, messages, _) = aggregate_entries(&refs);
-                            disk_cache.months.insert(
-                                month.clone(),
-                                MonthData {
-                                    daily: daily_map.into_values().collect(),
-                                    model_usage: model_map,
-                                    total_messages: messages,
-                                },
-                            );
-                        }
-                        save_disk_cache(&self.primary_dir, &disk_cache);
-                    }
-
-                    entries = current_entries;
+                let mut entry_keys_by_file = HashMap::new();
+                for path in current_meta.keys() {
+                    let file_entries = Self::parse_single_file(path);
+                    entry_keys_by_file.insert(path.clone(), file_entries.keys().cloned().collect());
+                    entries.extend(file_entries);
                 }
 
                 eprintln!("[PERF] Full parse completed in {:?}", full_start.elapsed());
-                entries
+                (entries, entry_keys_by_file)
             }
         } else {
             return Err("Failed to acquire cache lock".to_string());
@@ -1135,6 +913,7 @@ impl ClaudeCodeProvider {
                 stats: stats.clone(),
                 computed_at: Instant::now(),
                 entries,
+                entry_keys_by_file,
                 file_meta: current_meta,
             });
         }
@@ -1178,6 +957,17 @@ mod tests {
 
     fn sample_jsonl_line_fast() -> &'static str {
         r#"{"sessionId":"fast-123","type":"assistant","timestamp":"2026-03-23T10:00:00Z","requestId":"req-fast","message":{"id":"msg-fast","model":"claude-opus-4-6-20260320","usage":{"input_tokens":1000000,"output_tokens":1000000,"cache_read_input_tokens":1000000,"cache_creation_input_tokens":2000000,"cache_creation":{"ephemeral_5m_input_tokens":1000000,"ephemeral_1h_input_tokens":1000000},"service_tier":"fast","speed":"fast"}}}"#
+    }
+
+    fn temp_jsonl_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "ai-token-monitor-claude-{name}-{}-{nanos}.jsonl",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -1227,6 +1017,75 @@ mod tests {
         let entry = parse_session_line(sample_jsonl_line_fast()).expect("should parse");
         assert_eq!(entry.speed.as_deref(), Some("fast"));
         assert_eq!(entry.service_tier.as_deref(), Some("fast"));
+    }
+
+    #[test]
+    fn parse_incremental_removes_stale_entries_for_changed_file() {
+        let path = temp_jsonl_path("changed-file");
+        std::fs::write(&path, sample_jsonl_line()).unwrap();
+
+        let metadata = std::fs::metadata(&path).unwrap();
+        let mut current_meta = HashMap::new();
+        current_meta.insert(
+            path.clone(),
+            (
+                metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                metadata.len(),
+            ),
+        );
+        let mut cached_meta = HashMap::new();
+        cached_meta.insert(path.clone(), (SystemTime::UNIX_EPOCH, 0));
+        let stale_entry = parse_session_line(sample_jsonl_line()).unwrap();
+        let mut cached_entries = HashMap::new();
+        cached_entries.insert("stale-msg:stale-req".to_string(), stale_entry.clone());
+        cached_entries.insert("stale-msg-2:stale-req-2".to_string(), stale_entry);
+        let mut cached_keys_by_file = HashMap::new();
+        cached_keys_by_file.insert(
+            path.clone(),
+            HashSet::from([
+                "stale-msg:stale-req".to_string(),
+                "stale-msg-2:stale-req-2".to_string(),
+            ]),
+        );
+
+        let (entries, keys_by_file) = ClaudeCodeProvider::parse_incremental(
+            &current_meta,
+            &cached_entries,
+            &cached_keys_by_file,
+            &cached_meta,
+        );
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(entries.len(), 1);
+        assert!(!entries.contains_key("stale-msg:stale-req"));
+        assert!(!entries.contains_key("stale-msg-2:stale-req-2"));
+        assert_eq!(keys_by_file.get(&path).map(HashSet::len), Some(1));
+    }
+
+    #[test]
+    fn build_stats_counts_total_sessions_uniquely_across_days() {
+        let provider = ClaudeCodeProvider {
+            primary_dir: temp_jsonl_path("missing-dir"),
+            all_dirs: Vec::new(),
+        };
+        let mut first = parse_session_line(sample_jsonl_line()).unwrap();
+        first.session_id = "session-a".to_string();
+        first.date = "2026-03-24".to_string();
+        first.message_id = "msg-a".to_string();
+        first.request_id = "req-a".to_string();
+        let mut second = first.clone();
+        second.date = "2026-03-25".to_string();
+        second.message_id = "msg-b".to_string();
+        second.request_id = "req-b".to_string();
+
+        let mut entries = HashMap::new();
+        entries.insert("msg-a:req-a".to_string(), first);
+        entries.insert("msg-b:req-b".to_string(), second);
+
+        let stats = provider.build_stats(&entries);
+        assert_eq!(stats.daily.len(), 2);
+        assert_eq!(stats.daily.iter().map(|d| d.sessions).sum::<u32>(), 2);
+        assert_eq!(stats.total_sessions, 1);
     }
 
     #[test]

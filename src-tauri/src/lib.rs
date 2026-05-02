@@ -1,5 +1,5 @@
+mod claude_usage;
 mod commands;
-mod oauth_usage;
 mod providers;
 mod url_metadata;
 mod webhooks;
@@ -60,17 +60,12 @@ fn interruptible_sleep(duration: Duration) -> bool {
     true
 }
 
-/// Check OAuth usage thresholds and fire OS notifications + webhooks for newly crossed thresholds.
-fn check_and_fire_alerts(app_handle: &tauri::AppHandle) {
+/// Check local Claude statusLine thresholds and fire OS notifications + webhooks.
+fn check_and_fire_alerts(app_handle: &tauri::AppHandle, usage: &claude_usage::ClaudeQuotaUsage) {
     let prefs = commands::get_preferences();
     if !prefs.usage_alerts_enabled {
         return;
     }
-
-    let usage = match oauth_usage::get_cached_usage() {
-        Some(u) => u,
-        None => return,
-    };
 
     let webhook_config = prefs.webhook_config.clone();
     let thresholds: Vec<u32> = webhook_config
@@ -967,31 +962,29 @@ pub fn run() {
             // Start file watcher
             start_file_watcher(app.handle().clone());
 
-            // Start OAuth usage polling for webhook/alert checks only after explicit opt-in.
+            // Poll local Claude statusLine quota snapshots for webhook/alert checks.
             {
                 let handle = app.handle().clone();
                 thread::spawn(move || {
-                    let rt = tauri::async_runtime::handle();
                     while !is_shutdown_requested() {
                         let poll_result =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 let prefs = commands::get_preferences();
-                                if prefs.usage_tracking_enabled {
-                                    // Skip if cache was recently populated by another opt-in fetch.
-                                    if !oauth_usage::is_cache_fresh(
-                                        oauth_usage::USAGE_REFRESH_INTERVAL_SECS,
-                                    ) {
-                                        if let Some(_) =
-                                            rt.block_on(oauth_usage::fetch_and_cache_usage())
-                                        {
+                                if prefs.include_claude {
+                                    match claude_usage::get_statusline_rate_limits_usage() {
+                                        Ok(Some(usage)) => {
                                             let _ = handle.emit("usage-updated", ());
                                             if prefs.usage_alerts_enabled {
-                                                check_and_fire_alerts(&handle);
+                                                check_and_fire_alerts(&handle, &usage);
                                             }
+                                        }
+                                        Ok(None) => {}
+                                        Err(error) => {
+                                            eprintln!("[STATUSLINE-POLL] read failed: {}", error);
                                         }
                                     }
                                     let _ = interruptible_sleep(Duration::from_secs(
-                                        oauth_usage::USAGE_REFRESH_INTERVAL_SECS,
+                                        claude_usage::STATUSLINE_REFRESH_INTERVAL_SECS,
                                     ));
                                 } else {
                                     let _ = interruptible_sleep(Duration::from_secs(5));
@@ -1006,7 +999,7 @@ pub fn run() {
                             } else {
                                 "unknown panic".to_string()
                             };
-                            eprintln!("[OAUTH-POLL] panic caught, will retry: {}", msg);
+                            eprintln!("[STATUSLINE-POLL] panic caught, will retry: {}", msg);
                             let _ = interruptible_sleep(Duration::from_secs(30));
                         }
                     }

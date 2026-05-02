@@ -186,10 +186,6 @@ pub struct UserPreferences {
     #[serde(default = "default_true")]
     pub usage_alerts_enabled: bool,
     #[serde(default)]
-    pub usage_tracking_enabled: bool,
-    #[serde(default)]
-    pub usage_tracking_migrated: bool,
-    #[serde(default)]
     pub ai_keys: Option<AiKeys>,
     #[serde(default)]
     pub webhook_config: Option<WebhookConfig>,
@@ -327,8 +323,6 @@ impl Default for UserPreferences {
             salary_enabled: false,
             monthly_salary: None,
             usage_alerts_enabled: true,
-            usage_tracking_enabled: false,
-            usage_tracking_migrated: false,
             ai_keys: None,
             webhook_config: None,
             autostart_enabled: false,

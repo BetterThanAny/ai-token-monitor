@@ -67,39 +67,22 @@ pub async fn get_account_states() -> Result<Vec<AccountState>, String> {
     let prefs = get_preferences();
     let mut states = Vec::new();
 
-    match crate::oauth_usage::get_statusline_rate_limits_usage() {
-        Ok(Some(usage)) => {
-            states.push(claude_usage_to_account_state_with_source(
-                usage,
-                "claude_statusline_rate_limits",
-            ));
-        }
-        Err(error) => {
-            states.push(empty_claude_account_state(error));
-        }
-        Ok(None) => {
-            let usage = if prefs.usage_tracking_enabled {
-                crate::oauth_usage::fetch_and_cache_usage().await
-            } else {
-                crate::oauth_usage::get_cached_usage()
-            };
-            if let Some(usage) = usage {
-                let mut state = claude_usage_to_account_state(usage);
-                if state.is_stale {
-                    if let Some(error) = crate::oauth_usage::get_last_error() {
-                        state.diagnostics.push(error);
-                    }
-                }
-                states.push(state);
-            } else if prefs.usage_tracking_enabled || prefs.include_claude {
-                let diagnostic = if prefs.usage_tracking_enabled {
-                    crate::oauth_usage::get_last_error()
-                        .unwrap_or_else(|| "Claude OAuth usage data is not available.".to_string())
-                } else {
-                    "Claude usage tracking is disabled and no cached quota data is available."
-                        .to_string()
-                };
-                states.push(empty_claude_account_state(diagnostic));
+    if prefs.include_claude {
+        match crate::claude_usage::get_statusline_rate_limits_usage() {
+            Ok(Some(usage)) => {
+                states.push(claude_quota_to_account_state_with_source(
+                    usage,
+                    "claude_statusline_rate_limits",
+                ));
+            }
+            Err(error) => {
+                states.push(empty_claude_account_state(error));
+            }
+            Ok(None) => {
+                states.push(empty_claude_account_state(
+                    "Claude quota snapshots are only read from local statusLine data. Configure Claude Code statusLine to write ~/.claude/ai-token-monitor-rate-limits.json; local transcript logs are still used for token and cost totals."
+                        .to_string(),
+                ));
             }
         }
     }
@@ -122,12 +105,8 @@ pub async fn get_account_states() -> Result<Vec<AccountState>, String> {
     Ok(states)
 }
 
-fn claude_usage_to_account_state(usage: crate::oauth_usage::OAuthUsage) -> AccountState {
-    claude_usage_to_account_state_with_source(usage, "anthropic_oauth_usage")
-}
-
-fn claude_usage_to_account_state_with_source(
-    usage: crate::oauth_usage::OAuthUsage,
+fn claude_quota_to_account_state_with_source(
+    usage: crate::claude_usage::ClaudeQuotaUsage,
     source: &str,
 ) -> AccountState {
     let mut limit_windows = Vec::new();
@@ -190,7 +169,7 @@ fn empty_claude_account_state(diagnostic: String) -> AccountState {
 
 fn claude_limit_window(
     name: &str,
-    window: crate::oauth_usage::UsageWindow,
+    window: crate::claude_usage::UsageWindow,
     source: &str,
 ) -> LimitWindowStatus {
     LimitWindowStatus {
@@ -511,8 +490,6 @@ pub fn get_preferences() -> UserPreferences {
         prefs_changed = true;
     }
 
-    prefs_changed |= clear_usage_tracking_migration_marker(&mut prefs);
-
     if prefs_changed {
         if let Ok(json) = serde_json::to_string_pretty(&prefs) {
             let _ = fs::write(&path, &json);
@@ -521,18 +498,6 @@ pub fn get_preferences() -> UserPreferences {
 
     // ai_keys are loaded separately via get_ai_keys command
     prefs
-}
-
-fn clear_usage_tracking_migration_marker(prefs: &mut UserPreferences) -> bool {
-    // Older builds marked accounts migrated after changing the stored tracking
-    // preference. At this point we cannot reliably tell an implicit migration
-    // from a later manual user opt-in, so preserve the stored choice and only
-    // clear the legacy marker.
-    if prefs.usage_tracking_migrated {
-        prefs.usage_tracking_migrated = false;
-        return true;
-    }
-    false
 }
 
 /// Load AI keys from encrypted local file on-demand.
@@ -805,22 +770,4 @@ pub fn get_pricing_table() -> pricing::PricingTable {
 pub async fn test_webhook(platform: String) -> Result<String, String> {
     let secrets = load_ai_keys().ok_or("No webhook credentials configured")?;
     crate::webhooks::test_webhook_endpoint(&platform, &secrets).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn clearing_usage_tracking_migration_preserves_enabled_choice() {
-        let mut prefs = UserPreferences {
-            usage_tracking_enabled: true,
-            usage_tracking_migrated: true,
-            ..UserPreferences::default()
-        };
-
-        assert!(clear_usage_tracking_migration_marker(&mut prefs));
-        assert!(prefs.usage_tracking_enabled);
-        assert!(!prefs.usage_tracking_migrated);
-    }
 }
