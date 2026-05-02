@@ -62,6 +62,95 @@ pub struct AnalyticsData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountState {
+    pub provider: String,
+    #[serde(default)]
+    pub fetched_at: Option<String>,
+    pub is_stale: bool,
+    #[serde(default)]
+    pub limit_windows: Vec<LimitWindowStatus>,
+    #[serde(default)]
+    pub rate_limits: Vec<RateLimitStatus>,
+    #[serde(default)]
+    pub balance: Option<BalanceInfo>,
+    #[serde(default)]
+    pub client_distribution: Vec<ClientUsage>,
+    #[serde(default)]
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LimitWindowStatus {
+    pub name: String,
+    #[serde(default)]
+    pub used_percent: Option<f64>,
+    #[serde(default)]
+    pub used: Option<f64>,
+    #[serde(default)]
+    pub total: Option<f64>,
+    #[serde(default)]
+    pub remaining: Option<f64>,
+    pub unit: String,
+    #[serde(default)]
+    pub window_minutes: Option<u32>,
+    #[serde(default)]
+    pub starts_at: Option<String>,
+    #[serde(default)]
+    pub ends_at: Option<String>,
+    #[serde(default)]
+    pub resets_at: Option<String>,
+    pub status: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitStatus {
+    pub name: String,
+    #[serde(default)]
+    pub limit: Option<f64>,
+    #[serde(default)]
+    pub remaining: Option<f64>,
+    #[serde(default)]
+    pub used_percent: Option<f64>,
+    pub unit: String,
+    #[serde(default)]
+    pub window_minutes: Option<u32>,
+    #[serde(default)]
+    pub resets_at: Option<String>,
+    pub status: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BalanceInfo {
+    #[serde(default)]
+    pub balance: Option<f64>,
+    #[serde(default)]
+    pub used: Option<f64>,
+    #[serde(default)]
+    pub total: Option<f64>,
+    #[serde(default)]
+    pub remaining: Option<f64>,
+    pub unit: String,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub is_unlimited: bool,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientUsage {
+    pub name: String,
+    pub requests: u32,
+    pub tokens: u64,
+    pub cost_usd: f64,
+    pub percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllStats {
     pub daily: Vec<DailyUsage>,
     pub model_usage: HashMap<String, ModelUsage>,

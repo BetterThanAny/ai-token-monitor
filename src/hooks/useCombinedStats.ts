@@ -1,6 +1,15 @@
 import { useMemo } from "react";
 import { useTokenStats } from "./useTokenStats";
-import type { AllStats, DailyUsage, ModelUsage } from "../lib/types";
+import type {
+  ActivityCategory,
+  AllStats,
+  AnalyticsData,
+  DailyUsage,
+  McpServerUsage,
+  ModelUsage,
+  ProjectUsage,
+  ToolCount,
+} from "../lib/types";
 
 interface UseCombinedStatsProps {
   includeClaude: boolean;
@@ -101,8 +110,7 @@ function mergeStats(statsList: AllStats[]): AllStats {
 
   const daily = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
-  // Take the first available analytics (currently only Claude provides it)
-  const analytics = statsList.find(s => s.analytics)?.analytics;
+  const analytics = mergeAnalytics(statsList);
 
   return {
     daily,
@@ -111,5 +119,70 @@ function mergeStats(statsList: AllStats[]): AllStats {
     total_messages: totalMessages,
     first_session_date: firstDate,
     analytics,
+  };
+}
+
+function mergeAnalytics(statsList: AllStats[]): AnalyticsData | undefined {
+  const analyticsList = statsList
+    .map((s) => s.analytics)
+    .filter((a): a is AnalyticsData => !!a);
+
+  if (analyticsList.length === 0) return undefined;
+  if (analyticsList.length === 1) return analyticsList[0];
+
+  const projects = new Map<string, ProjectUsage>();
+  const tools = new Map<string, ToolCount>();
+  const shell = new Map<string, ToolCount>();
+  const mcp = new Map<string, McpServerUsage>();
+  const activity = new Map<string, ActivityCategory>();
+
+  for (const analytics of analyticsList) {
+    for (const item of analytics.project_usage) {
+      const existing = projects.get(item.name);
+      if (existing) {
+        existing.cost_usd += item.cost_usd;
+        existing.tokens += item.tokens;
+        existing.sessions += item.sessions;
+        existing.messages += item.messages;
+      } else {
+        projects.set(item.name, { ...item });
+      }
+    }
+
+    for (const item of analytics.tool_usage) {
+      const existing = tools.get(item.name);
+      if (existing) existing.count += item.count;
+      else tools.set(item.name, { ...item });
+    }
+
+    for (const item of analytics.shell_commands) {
+      const existing = shell.get(item.name);
+      if (existing) existing.count += item.count;
+      else shell.set(item.name, { ...item });
+    }
+
+    for (const item of analytics.mcp_usage) {
+      const existing = mcp.get(item.server);
+      if (existing) existing.calls += item.calls;
+      else mcp.set(item.server, { ...item });
+    }
+
+    for (const item of analytics.activity_breakdown) {
+      const existing = activity.get(item.category);
+      if (existing) {
+        existing.cost_usd += item.cost_usd;
+        existing.messages += item.messages;
+      } else {
+        activity.set(item.category, { ...item });
+      }
+    }
+  }
+
+  return {
+    project_usage: Array.from(projects.values()).sort((a, b) => b.cost_usd - a.cost_usd),
+    tool_usage: Array.from(tools.values()).sort((a, b) => b.count - a.count),
+    shell_commands: Array.from(shell.values()).sort((a, b) => b.count - a.count),
+    mcp_usage: Array.from(mcp.values()).sort((a, b) => b.calls - a.calls),
+    activity_breakdown: Array.from(activity.values()).sort((a, b) => b.cost_usd - a.cost_usd),
   };
 }

@@ -9,7 +9,10 @@ use std::time::{Duration, Instant, SystemTime};
 use serde_json::Value;
 
 use super::traits::TokenProvider;
-use super::types::{AllStats, DailyUsage, ModelUsage};
+use super::types::{
+    AccountState, ActivityCategory, AllStats, AnalyticsData, BalanceInfo, ClientUsage, DailyUsage,
+    LimitWindowStatus, McpServerUsage, ModelUsage, ProjectUsage, ToolCount,
+};
 
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
@@ -269,17 +272,64 @@ struct TokenUsage {
     source: TokenUsageSource,
 }
 
+#[derive(Clone, Debug)]
+struct CodexRateLimitWindow {
+    name: String,
+    used_percent: Option<f64>,
+    limit: Option<f64>,
+    remaining: Option<f64>,
+    unit: String,
+    window_minutes: Option<u32>,
+    resets_at: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct CodexCredits {
+    balance: Option<f64>,
+    used: Option<f64>,
+    total: Option<f64>,
+    remaining: Option<f64>,
+    unit: String,
+    currency: Option<String>,
+    expires_at: Option<String>,
+    is_unlimited: bool,
+}
+
+#[derive(Clone, Debug)]
+struct CodexRateLimitSnapshot {
+    observed_at: Option<String>,
+    windows: Vec<CodexRateLimitWindow>,
+    credits: Option<CodexCredits>,
+}
+
+struct ProjectAcc {
+    cost_usd: f64,
+    tokens: u64,
+    sessions: HashSet<String>,
+    messages: u32,
+}
+
+struct ActivityAcc {
+    cost_usd: f64,
+    messages: u32,
+}
+
 #[derive(Clone)]
 struct CodexEntry {
     date: String,
     model: String,
     session_id: String,
+    cwd: Option<String>,
+    client_name: String,
     input_tokens: u64,
     output_tokens: u64,
     cached_tokens: u64,
     total_tokens: u64,
     usage_source: TokenUsageSource,
     service_tier: ServiceTier,
+    tool_names: Vec<String>,
+    shell_commands: Vec<String>,
+    rate_limits: Option<CodexRateLimitSnapshot>,
 }
 
 // --- Provider ---
@@ -339,7 +389,9 @@ impl CodexProvider {
                 .join("*.jsonl")
                 .to_string_lossy()
                 .to_string();
-            let files = glob::glob(&pattern).unwrap_or_else(|_| glob::glob("").unwrap());
+            let Ok(files) = glob::glob(&pattern) else {
+                continue;
+            };
             for path in files.flatten() {
                 if let Ok(m) = fs::metadata(&path) {
                     let mtime = m.modified().unwrap_or(SystemTime::UNIX_EPOCH);
@@ -370,10 +422,14 @@ impl CodexProvider {
             .unwrap_or("codex-session")
             .to_string();
         let mut current_model = String::new();
+        let mut current_cwd: Option<String> = None;
+        let mut current_client = "Codex".to_string();
         let mut current_service_tier =
             default_service_tier_for_path(path, config_service_tier.clone());
         let mut has_explicit_service_tier = false;
         let mut line_index: u32 = 0;
+        let mut pending_tool_names: Vec<String> = Vec::new();
+        let mut pending_shell_commands: Vec<String> = Vec::new();
         // Track previous snapshot for deduplication of identical consecutive token_count events
         let mut prev_snapshot: Option<(u64, u64, u64, u64)> = None;
 
@@ -390,10 +446,22 @@ impl CodexProvider {
                     if let Some(id) = value.pointer("/payload/id").and_then(|v| v.as_str()) {
                         session_id = id.to_string();
                     }
+                    if let Some(cwd) = extract_cwd(&value) {
+                        current_cwd = Some(cwd);
+                    }
+                    if let Some(client) = extract_client_name(&value) {
+                        current_client = client;
+                    }
                 }
                 Some("turn_context") => {
                     if let Some(model) = value.pointer("/payload/model").and_then(|v| v.as_str()) {
                         current_model = model.to_string();
+                    }
+                    if let Some(cwd) = extract_cwd(&value) {
+                        current_cwd = Some(cwd);
+                    }
+                    if let Some(client) = extract_client_name(&value) {
+                        current_client = client;
                     }
                     if let Some(service_tier) = extract_service_tier(&value) {
                         current_service_tier = service_tier;
@@ -404,6 +472,14 @@ impl CodexProvider {
                             path,
                             config_service_tier.clone(),
                         );
+                    }
+                }
+                Some("response_item") => {
+                    if let Some((tool_name, shell_command)) = extract_function_call(&value) {
+                        pending_tool_names.push(tool_name);
+                        if let Some(command) = shell_command {
+                            pending_shell_commands.push(command);
+                        }
                     }
                 }
                 Some("event_msg") => {
@@ -456,6 +532,7 @@ impl CodexProvider {
                             }
 
                             let date = resolve_entry_date(path_date.as_deref(), &value);
+                            let rate_limits = extract_codex_rate_limits(&value);
 
                             let model = if current_model.is_empty() {
                                 "codex".to_string()
@@ -470,14 +547,21 @@ impl CodexProvider {
                                     date,
                                     model,
                                     session_id: session_id.clone(),
+                                    cwd: current_cwd.clone(),
+                                    client_name: current_client.clone(),
                                     input_tokens: usage.input_tokens,
                                     output_tokens: usage.output_tokens,
                                     cached_tokens: usage.cached_tokens,
                                     total_tokens: usage.total_tokens,
                                     usage_source: usage.source,
                                     service_tier: current_service_tier,
+                                    tool_names: pending_tool_names.clone(),
+                                    shell_commands: pending_shell_commands.clone(),
+                                    rate_limits,
                                 },
                             );
+                            pending_tool_names.clear();
+                            pending_shell_commands.clear();
                         }
                         _ => {}
                     }
@@ -545,17 +629,13 @@ impl CodexProvider {
         let mut first_date: Option<String> = None;
         let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
         let mut long_context_sessions: HashSet<(String, &'static str)> = HashSet::new();
+        let mut project_map: HashMap<String, ProjectAcc> = HashMap::new();
+        let mut tool_map: HashMap<String, u32> = HashMap::new();
+        let mut shell_map: HashMap<String, u32> = HashMap::new();
+        let mut mcp_map: HashMap<String, u32> = HashMap::new();
+        let mut activity_map: HashMap<String, ActivityAcc> = HashMap::new();
 
-        let mut ordered_entries: Vec<(&String, &CodexEntry)> = entries.iter().collect();
-        ordered_entries.sort_by(|(key_a, entry_a), (key_b, entry_b)| {
-            let line_a = dedup_key_line_index(key_a);
-            let line_b = dedup_key_line_index(key_b);
-            entry_a
-                .session_id
-                .cmp(&entry_b.session_id)
-                .then_with(|| line_a.cmp(&line_b))
-                .then_with(|| key_a.cmp(key_b))
-        });
+        let ordered_entries = sorted_entries(entries);
 
         for (_, entry) in ordered_entries {
             total_messages += 1;
@@ -564,39 +644,8 @@ impl CodexProvider {
                 first_date = Some(entry.date.clone());
             }
 
-            let pricing = pricing::get_codex_pricing(&entry.model);
-            let is_long_context = match long_context_model_family(&entry.model) {
-                Some(family) => {
-                    let key = (entry.session_id.clone(), family);
-                    let already_long_context = long_context_sessions.contains(&key);
-                    let triggers_long_context = entry.usage_source == TokenUsageSource::Last
-                        && entry.input_tokens > LONG_CONTEXT_THRESHOLD;
-
-                    if triggers_long_context {
-                        long_context_sessions.insert(key);
-                    }
-
-                    already_long_context || triggers_long_context
-                }
-                None => false,
-            };
-            let (input_multiplier, output_multiplier) = if is_long_context {
-                (
-                    LONG_CONTEXT_INPUT_MULTIPLIER,
-                    LONG_CONTEXT_OUTPUT_MULTIPLIER,
-                )
-            } else {
-                (1.0, 1.0)
-            };
-            let fast_multiplier = codex_fast_credit_multiplier(&entry.model, entry.service_tier);
-            let cost = calculate_cost(
-                &pricing,
-                entry.input_tokens,
-                entry.output_tokens,
-                entry.cached_tokens,
-                input_multiplier * fast_multiplier,
-                output_multiplier * fast_multiplier,
-            );
+            let cost = calculate_entry_cost(entry, &mut long_context_sessions);
+            let total_tokens = entry.total_tokens;
 
             let daily = daily_map
                 .entry(entry.date.clone())
@@ -615,6 +664,7 @@ impl CodexProvider {
             *daily.tokens.entry(entry.model.clone()).or_insert(0) += entry.total_tokens;
             daily.cost_usd += cost;
             daily.messages += 1;
+            daily.tool_calls += entry.tool_names.len() as u32;
             // OpenAI's input_tokens includes cached as a subset.
             // Normalize to uncached-only so the frontend cache-hit formula
             // (cache_read / (input + cache_read)) stays consistent with Claude.
@@ -640,6 +690,44 @@ impl CodexProvider {
             mu.output_tokens += entry.output_tokens;
             mu.cache_read += entry.cached_tokens;
             mu.cost_usd += cost;
+
+            if let Some(project_name) = project_name_from_cwd(entry.cwd.as_deref()) {
+                let acc = project_map
+                    .entry(project_name)
+                    .or_insert_with(|| ProjectAcc {
+                        cost_usd: 0.0,
+                        tokens: 0,
+                        sessions: HashSet::new(),
+                        messages: 0,
+                    });
+                acc.cost_usd += cost;
+                acc.tokens += total_tokens;
+                acc.messages += 1;
+                acc.sessions.insert(entry.session_id.clone());
+            }
+
+            for tool in &entry.tool_names {
+                if tool.starts_with("mcp__") {
+                    let parts: Vec<&str> = tool.splitn(3, "__").collect();
+                    if parts.len() >= 2 {
+                        *mcp_map.entry(parts[1].to_string()).or_insert(0) += 1;
+                    }
+                } else {
+                    *tool_map.entry(tool.clone()).or_insert(0) += 1;
+                }
+            }
+
+            for command in &entry.shell_commands {
+                *shell_map.entry(command.clone()).or_insert(0) += 1;
+            }
+
+            let category = classify_codex_activity(&entry.tool_names, &entry.shell_commands);
+            let acc = activity_map.entry(category).or_insert_with(|| ActivityAcc {
+                cost_usd: 0.0,
+                messages: 0,
+            });
+            acc.cost_usd += cost;
+            acc.messages += 1;
         }
 
         // Set session counts from unique session IDs per day
@@ -653,6 +741,8 @@ impl CodexProvider {
         daily.sort_by(|a, b| a.date.cmp(&b.date));
 
         let total_sessions = daily.iter().map(|d| d.sessions as u32).sum();
+        let analytics =
+            build_analytics_from_maps(project_map, tool_map, shell_map, mcp_map, activity_map);
 
         AllStats {
             daily,
@@ -660,34 +750,151 @@ impl CodexProvider {
             total_sessions,
             total_messages,
             first_session_date: first_date,
-            analytics: None,
+            analytics: Some(analytics),
         }
+    }
+
+    fn build_account_state(entries: &HashMap<String, CodexEntry>) -> Option<AccountState> {
+        if entries.is_empty() {
+            return None;
+        }
+
+        struct ClientAcc {
+            requests: u32,
+            tokens: u64,
+            cost_usd: f64,
+        }
+
+        let mut latest_snapshot: Option<CodexRateLimitSnapshot> = None;
+        let mut client_map: HashMap<String, ClientAcc> = HashMap::new();
+        let mut long_context_sessions: HashSet<(String, &'static str)> = HashSet::new();
+        let mut total_requests = 0_u32;
+
+        for (_, entry) in sorted_entries(entries) {
+            let cost = calculate_entry_cost(entry, &mut long_context_sessions);
+            let client_name = if entry.client_name.trim().is_empty() {
+                "Codex".to_string()
+            } else {
+                entry.client_name.clone()
+            };
+            let acc = client_map.entry(client_name).or_insert(ClientAcc {
+                requests: 0,
+                tokens: 0,
+                cost_usd: 0.0,
+            });
+            acc.requests += 1;
+            acc.tokens += entry.total_tokens;
+            acc.cost_usd += cost;
+            total_requests += 1;
+
+            if let Some(snapshot) = &entry.rate_limits {
+                if latest_snapshot
+                    .as_ref()
+                    .map(|current| snapshot_is_newer(snapshot, current))
+                    .unwrap_or(true)
+                {
+                    latest_snapshot = Some(snapshot.clone());
+                }
+            }
+        }
+
+        let mut client_distribution: Vec<ClientUsage> = client_map
+            .into_iter()
+            .map(|(name, acc)| ClientUsage {
+                name,
+                requests: acc.requests,
+                tokens: acc.tokens,
+                cost_usd: acc.cost_usd,
+                percent: if total_requests > 0 {
+                    (acc.requests as f64 / total_requests as f64) * 100.0
+                } else {
+                    0.0
+                },
+            })
+            .collect();
+        client_distribution.sort_by(|a, b| b.requests.cmp(&a.requests));
+
+        let Some(snapshot) = latest_snapshot else {
+            return Some(AccountState {
+                provider: "codex".to_string(),
+                fetched_at: None,
+                is_stale: false,
+                limit_windows: Vec::new(),
+                rate_limits: Vec::new(),
+                balance: None,
+                client_distribution,
+                diagnostics: Vec::new(),
+            });
+        };
+
+        let limit_windows: Vec<LimitWindowStatus> = snapshot
+            .windows
+            .iter()
+            .map(|window| LimitWindowStatus {
+                name: window.name.clone(),
+                used_percent: window.used_percent,
+                used: None,
+                total: window.limit,
+                remaining: window.remaining,
+                unit: window.unit.clone(),
+                window_minutes: window.window_minutes,
+                starts_at: None,
+                ends_at: None,
+                resets_at: window.resets_at.clone(),
+                status: status_from_used_percent(window.used_percent),
+                source: "codex_jsonl_rate_limits".to_string(),
+            })
+            .collect();
+
+        let balance = snapshot.credits.as_ref().map(|credits| BalanceInfo {
+            balance: credits.balance,
+            used: credits.used,
+            total: credits.total,
+            remaining: credits.remaining,
+            unit: credits.unit.clone(),
+            currency: credits.currency.clone(),
+            expires_at: credits.expires_at.clone(),
+            is_unlimited: credits.is_unlimited,
+            status: status_from_balance(credits),
+        });
+
+        Some(AccountState {
+            provider: "codex".to_string(),
+            fetched_at: snapshot.observed_at.clone(),
+            is_stale: snapshot_is_stale(&snapshot),
+            limit_windows,
+            rate_limits: Vec::new(),
+            balance,
+            client_distribution,
+            diagnostics: Vec::new(),
+        })
+    }
+
+    pub fn fetch_account_state(&self) -> Result<Option<AccountState>, String> {
+        let _ = self.fetch_stats()?;
+        let cache = STATS_CACHE
+            .lock()
+            .map_err(|_| "Failed to acquire Codex cache lock".to_string())?;
+        Ok(cache
+            .as_ref()
+            .and_then(|cached| Self::build_account_state(&cached.entries)))
     }
 
     fn do_fetch_stats(&self) -> Result<AllStats, String> {
         let start = Instant::now();
         let current_meta = self.collect_file_meta();
 
-        let entries = if let Ok(cache) = STATS_CACHE.lock() {
-            if let Some(ref cached) = *cache {
+        let entries = if let Ok(mut cache) = STATS_CACHE.lock() {
+            if let Some(ref mut cached) = *cache {
                 if cached.file_meta == current_meta {
                     // No files changed — refresh timestamp and return cached
-                    drop(cache);
-                    if let Ok(mut cache) = STATS_CACHE.lock() {
-                        if let Some(ref mut cached) = *cache {
-                            cached.computed_at = Instant::now();
-                        }
-                    }
+                    cached.computed_at = Instant::now();
+                    let stats = cached.stats.clone();
                     eprintln!(
                         "[PERF][Codex] No files changed, reusing cache ({:?})",
                         start.elapsed()
                     );
-                    if let Ok(cache) = STATS_CACHE.lock() {
-                        if let Some(ref cached) = *cache {
-                            return Ok(cached.stats.clone());
-                        }
-                    }
-                    return Err("Cache lost during refresh".to_string());
+                    return Ok(stats);
                 }
 
                 // Incremental parse
@@ -872,6 +1079,474 @@ fn extract_token_usage(info: &Value) -> Option<TokenUsage> {
     })
 }
 
+fn sorted_entries(entries: &HashMap<String, CodexEntry>) -> Vec<(&String, &CodexEntry)> {
+    let mut ordered_entries: Vec<(&String, &CodexEntry)> = entries.iter().collect();
+    ordered_entries.sort_by(|(key_a, entry_a), (key_b, entry_b)| {
+        let line_a = dedup_key_line_index(key_a);
+        let line_b = dedup_key_line_index(key_b);
+        entry_a
+            .session_id
+            .cmp(&entry_b.session_id)
+            .then_with(|| line_a.cmp(&line_b))
+            .then_with(|| key_a.cmp(key_b))
+    });
+    ordered_entries
+}
+
+fn calculate_entry_cost(
+    entry: &CodexEntry,
+    long_context_sessions: &mut HashSet<(String, &'static str)>,
+) -> f64 {
+    let pricing = pricing::get_codex_pricing(&entry.model);
+    let is_long_context = match long_context_model_family(&entry.model) {
+        Some(family) => {
+            let key = (entry.session_id.clone(), family);
+            let already_long_context = long_context_sessions.contains(&key);
+            let triggers_long_context = entry.usage_source == TokenUsageSource::Last
+                && entry.input_tokens > LONG_CONTEXT_THRESHOLD;
+
+            if triggers_long_context {
+                long_context_sessions.insert(key);
+            }
+
+            already_long_context || triggers_long_context
+        }
+        None => false,
+    };
+    let (input_multiplier, output_multiplier) = if is_long_context {
+        (
+            LONG_CONTEXT_INPUT_MULTIPLIER,
+            LONG_CONTEXT_OUTPUT_MULTIPLIER,
+        )
+    } else {
+        (1.0, 1.0)
+    };
+    let fast_multiplier = codex_fast_credit_multiplier(&entry.model, entry.service_tier);
+    calculate_cost(
+        &pricing,
+        entry.input_tokens,
+        entry.output_tokens,
+        entry.cached_tokens,
+        input_multiplier * fast_multiplier,
+        output_multiplier * fast_multiplier,
+    )
+}
+
+fn extract_cwd(value: &Value) -> Option<String> {
+    [
+        "/payload/cwd",
+        "/payload/current_dir",
+        "/payload/workdir",
+        "/cwd",
+    ]
+    .iter()
+    .find_map(|pointer| value.pointer(pointer).and_then(|v| v.as_str()))
+    .filter(|cwd| !cwd.trim().is_empty())
+    .map(ToString::to_string)
+}
+
+fn extract_client_name(value: &Value) -> Option<String> {
+    let payload = value.get("payload").unwrap_or(value);
+    let originator = payload
+        .get("originator")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let source = payload.get("source").and_then(|v| v.as_str()).unwrap_or("");
+    let lower = format!("{} {}", originator, source).to_ascii_lowercase();
+
+    if lower.contains("vscode")
+        || lower.contains("cursor")
+        || lower.contains("editor")
+        || lower.contains("extension")
+    {
+        Some("Codex Editor".to_string())
+    } else if lower.contains("desktop") {
+        Some("Codex Desktop".to_string())
+    } else if payload.get("cli_version").is_some()
+        || lower.contains("cli")
+        || lower.contains("codex")
+    {
+        Some("Codex CLI".to_string())
+    } else {
+        None
+    }
+}
+
+fn extract_function_call(value: &Value) -> Option<(String, Option<String>)> {
+    let payload = value.get("payload")?;
+    if payload.get("type").and_then(|v| v.as_str()) != Some("function_call") {
+        return None;
+    }
+    let raw_name = payload.get("name")?.as_str()?;
+    let tool_name = normalize_codex_tool_name(raw_name);
+    let shell_command = if raw_name == "exec_command" {
+        payload.get("arguments").and_then(extract_exec_command_name)
+    } else {
+        None
+    };
+    Some((tool_name, shell_command))
+}
+
+fn normalize_codex_tool_name(name: &str) -> String {
+    match name {
+        "exec_command" => "Bash".to_string(),
+        "apply_patch" => "Edit".to_string(),
+        "update_plan" => "Plan".to_string(),
+        "view_image" => "Read".to_string(),
+        "web_search" | "web_search_exa" => "WebSearch".to_string(),
+        "web_fetch" | "web_fetch_exa" => "WebFetch".to_string(),
+        name if name.starts_with("browser_") => "Browser".to_string(),
+        name if name.starts_with("mcp__") => name.to_string(),
+        _ => name.to_string(),
+    }
+}
+
+fn extract_exec_command_name(arguments: &Value) -> Option<String> {
+    let parsed;
+    let args = if let Some(s) = arguments.as_str() {
+        parsed = serde_json::from_str::<Value>(s).ok()?;
+        &parsed
+    } else {
+        arguments
+    };
+    args.get("cmd")
+        .and_then(|v| v.as_str())
+        .and_then(first_shell_word)
+}
+
+fn first_shell_word(command: &str) -> Option<String> {
+    let mut parts = command.split_whitespace();
+    let first = parts.next()?.trim_matches(|c: char| c == '\'' || c == '"');
+    if first.is_empty() {
+        None
+    } else {
+        Some(first.to_string())
+    }
+}
+
+fn extract_codex_rate_limits(value: &Value) -> Option<CodexRateLimitSnapshot> {
+    let rate_limits = value
+        .pointer("/payload/rate_limits")
+        .or_else(|| value.pointer("/payload/info/rate_limits"))?;
+    if rate_limits.is_null() {
+        return None;
+    }
+
+    let observed_at = value
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string);
+    let limit_id = rate_limits
+        .get("limit_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("codex");
+    let display_prefix = if limit_id.eq_ignore_ascii_case("codex") {
+        None
+    } else {
+        Some(limit_id.to_string())
+    };
+
+    let mut windows = Vec::new();
+    for (key, label) in [("primary", "Primary"), ("secondary", "Secondary")] {
+        if let Some(window) = rate_limits.get(key) {
+            let name = display_prefix
+                .as_ref()
+                .map(|prefix| format!("{} {}", prefix, label))
+                .unwrap_or_else(|| format!("{} Usage", label));
+            if let Some(parsed) = parse_codex_rate_limit_window(name, window) {
+                windows.push(parsed);
+            }
+        }
+    }
+
+    if windows.is_empty() {
+        if let Some(array) = rate_limits.as_array() {
+            for (idx, window) in array.iter().enumerate() {
+                if let Some(parsed) = parse_codex_rate_limit_window(
+                    display_prefix
+                        .as_ref()
+                        .map(|prefix| format!("{} Window {}", prefix, idx + 1))
+                        .unwrap_or_else(|| format!("Window {}", idx + 1)),
+                    window,
+                ) {
+                    windows.push(parsed);
+                }
+            }
+        }
+    }
+
+    let credits = rate_limits.get("credits").and_then(parse_codex_credits);
+    if windows.is_empty() && credits.is_none() {
+        return None;
+    }
+
+    Some(CodexRateLimitSnapshot {
+        observed_at,
+        windows,
+        credits,
+    })
+}
+
+fn parse_codex_rate_limit_window(name: String, value: &Value) -> Option<CodexRateLimitWindow> {
+    if !value.is_object() {
+        return None;
+    }
+    let used_percent = number_at(value, &["used_percent", "usage_percent", "utilization"])
+        .or_else(|| number_at(value, &["remaining_percent"]).map(|remaining| 100.0 - remaining))
+        .map(clamp_percent);
+    let unit = normalize_limit_unit(
+        value
+            .get("unit")
+            .and_then(|v| v.as_str())
+            .unwrap_or("percent"),
+    );
+    let mut limit = number_at(value, &["limit", "total", "quota", "max"]);
+    let mut remaining = number_at(value, &["remaining", "available"])
+        .or_else(|| number_at(value, &["remaining_percent"]));
+    if is_percent_unit(&unit) {
+        if let Some(used) = used_percent {
+            limit = limit.or(Some(100.0));
+            remaining = remaining.or(Some((100.0 - used).max(0.0)));
+        }
+    }
+    let window_minutes = number_at(value, &["window_minutes", "window"])
+        .or_else(|| {
+            number_at(value, &["limit_window_seconds"]).map(|seconds| (seconds / 60.0).ceil())
+        })
+        .and_then(|n| u32::try_from(n as u64).ok());
+    let resets_at = value
+        .get("resets_at")
+        .or_else(|| value.get("reset_at"))
+        .or_else(|| value.get("reset_time"))
+        .and_then(reset_value_to_rfc3339)
+        .or_else(|| {
+            number_at(value, &["reset_after_seconds"]).and_then(|seconds| {
+                let reset_at = chrono::Utc::now() + chrono::Duration::seconds(seconds as i64);
+                Some(reset_at.to_rfc3339())
+            })
+        });
+
+    if used_percent.is_none() && limit.is_none() && remaining.is_none() && resets_at.is_none() {
+        return None;
+    }
+
+    Some(CodexRateLimitWindow {
+        name: append_window_label(name, window_minutes),
+        used_percent,
+        limit,
+        remaining,
+        unit,
+        window_minutes,
+        resets_at,
+    })
+}
+
+fn normalize_limit_unit(unit: &str) -> String {
+    if is_percent_unit(unit) {
+        "percent".to_string()
+    } else {
+        unit.to_string()
+    }
+}
+
+fn append_window_label(name: String, window_minutes: Option<u32>) -> String {
+    let Some(minutes) = window_minutes else {
+        return name;
+    };
+    if name.contains('(') {
+        return name;
+    }
+    let label = format_window_minutes(minutes);
+    if label.is_empty() {
+        name
+    } else {
+        format!("{} ({})", name, label)
+    }
+}
+
+fn format_window_minutes(minutes: u32) -> String {
+    match minutes {
+        0 => String::new(),
+        300 => "5h".to_string(),
+        10080 => "7d".to_string(),
+        _ if minutes % 1440 == 0 => format!("{}d", minutes / 1440),
+        _ if minutes % 60 == 0 => format!("{}h", minutes / 60),
+        _ => format!("{}m", minutes),
+    }
+}
+
+fn reset_value_to_rfc3339(value: &Value) -> Option<String> {
+    if let Some(seconds) = value.as_i64().or_else(|| value.as_u64().map(|n| n as i64)) {
+        return unix_seconds_to_rfc3339(seconds);
+    }
+
+    let raw = value.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Ok(seconds) = raw.parse::<i64>() {
+        return unix_seconds_to_rfc3339(seconds);
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
+        return Some(dt.with_timezone(&chrono::Utc).to_rfc3339());
+    }
+    Some(raw.to_string())
+}
+
+fn unix_seconds_to_rfc3339(seconds: i64) -> Option<String> {
+    chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0).map(|dt| dt.to_rfc3339())
+}
+
+fn clamp_percent(value: f64) -> f64 {
+    value.clamp(0.0, 100.0)
+}
+
+fn currency_number_at(value: &Value, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|key| {
+        let v = value.get(*key)?;
+        v.as_f64()
+            .or_else(|| v.as_u64().map(|n| n as f64))
+            .or_else(|| v.as_i64().map(|n| n as f64))
+            .or_else(|| v.as_str().and_then(parse_currency_number))
+    })
+}
+
+fn parse_currency_number(raw: &str) -> Option<f64> {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+'))
+        .collect();
+    if cleaned.trim().is_empty() {
+        None
+    } else {
+        cleaned.parse::<f64>().ok()
+    }
+}
+
+fn bool_at(value: &Value, keys: &[&str]) -> bool {
+    keys.iter().any(|key| {
+        let Some(v) = value.get(*key) else {
+            return false;
+        };
+        v.as_bool().unwrap_or_else(|| {
+            v.as_str()
+                .map(|s| matches!(s.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "1"))
+                .unwrap_or(false)
+        })
+    })
+}
+
+fn infer_credit_unit(value: &Value) -> String {
+    if let Some(unit) = value.get("unit").and_then(|v| v.as_str()) {
+        return unit.to_ascii_lowercase();
+    }
+    let currency = value
+        .get("currency")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_ascii_uppercase());
+    if currency.as_deref() == Some("USD") {
+        "usd".to_string()
+    } else if value
+        .get("balance")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s.trim().starts_with('$'))
+    {
+        "usd".to_string()
+    } else {
+        "credits".to_string()
+    }
+}
+
+fn infer_credit_currency(value: &Value) -> Option<String> {
+    value
+        .get("unit")
+        .and_then(|v| v.as_str())
+        .filter(|unit| unit.eq_ignore_ascii_case("usd"))
+        .map(|_| "USD".to_string())
+        .or_else(|| {
+            value
+                .get("currency")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_ascii_uppercase())
+        })
+        .or_else(|| {
+            value
+                .get("balance")
+                .and_then(|v| v.as_str())
+                .filter(|s| s.trim().starts_with('$'))
+                .map(|_| "USD".to_string())
+        })
+}
+
+fn parse_codex_credits(value: &Value) -> Option<CodexCredits> {
+    if value.is_null() {
+        return None;
+    }
+    if let Some(balance) = value.as_f64() {
+        return Some(CodexCredits {
+            balance: Some(balance),
+            used: None,
+            total: None,
+            remaining: Some(balance),
+            unit: "credits".to_string(),
+            currency: None,
+            expires_at: None,
+            is_unlimited: false,
+        });
+    }
+    if !value.is_object() {
+        return None;
+    }
+
+    let is_unlimited = bool_at(value, &["unlimited", "is_unlimited"]);
+    let has_credits = bool_at(value, &["has_credits", "hasCredits"]);
+    let balance = currency_number_at(value, &["balance", "remaining", "available"]);
+    let used = currency_number_at(value, &["used", "used_credits"]);
+    let total = currency_number_at(value, &["total", "limit", "monthly_limit"]);
+    let remaining =
+        currency_number_at(value, &["remaining", "available"]).or_else(|| match (total, used) {
+            (Some(total), Some(used)) => Some((total - used).max(0.0)),
+            _ => None,
+        });
+    let unit = infer_credit_unit(value);
+    let currency = infer_credit_currency(value);
+    let expires_at = value
+        .get("expires_at")
+        .or_else(|| value.get("expiresAt"))
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string);
+
+    if !is_unlimited
+        && !has_credits
+        && balance.is_none()
+        && used.is_none()
+        && total.is_none()
+        && remaining.is_none()
+    {
+        return None;
+    }
+
+    Some(CodexCredits {
+        balance,
+        used,
+        total,
+        remaining,
+        unit,
+        currency,
+        expires_at,
+        is_unlimited,
+    })
+}
+
+fn number_at(value: &Value, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|key| {
+        let v = value.get(*key)?;
+        v.as_f64()
+            .or_else(|| v.as_u64().map(|n| n as f64))
+            .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+    })
+}
+
 fn resolve_entry_date(path_date: Option<&str>, value: &Value) -> String {
     extract_date_from_timestamp(value)
         .or_else(|| path_date.map(ToString::to_string))
@@ -884,9 +1559,213 @@ fn dedup_key_line_index(key: &str) -> u32 {
         .unwrap_or(0)
 }
 
+fn project_name_from_cwd(cwd: Option<&str>) -> Option<String> {
+    let cwd = cwd?.trim();
+    if cwd.is_empty() {
+        return None;
+    }
+    Path::new(cwd)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|name| !name.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| Some(cwd.to_string()))
+}
+
+fn classify_codex_activity(tool_names: &[String], shell_commands: &[String]) -> String {
+    if tool_names.is_empty() {
+        return "Conversation".to_string();
+    }
+
+    let has_edit = tool_names.iter().any(|t| t == "Edit" || t == "Write");
+    let has_bash = tool_names.iter().any(|t| t == "Bash");
+    let has_read = tool_names.iter().any(|t| t == "Read");
+    let has_search = tool_names
+        .iter()
+        .any(|t| t == "WebSearch" || t == "WebFetch");
+    let has_plan = tool_names.iter().any(|t| t == "Plan");
+    let has_browser = tool_names.iter().any(|t| t == "Browser");
+    let has_agent = tool_names
+        .iter()
+        .any(|t| t == "Task" || t == "Agent" || t.starts_with("mcp__"));
+
+    if has_plan {
+        return "Planning".to_string();
+    }
+    if has_agent {
+        return "Delegation".to_string();
+    }
+
+    if has_bash && !has_edit {
+        if shell_commands
+            .iter()
+            .any(|cmd| matches!(cmd.as_str(), "pytest" | "vitest" | "jest" | "mocha" | "npx"))
+        {
+            return "Testing".to_string();
+        }
+        if shell_commands.iter().any(|cmd| cmd == "git") {
+            return "Git Ops".to_string();
+        }
+        if shell_commands.iter().any(|cmd| {
+            matches!(
+                cmd.as_str(),
+                "docker" | "make" | "cargo" | "npm" | "yarn" | "pnpm" | "bun" | "pip" | "brew"
+            )
+        }) {
+            return "Build/Deploy".to_string();
+        }
+    }
+
+    if has_edit {
+        return "Coding".to_string();
+    }
+    if has_bash || has_read || has_search || has_browser {
+        return "Exploration".to_string();
+    }
+    "Conversation".to_string()
+}
+
+fn build_analytics_from_maps(
+    project_map: HashMap<String, ProjectAcc>,
+    tool_map: HashMap<String, u32>,
+    shell_map: HashMap<String, u32>,
+    mcp_map: HashMap<String, u32>,
+    activity_map: HashMap<String, ActivityAcc>,
+) -> AnalyticsData {
+    let mut project_usage: Vec<ProjectUsage> = project_map
+        .into_iter()
+        .map(|(name, acc)| ProjectUsage {
+            name,
+            cost_usd: acc.cost_usd,
+            tokens: acc.tokens,
+            sessions: acc.sessions.len() as u32,
+            messages: acc.messages,
+        })
+        .collect();
+    project_usage.sort_by(|a, b| {
+        b.cost_usd
+            .partial_cmp(&a.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut tool_usage: Vec<ToolCount> = tool_map
+        .into_iter()
+        .map(|(name, count)| ToolCount { name, count })
+        .collect();
+    tool_usage.sort_by(|a, b| b.count.cmp(&a.count));
+
+    let mut shell_commands: Vec<ToolCount> = shell_map
+        .into_iter()
+        .map(|(name, count)| ToolCount { name, count })
+        .collect();
+    shell_commands.sort_by(|a, b| b.count.cmp(&a.count));
+
+    let mut mcp_usage: Vec<McpServerUsage> = mcp_map
+        .into_iter()
+        .map(|(server, calls)| McpServerUsage { server, calls })
+        .collect();
+    mcp_usage.sort_by(|a, b| b.calls.cmp(&a.calls));
+
+    let mut activity_breakdown: Vec<ActivityCategory> = activity_map
+        .into_iter()
+        .map(|(category, acc)| ActivityCategory {
+            category,
+            cost_usd: acc.cost_usd,
+            messages: acc.messages,
+        })
+        .collect();
+    activity_breakdown.sort_by(|a, b| {
+        b.cost_usd
+            .partial_cmp(&a.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    AnalyticsData {
+        project_usage,
+        tool_usage,
+        shell_commands,
+        mcp_usage,
+        activity_breakdown,
+    }
+}
+
+fn status_from_used_percent(used_percent: Option<f64>) -> String {
+    match used_percent {
+        Some(p) if p >= 100.0 => "exhausted".to_string(),
+        Some(p) if p >= 90.0 => "critical".to_string(),
+        Some(p) if p >= 70.0 => "warning".to_string(),
+        Some(_) => "ok".to_string(),
+        None => "unknown".to_string(),
+    }
+}
+
+fn status_from_balance(credits: &CodexCredits) -> String {
+    if credits.is_unlimited {
+        return "ok".to_string();
+    }
+    if let Some(remaining) = credits.remaining.or(credits.balance) {
+        if remaining <= 0.0 {
+            return "exhausted".to_string();
+        }
+    }
+    match (credits.used, credits.total) {
+        (Some(used), Some(total)) if total > 0.0 => {
+            status_from_used_percent(Some((used / total) * 100.0))
+        }
+        _ => "unknown".to_string(),
+    }
+}
+
+fn is_percent_unit(unit: &str) -> bool {
+    let normalized = unit.trim().to_ascii_lowercase();
+    normalized == "percent" || normalized == "%"
+}
+
+fn snapshot_is_newer(candidate: &CodexRateLimitSnapshot, current: &CodexRateLimitSnapshot) -> bool {
+    match (&candidate.observed_at, &current.observed_at) {
+        (Some(a), Some(b)) => a > b,
+        (Some(_), None) => true,
+        (None, Some(_)) => false,
+        (None, None) => false,
+    }
+}
+
+fn snapshot_is_stale(snapshot: &CodexRateLimitSnapshot) -> bool {
+    snapshot
+        .observed_at
+        .as_deref()
+        .and_then(|timestamp| chrono::DateTime::parse_from_rfc3339(timestamp).ok())
+        .map(|dt| {
+            chrono::Utc::now()
+                .signed_duration_since(dt.with_timezone(&chrono::Utc))
+                .num_seconds()
+                > 600
+        })
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_entry() -> CodexEntry {
+        CodexEntry {
+            date: "2026-01-01".to_string(),
+            model: "codex".to_string(),
+            session_id: "test-session".to_string(),
+            cwd: None,
+            client_name: "Codex CLI".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cached_tokens: 0,
+            total_tokens: 0,
+            usage_source: TokenUsageSource::Last,
+            service_tier: ServiceTier::Standard,
+            tool_names: Vec::new(),
+            shell_commands: Vec::new(),
+            rate_limits: None,
+        }
+    }
 
     #[test]
     fn test_extract_date_from_path() {
@@ -1015,6 +1894,77 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_function_call_maps_exec_command() {
+        let value: Value = serde_json::json!({
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"cargo test --lib\",\"workdir\":\"/tmp\"}"
+            }
+        });
+
+        let (tool, command) = extract_function_call(&value).unwrap();
+        assert_eq!(tool, "Bash");
+        assert_eq!(command.as_deref(), Some("cargo"));
+    }
+
+    #[test]
+    fn test_extract_codex_rate_limits_snapshot() {
+        let value: Value = serde_json::json!({
+            "timestamp": "2026-05-02T10:00:00Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "limit_id": "codex",
+                    "primary": {
+                        "used_percent": 71.5,
+                        "window_minutes": 300,
+                        "resets_at": 1777734000
+                    },
+                    "secondary": {
+                        "remaining_percent": 40.0,
+                        "limit_window_seconds": 604800,
+                        "reset_after_seconds": 3600
+                    },
+                    "credits": {
+                        "has_credits": true,
+                        "balance": "$9.99"
+                    }
+                }
+            }
+        });
+
+        let snapshot = extract_codex_rate_limits(&value).unwrap();
+        assert_eq!(
+            snapshot.observed_at.as_deref(),
+            Some("2026-05-02T10:00:00Z")
+        );
+        assert_eq!(snapshot.windows.len(), 2);
+        assert_eq!(snapshot.windows[0].name, "Primary Usage (5h)");
+        assert_eq!(snapshot.windows[0].used_percent, Some(71.5));
+        assert_eq!(snapshot.windows[0].remaining, Some(28.5));
+        assert_eq!(snapshot.windows[0].window_minutes, Some(300));
+        assert_eq!(
+            snapshot.windows[0].resets_at,
+            unix_seconds_to_rfc3339(1777734000)
+        );
+        assert_eq!(snapshot.windows[1].name, "Secondary Usage (7d)");
+        assert_eq!(snapshot.windows[1].used_percent, Some(60.0));
+        assert_eq!(snapshot.windows[1].remaining, Some(40.0));
+        assert_eq!(snapshot.windows[1].window_minutes, Some(10080));
+        assert_eq!(
+            snapshot.credits.as_ref().and_then(|c| c.balance),
+            Some(9.99)
+        );
+        assert_eq!(
+            snapshot.credits.as_ref().map(|c| c.unit.as_str()),
+            Some("usd")
+        );
+    }
+
+    #[test]
     fn test_parse_codex_config_service_tier() {
         let config = r#"
 model = "gpt-5.5"
@@ -1129,6 +2079,7 @@ memories = true
                 total_tokens: 150,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
         entries.insert(
@@ -1143,6 +2094,7 @@ memories = true
                 total_tokens: 225,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
 
@@ -1151,6 +2103,74 @@ memories = true
         assert_eq!(stats.daily.len(), 1);
         assert_eq!(stats.daily[0].messages, 2);
         assert_eq!(stats.daily[0].sessions, 1);
+    }
+
+    #[test]
+    fn test_build_stats_includes_codex_analytics() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                cwd: Some("/Users/example/work/project-a".to_string()),
+                input_tokens: 1_000,
+                output_tokens: 500,
+                total_tokens: 1_500,
+                tool_names: vec!["Bash".to_string(), "Edit".to_string()],
+                shell_commands: vec!["cargo".to_string()],
+                ..test_entry()
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        let analytics = stats.analytics.unwrap();
+        assert_eq!(stats.daily[0].tool_calls, 2);
+        assert_eq!(analytics.project_usage[0].name, "project-a");
+        assert_eq!(analytics.project_usage[0].sessions, 1);
+        assert_eq!(analytics.tool_usage[0].count, 1);
+        assert_eq!(analytics.shell_commands[0].name, "cargo");
+        assert_eq!(analytics.activity_breakdown[0].category, "Coding");
+    }
+
+    #[test]
+    fn test_build_account_state_uses_latest_rate_limits_and_clients() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                client_name: "Codex CLI".to_string(),
+                input_tokens: 1_000,
+                output_tokens: 500,
+                total_tokens: 1_500,
+                rate_limits: Some(CodexRateLimitSnapshot {
+                    observed_at: Some(chrono::Utc::now().to_rfc3339()),
+                    windows: vec![CodexRateLimitWindow {
+                        name: "Codex Primary".to_string(),
+                        used_percent: Some(72.0),
+                        limit: None,
+                        remaining: None,
+                        unit: "percent".to_string(),
+                        window_minutes: Some(300),
+                        resets_at: Some("2026-05-02T15:00:00Z".to_string()),
+                    }],
+                    credits: None,
+                }),
+                ..test_entry()
+            },
+        );
+
+        let state = CodexProvider::build_account_state(&entries).unwrap();
+        assert_eq!(state.provider, "codex");
+        assert_eq!(state.limit_windows.len(), 1);
+        assert_eq!(state.rate_limits.len(), 0);
+        assert_eq!(state.limit_windows[0].status, "warning");
+        assert_eq!(state.client_distribution[0].name, "Codex CLI");
+        assert_eq!(state.client_distribution[0].requests, 1);
     }
 
     #[test]
@@ -1168,6 +2188,7 @@ memories = true
                 total_tokens: 110_000,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Fast,
+                ..test_entry()
             },
         );
 
@@ -1216,6 +2237,7 @@ memories = true
                 total_tokens: 1_500_000,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
 
@@ -1246,6 +2268,7 @@ memories = true
                 total_tokens: LONG_CONTEXT_THRESHOLD,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
         entries.insert(
@@ -1260,6 +2283,7 @@ memories = true
                 total_tokens: LONG_CONTEXT_THRESHOLD + 1,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
 
@@ -1286,6 +2310,7 @@ memories = true
                 total_tokens: LONG_CONTEXT_THRESHOLD + 11_000,
                 usage_source: TokenUsageSource::TotalFallback,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
 
@@ -1313,6 +2338,7 @@ memories = true
                 total_tokens: 2_000,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
         entries.insert(
@@ -1327,6 +2353,7 @@ memories = true
                 total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
 
@@ -1353,6 +2380,7 @@ memories = true
                 total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
         entries.insert(
@@ -1367,6 +2395,7 @@ memories = true
                 total_tokens: 2_000,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
 
@@ -1391,6 +2420,7 @@ memories = true
                 total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
         entries.insert(
@@ -1405,6 +2435,7 @@ memories = true
                 total_tokens: 1_000,
                 usage_source: TokenUsageSource::Last,
                 service_tier: ServiceTier::Standard,
+                ..test_entry()
             },
         );
 

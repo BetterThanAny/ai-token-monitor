@@ -190,7 +190,9 @@ impl ClaudeCodeProvider {
                 .join("*.jsonl")
                 .to_string_lossy()
                 .to_string();
-            let files = glob::glob(&pattern).unwrap_or_else(|_| glob::glob("").unwrap());
+            let Ok(files) = glob::glob(&pattern) else {
+                continue;
+            };
             for path in files.flatten() {
                 if let Ok(m) = fs::metadata(&path) {
                     let mtime = m.modified().unwrap_or(SystemTime::UNIX_EPOCH);
@@ -1024,26 +1026,17 @@ impl ClaudeCodeProvider {
         let current_meta = self.collect_file_meta();
 
         // Check if any files actually changed since last computation
-        let entries = if let Ok(cache) = STATS_CACHE.lock() {
-            if let Some(ref cached) = *cache {
+        let entries = if let Ok(mut cache) = STATS_CACHE.lock() {
+            if let Some(ref mut cached) = *cache {
                 if cached.file_meta == current_meta {
                     // No files changed — refresh timestamp and return cached stats
-                    drop(cache);
-                    if let Ok(mut cache) = STATS_CACHE.lock() {
-                        if let Some(ref mut cached) = *cache {
-                            cached.computed_at = Instant::now();
-                        }
-                    }
+                    cached.computed_at = Instant::now();
+                    let stats = cached.stats.clone();
                     eprintln!(
                         "[PERF] No files changed, reusing cache ({:?})",
                         start.elapsed()
                     );
-                    if let Ok(cache) = STATS_CACHE.lock() {
-                        if let Some(ref cached) = *cache {
-                            return Ok(cached.stats.clone());
-                        }
-                    }
-                    return Err("Cache lost during refresh".to_string());
+                    return Ok(stats);
                 }
 
                 // Incremental parse — only changed files

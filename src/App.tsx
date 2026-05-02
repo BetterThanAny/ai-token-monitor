@@ -35,6 +35,8 @@ import { ToolUsage } from "./components/ToolUsage";
 import { ShellCommands } from "./components/ShellCommands";
 import { AnalyticsSummary } from "./components/AnalyticsSummary";
 import { ActivityBreakdown } from "./components/ActivityBreakdown";
+import { AccountLimits } from "./components/AccountLimits";
+import { useAccountStates } from "./hooks/useAccountStates";
 import { useUpdater } from "./hooks/useUpdater";
 import { setChatChannelUser, activateChatChannel } from "./realtime/chatChannel";
 
@@ -71,6 +73,9 @@ function AppContent() {
   const { stats, error, loading } = useCombinedStats({
     includeClaude: prefs.include_claude,
     includeCodex: prefs.include_codex,
+  });
+  const { states: accountStates, loading: accountStatesLoading } = useAccountStates({
+    enabled: prefs.include_claude || prefs.include_codex,
   });
   const t = useI18n();
   const { user, profile } = useAuth();
@@ -223,6 +228,10 @@ function AppContent() {
                 />
               </>
             : <AnalyticsEmptyState message={t("analytics.empty.tools")} />
+        )}
+
+        {analyticsSubTab === "limits" && (
+          <AccountLimits states={accountStates} loading={accountStatesLoading} />
         )}
       </div>
 

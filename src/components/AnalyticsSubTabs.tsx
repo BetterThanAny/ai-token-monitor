@@ -1,13 +1,13 @@
 import { useI18n } from "../i18n/I18nContext";
 
-export type AnalyticsSubTab = "usage" | "projects" | "tools";
+export type AnalyticsSubTab = "usage" | "projects" | "tools" | "limits";
 
 interface Props {
   active: AnalyticsSubTab;
   onChange: (tab: AnalyticsSubTab) => void;
 }
 
-const TABS: AnalyticsSubTab[] = ["usage", "projects", "tools"];
+const TABS: AnalyticsSubTab[] = ["usage", "projects", "tools", "limits"];
 
 export function AnalyticsSubTabs({ active, onChange }: Props) {
   const t = useI18n();
