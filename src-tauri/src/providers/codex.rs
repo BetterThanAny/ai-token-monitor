@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use serde_json::Value;
 
 use super::traits::TokenProvider;
@@ -55,6 +57,8 @@ const LONG_CONTEXT_INPUT_MULTIPLIER: f64 = 2.0;
 const LONG_CONTEXT_OUTPUT_MULTIPLIER: f64 = 1.5;
 const GPT55_FAST_CREDIT_MULTIPLIER: f64 = 2.5;
 const GPT54_FAST_CREDIT_MULTIPLIER: f64 = 2.0;
+const SERVICE_TIER_OVERRIDES_JSON: &str = include_str!("../../codex-service-tier-overrides.json");
+const SERVICE_TIER_OVERRIDES_CONFIG: &str = "ai-token-monitor-service-tier-overrides.json";
 
 fn long_context_model_family(model: &str) -> Option<&'static str> {
     if model.contains("gpt-5.5-pro") {
@@ -121,6 +125,23 @@ enum ServiceTier {
     Fast,
 }
 
+#[derive(Clone, Debug)]
+struct ServiceTierOverrideWindow {
+    starts_at: DateTime<Utc>,
+    ends_at: Option<DateTime<Utc>>,
+    tier: ServiceTier,
+}
+
+#[derive(Deserialize)]
+struct RawServiceTierOverride {
+    starts_at: String,
+    #[serde(default)]
+    ends_at: Option<String>,
+    tier: String,
+    #[serde(default)]
+    provider: Option<String>,
+}
+
 fn service_tier_from_str(value: &str) -> Option<ServiceTier> {
     if value.eq_ignore_ascii_case("fast") {
         Some(ServiceTier::Fast)
@@ -179,6 +200,60 @@ fn parse_codex_config_service_tier(contents: &str) -> Option<ServiceTier> {
     }
 }
 
+fn parse_override_datetime(raw: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))
+}
+
+fn parse_service_tier_overrides(contents: &str) -> Vec<ServiceTierOverrideWindow> {
+    let trimmed = contents.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let Ok(raw_overrides) = serde_json::from_str::<Vec<RawServiceTierOverride>>(trimmed) else {
+        eprintln!("[Codex] Failed to parse codex service tier overrides");
+        return Vec::new();
+    };
+
+    let mut windows: Vec<ServiceTierOverrideWindow> = raw_overrides
+        .into_iter()
+        .filter(|raw| {
+            raw.provider
+                .as_deref()
+                .map(|provider| provider.eq_ignore_ascii_case("codex"))
+                .unwrap_or(true)
+        })
+        .filter_map(|raw| {
+            let starts_at = parse_override_datetime(&raw.starts_at)?;
+            let ends_at = raw.ends_at.as_deref().and_then(parse_override_datetime);
+            let tier = service_tier_from_str(&raw.tier)?;
+            Some(ServiceTierOverrideWindow {
+                starts_at,
+                ends_at,
+                tier,
+            })
+        })
+        .collect();
+    windows.sort_by_key(|window| window.starts_at);
+    windows
+}
+
+fn service_tier_overrides_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|home| home.join(".codex").join(SERVICE_TIER_OVERRIDES_CONFIG))
+}
+
+fn configured_service_tier_overrides() -> Vec<ServiceTierOverrideWindow> {
+    if let Some(path) = service_tier_overrides_path() {
+        if let Ok(contents) = fs::read_to_string(&path) {
+            return parse_service_tier_overrides(&contents);
+        }
+    }
+
+    parse_service_tier_overrides(SERVICE_TIER_OVERRIDES_JSON)
+}
+
 fn codex_config_service_tier() -> Option<(ServiceTier, SystemTime)> {
     let path = dirs::home_dir()?.join(".codex").join("config.toml");
     let contents = fs::read_to_string(&path).ok()?;
@@ -196,9 +271,15 @@ fn default_service_tier_for_path(
     default_service_tier_after_timestamp(None, path, config_service_tier)
 }
 
-fn system_time_from_event_timestamp(value: &Value) -> Option<SystemTime> {
+fn event_datetime_from_timestamp(value: &Value) -> Option<DateTime<Utc>> {
     let timestamp = value.get("timestamp")?.as_str()?;
-    let utc_dt = timestamp.parse::<chrono::DateTime<chrono::Utc>>().ok()?;
+    DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))
+}
+
+fn system_time_from_event_timestamp(value: &Value) -> Option<SystemTime> {
+    let utc_dt = event_datetime_from_timestamp(value)?;
     let millis = utc_dt.timestamp_millis();
     if millis < 0 {
         return None;
@@ -223,11 +304,35 @@ fn default_service_tier_after_timestamp(
     }
 }
 
+fn service_tier_from_overrides(
+    event_time: DateTime<Utc>,
+    overrides: &[ServiceTierOverrideWindow],
+) -> Option<ServiceTier> {
+    overrides
+        .iter()
+        .rev()
+        .find(|window| {
+            event_time >= window.starts_at
+                && window
+                    .ends_at
+                    .map(|ends_at| event_time < ends_at)
+                    .unwrap_or(true)
+        })
+        .map(|window| window.tier)
+}
+
 fn default_service_tier_for_event(
     value: &Value,
     path: &Path,
     config_service_tier: Option<(ServiceTier, SystemTime)>,
+    overrides: &[ServiceTierOverrideWindow],
 ) -> ServiceTier {
+    if let Some(event_time) = event_datetime_from_timestamp(value) {
+        if let Some(tier) = service_tier_from_overrides(event_time, overrides) {
+            return tier;
+        }
+    }
+
     default_service_tier_after_timestamp(
         system_time_from_event_timestamp(value),
         path,
@@ -339,6 +444,7 @@ pub struct CodexProvider {
     primary_dir: PathBuf,
     all_dirs: Vec<PathBuf>,
     config_service_tier: Option<(ServiceTier, SystemTime)>,
+    service_tier_overrides: Vec<ServiceTierOverrideWindow>,
 }
 
 impl CodexProvider {
@@ -365,6 +471,7 @@ impl CodexProvider {
             primary_dir: primary,
             all_dirs,
             config_service_tier: codex_config_service_tier(),
+            service_tier_overrides: configured_service_tier_overrides(),
         }
     }
 
@@ -406,6 +513,7 @@ impl CodexProvider {
     fn parse_single_file(
         path: &Path,
         config_service_tier: Option<(ServiceTier, SystemTime)>,
+        service_tier_overrides: &[ServiceTierOverrideWindow],
     ) -> HashMap<String, CodexEntry> {
         let mut entries = HashMap::new();
         let Ok(file) = fs::File::open(path) else {
@@ -471,6 +579,7 @@ impl CodexProvider {
                             &value,
                             path,
                             config_service_tier.clone(),
+                            service_tier_overrides,
                         );
                     }
                 }
@@ -491,6 +600,7 @@ impl CodexProvider {
                             &value,
                             path,
                             config_service_tier.clone(),
+                            service_tier_overrides,
                         );
                     }
 
@@ -579,6 +689,7 @@ impl CodexProvider {
         cached_entries: &HashMap<String, CodexEntry>,
         cached_meta: &HashMap<PathBuf, (SystemTime, u64)>,
         config_service_tier: Option<(ServiceTier, SystemTime)>,
+        service_tier_overrides: &[ServiceTierOverrideWindow],
     ) -> HashMap<String, CodexEntry> {
         let mut entries = cached_entries.clone();
 
@@ -598,7 +709,11 @@ impl CodexProvider {
         if has_deleted {
             let mut fresh = HashMap::new();
             for path in current_meta.keys() {
-                fresh.extend(Self::parse_single_file(path, config_service_tier.clone()));
+                fresh.extend(Self::parse_single_file(
+                    path,
+                    config_service_tier.clone(),
+                    service_tier_overrides,
+                ));
             }
             return fresh;
         }
@@ -607,7 +722,11 @@ impl CodexProvider {
             let start = Instant::now();
             let count = changed_files.len();
             for path in &changed_files {
-                let file_entries = Self::parse_single_file(path, config_service_tier.clone());
+                let file_entries = Self::parse_single_file(
+                    path,
+                    config_service_tier.clone(),
+                    service_tier_overrides,
+                );
                 entries.extend(file_entries);
             }
             eprintln!(
@@ -903,6 +1022,7 @@ impl CodexProvider {
                     &cached.entries,
                     &cached.file_meta,
                     self.config_service_tier.clone(),
+                    &self.service_tier_overrides,
                 )
             } else {
                 // First run — full parse
@@ -917,6 +1037,7 @@ impl CodexProvider {
                     entries.extend(Self::parse_single_file(
                         path,
                         self.config_service_tier.clone(),
+                        &self.service_tier_overrides,
                     ));
                 }
                 eprintln!(
@@ -2003,12 +2124,42 @@ memories = true
         });
 
         assert_eq!(
-            default_service_tier_for_event(&before_config, &path, config_tier),
+            default_service_tier_for_event(&before_config, &path, config_tier, &[]),
             ServiceTier::Standard
         );
         assert_eq!(
-            default_service_tier_for_event(&after_config, &path, config_tier),
+            default_service_tier_for_event(&after_config, &path, config_tier, &[]),
             ServiceTier::Fast
+        );
+    }
+
+    #[test]
+    fn test_service_tier_override_applies_to_unmarked_event() {
+        let path = PathBuf::from("/tmp/nonexistent-codex-session.jsonl");
+        let overrides = parse_service_tier_overrides(
+            r#"[
+              {
+                "provider": "codex",
+                "starts_at": "2026-05-02T13:00:00+08:00",
+                "ends_at": "2026-05-02T20:00:00+08:00",
+                "tier": "fast"
+              }
+            ]"#,
+        );
+        let inside: Value = serde_json::json!({
+            "timestamp": "2026-05-02T06:00:00.000Z"
+        });
+        let outside: Value = serde_json::json!({
+            "timestamp": "2026-05-02T12:30:00.000Z"
+        });
+
+        assert_eq!(
+            default_service_tier_for_event(&inside, &path, None, &overrides),
+            ServiceTier::Fast
+        );
+        assert_eq!(
+            default_service_tier_for_event(&outside, &path, None, &overrides),
+            ServiceTier::Standard
         );
     }
 

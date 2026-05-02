@@ -1,4 +1,3 @@
-mod ai_translate;
 mod commands;
 mod oauth_usage;
 mod providers;
@@ -18,13 +17,6 @@ static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
 /// Timestamp (ms) when the window was last shown — prevents immediate focus-loss hide.
 static LAST_SHOWN_MS: AtomicU64 = AtomicU64::new(0);
 
-/// Stores a deep-link URL that arrived before the frontend was ready (cold start).
-/// The frontend can retrieve it via the `get_pending_deep_link` command.
-static PENDING_DEEP_LINK: Mutex<Option<String>> = Mutex::new(None);
-
-/// Set to true when the single-instance callback has already emitted the deep-link URL,
-/// so the setup block doesn't store a duplicate into PENDING_DEEP_LINK.
-static DEEP_LINK_EMITTED: AtomicBool = AtomicBool::new(false);
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use tauri::tray::TrayIconBuilder;
@@ -735,14 +727,6 @@ fn show_window(window: tauri::WebviewWindow) {
 }
 
 #[tauri::command]
-fn get_pending_deep_link() -> Option<String> {
-    PENDING_DEEP_LINK
-        .lock()
-        .ok()
-        .and_then(|mut guard| guard.take())
-}
-
-#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     eprintln!("[CMD] quit_app called");
     request_shutdown();
@@ -813,28 +797,13 @@ pub fn run() {
     SHUTDOWN_REQUESTED.store(false, Ordering::SeqCst);
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // Windows에서 deep link는 새 프로세스의 CLI arg로 전달되며,
-            // single-instance 플러그인이 이를 가로챈다.
-            // deep-link 플러그인의 onOpenUrl에 도달하지 않을 수 있으므로
-            // 여기서 직접 프론트엔드에 emit한다.
-            if let Some(url) = args.iter().find(|a| a.contains("auth/callback")) {
-                eprintln!(
-                    "[SINGLE-INSTANCE] OAuth callback detected, emitting to frontend: {}",
-                    url
-                );
-                DEEP_LINK_EMITTED.store(true, Ordering::SeqCst);
-                let _ = app.emit("deep-link-auth", url.clone());
-                return;
-            }
-
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
         }))
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -850,7 +819,6 @@ pub fn run() {
             commands::is_codex_available,
             commands::get_preferences,
             commands::set_preferences,
-            commands::get_stable_device_id,
             commands::detect_claude_dirs,
             commands::validate_claude_dir,
             commands::detect_codex_dirs,
@@ -859,7 +827,6 @@ pub fn run() {
             set_dialog_open,
             hide_window,
             show_window,
-            get_pending_deep_link,
             quit_app,
             restart_app,
             commands::capture_window,
@@ -868,8 +835,6 @@ pub fn run() {
             commands::get_pricing_table,
             commands::get_ai_keys,
             commands::test_webhook,
-            ai_translate::translate_text,
-            ai_translate::translate_reply,
             url_metadata::fetch_url_metadata
         ])
         .setup(|app| {
@@ -916,21 +881,6 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-
-            // Cold start (Windows only): check if the app was launched with a deep-link URL as arg.
-            // macOS delivers deep links via Apple Events, not process args.
-            #[cfg(target_os = "windows")]
-            {
-                if !DEEP_LINK_EMITTED.load(Ordering::SeqCst) {
-                    let args: Vec<String> = std::env::args().collect();
-                    if let Some(url) = args.iter().find(|a| a.contains("auth/callback")) {
-                        eprintln!("[SETUP] Deep-link URL found in launch args: {}", url);
-                        if let Ok(mut guard) = PENDING_DEEP_LINK.lock() {
-                            *guard = Some(url.clone());
-                        }
-                    }
-                }
-            }
 
             // Hide from dock on macOS
             #[cfg(target_os = "macos")]

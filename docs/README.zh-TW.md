@@ -5,12 +5,12 @@
 
 > **[English](../README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Türkçe](README.tr.md) | [Italiano](README.it.md)**
 
-一款 macOS 和 Windows 系統托盤應用,可即時追蹤 **Claude Code** 和 **Codex** 的權杖使用量、費用與活動,並內建排行榜、聊天與 Webhook 提醒。
+一款 macOS 和 Windows 系統托盤應用,可即時追蹤 **Claude Code** 和 **Codex** 的權杖使用量、費用和活動,並支援可選 Webhook 提醒。
 
-| 總覽 | 分析 | 排行榜 |
-|:---:|:---:|:---:|
-| <img src="screenshots/overview.png" width="280" /> | <img src="screenshots/analytics.png" width="280" /> | <img src="screenshots/leaderboard.png" width="280" /> |
-| 今日使用量、7 天圖表、週/月彙總 | 活動圖、30 天趨勢、模型分析 | 與其他開發者比較使用量 |
+| 總覽 | 分析 |
+| :---: | :---: |
+| <img src="screenshots/overview.png" width="280" /> | <img src="screenshots/analytics.png" width="280" /> |
+| 今日使用量、7 天圖表、週/月彙總 | 活動圖、30 天趨勢、模型分析 |
 
 ## 下載
 
@@ -34,11 +34,6 @@
 - **快取效率** — 快取命中率環形圖
 
 ### 社交與分享
-- **排行榜** — 與其他開發者比較日/週/月使用量(GitHub OAuth,需主動開啟)
-- **7 天 TOP 10 網格** — 直觀呈現排名歷史
-- **迷你個人資料** — 活動熱力圖、連續活躍天數、外部資料連結
-- **徽章** — Card / Compact / Flat Square 樣式,可匯出為 PNG / SVG / Markdown 或動態 URL,嵌入 GitHub README
-- **聊天** — 面向排行榜成員的應用內聊天,支援提及、回覆、圖片附件、未讀徽章、輸入中提示以及 AI 翻譯
 - **AI 報告 (Wrapped)** — 月度/年度回顧卡片(最常用模型、最忙碌的一天、連續紀錄)
 - **收據檢視** — 今日 / 本週 / 本月 / 全部 的收據式使用摘要
 - **薪資比較** — 將 AI 花費換算為月薪佔比(拿鐵 / Netflix / 炸雞)
@@ -54,7 +49,6 @@
 - **10 種語言** — English, 한국어, 日本語, 简体中文, 繁體中文, Français, Español, Deutsch, Türkçe, Italiano
 - **數字格式** — 精簡(`377.0K`)/ 完整(`377,000`)切換
 - **開機自動啟動** — 可選開機時自動啟動
-- **AI 翻譯** — 新增 Gemini / OpenAI / Anthropic API 金鑰後可翻譯聊天訊息(金鑰於本機加密儲存)
 - **自動隱藏** — 點擊視窗外自動隱藏
 
 ## 從原始碼安裝
@@ -82,7 +76,7 @@ npm run tauri build   # 生產建置
 
 1. 啟動應用程式後,系統托盤(macOS 選單列 / Windows 工作列)會出現圖示
 2. 點擊圖示開啟使用量儀表板
-3. 在 **總覽**、**分析**、**排行榜** 和 **聊天** 分頁之間切換
+3. 在 **概覽** 和 **分析** 標籤之間切換
 
 ### 分頁說明
 
@@ -90,37 +84,16 @@ npm run tauri build   # 生產建置
 |------|------|
 | **總覽** | 今日摘要、7 天圖表、週/月彙總、8 週熱力圖 |
 | **分析** | 全年活動圖(2D/3D)、30 天圖表、模型分析、快取效率 |
-| **排行榜** | 使用量排名、7 天 TOP 10 網格、徽章、迷你個人資料 |
-| **聊天** | 與排行榜成員即時聊天 — 提及、回覆、圖片、AI 翻譯 |
-
-### 頂部操作
-
-頂部包含 **分享按鈕**、**⋯ 選單** 與 **⚙ 設定** 按鈕。選單包含以下項目:
-
-- **查看 GitHub 儲存庫** — 在瀏覽器中開啟儲存庫
-- **我的 AI 報告** — 月度/年度回顧卡片
-- **收據** — 收據式使用摘要
-- **分享此應用** — 複製推薦訊息 + 儲存庫連結到剪貼簿
-- **擷取螢幕截圖** — 將目前畫面複製到剪貼簿
 
 ### 設定
 
-設定分為 4 個分頁:
+設定分為 3 個分頁:
 
-| 分頁 | 選項 |
+| 標籤 | 選項 |
 |------|------|
-| **一般** | 主題、語言、外觀、數字格式、選單列費用、開機自動啟動、月薪、Claude/Codex 目錄、Claude 用量追蹤(OAuth) |
-| **帳戶** | GitHub 登入、排行榜公開、個人資料連結 |
-| **AI** | Gemini / OpenAI / Anthropic API 金鑰(聊天翻譯,本機加密儲存) |
+| **一般** | 主題、語言、外觀、數字格式、選單列費用、開機自啟、月薪、可選 Claude 用量追蹤 |
+| **帳戶** | Claude/Codex 設定目錄 |
 | **Webhooks** | Discord / Slack / Telegram Webhook URL、提醒閾值、監控視窗、重置通知 |
-
-### 排行榜與聊天
-
-1. 在 設定 → 帳戶 啟用 "分享使用資料"
-2. 點擊 "使用 GitHub 登入"
-3. 在排行榜分頁查看排名,在聊天分頁參與對話
-
-分享的資料:每日權杖總量、費用、訊息/工作階段數。**不會分享程式碼或對話內容。**
 
 ## 資料來源
 
@@ -129,23 +102,18 @@ npm run tauri build   # 生產建置
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | 從 `~/.claude/stats-cache.json` 補充工作階段/工具呼叫數。支援多個根目錄。 |
 | **Codex** | `~/.codex/sessions/**/*.jsonl` | 支援多個根目錄。 |
 
-**網路請求**:僅在啟用排行榜/聊天時(向 Supabase 傳送彙總資料)或 Webhook 觸發時才會發起網路請求。未使用這些功能時,應用完全離線運作。設定 AI 翻譯金鑰後,才會直接向對應供應商傳送請求。
-
 ## 架構
 
 ```
 ┌────────────────────────────────────┐
 │  前端 (React 19 + Vite)            │
 │  ├── PopoverShell / Header         │
-│  ├── TabBar (4 分頁)               │
+│  ├── TabBar (2 tabs)               │
 │  ├── TodaySummary / DailyChart     │
 │  ├── ActivityGraph (2D/3D) / Heatmap│
 │  ├── ModelBreakdown / CacheEfficiency│
-│  ├── Leaderboard + Grid + Badges   │
-│  ├── Chat + MentionAutocomplete    │
-│  ├── MiniProfile / Wrapped / Receipt│
 │  ├── SalaryComparator              │
-│  └── SettingsOverlay (4 分頁)      │
+│  └── SettingsOverlay (3 tabs)      │
 ├────────────────────────────────────┤
 │  後端 (Tauri v2 / Rust)            │
 │  ├── JSONL 工作階段解析器 (Claude/Codex)│
@@ -156,9 +124,7 @@ npm run tauri build   # 生產建置
 │  └── 偏好設定 + 加密機密           │
 ├────────────────────────────────────┤
 │  外部服務 (可選)                   │
-│  ├── Supabase (排行榜 + 聊天)      │
-│  ├── Discord / Slack / Telegram    │
-│  └── Gemini / OpenAI / Anthropic   │
+│  └── Discord / Slack / Telegram    │
 └────────────────────────────────────┘
 ```
 

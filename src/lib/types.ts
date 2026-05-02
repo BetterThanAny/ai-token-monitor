@@ -120,13 +120,9 @@ export interface ClientUsage {
 
 export type LimitStatus = "ok" | "warning" | "critical" | "exhausted" | "unknown";
 
-export type LeaderboardProvider = "claude" | "codex";
-
 export interface UserPreferences {
   number_format: "compact" | "full";
   show_tray_cost: boolean;
-  leaderboard_opted_in: boolean;
-  device_id?: string;
   include_claude: boolean;
   include_codex: boolean;
   theme: "github" | "purple" | "ocean" | "sunset";
@@ -148,7 +144,6 @@ export interface UserPreferences {
     webhook_telegram_bot_token?: string;
     webhook_telegram_chat_id?: string;
   };
-  ai_model?: string;
   webhook_config?: WebhookConfig;
   autostart_enabled: boolean;
   quick_action_items: string[];
