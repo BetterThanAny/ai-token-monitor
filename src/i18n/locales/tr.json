@@ -3,7 +3,7 @@
   "app.subtitle": "AI Kodlama Kullanım Takipçisi",
   "app.loading": "Yükleniyor...",
   "app.error.title": "Kullanım istatistiği bulunamadı",
-  "app.error.description": "Claude Code, Codex veya OpenCode'un en az bir kez kullanıldığından emin olun.",
+  "app.error.description": "Claude Code veya Codex'in en az bir kez kullanıldığından emin olun.",
 
   "tab.overview": "Genel Bakış",
   "tab.analytics": "Analitik",
@@ -13,9 +13,6 @@
   "sources.title": "Kaynaklar",
   "sources.claude": "Claude",
   "sources.codex": "Codex",
-  "sources.opencode": "OpenCode",
-  "sources.kimi": "Kimi",
-  "sources.glm": "GLM",
   "sources.summary.count": "{{total}} içinden {{active}} aktif",
   "sources.open": "Kaynak menüsünü aç",
 

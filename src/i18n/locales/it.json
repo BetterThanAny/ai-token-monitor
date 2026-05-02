@@ -3,7 +3,7 @@
   "app.subtitle": "Monitoraggio utilizzo AI",
   "app.loading": "Caricamento...",
   "app.error.title": "Nessuna statistica trovata",
-  "app.error.description": "Assicurati che Claude Code, Codex o OpenCode sia stato usato almeno una volta.",
+  "app.error.description": "Assicurati che Claude Code o Codex sia stato usato almeno una volta.",
 
   "tab.overview": "Panoramica",
   "tab.analytics": "Statistiche",
@@ -13,9 +13,6 @@
   "sources.title": "Fonti",
   "sources.claude": "Claude",
   "sources.codex": "Codex",
-  "sources.opencode": "OpenCode",
-  "sources.kimi": "Kimi",
-  "sources.glm": "GLM",
   "sources.summary.count": "{{active}} di {{total}} attive",
   "sources.open": "Apri menu sorgenti",
 

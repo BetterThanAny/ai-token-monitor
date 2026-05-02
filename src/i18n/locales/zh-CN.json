@@ -3,7 +3,7 @@
   "app.subtitle": "AI编程使用量追踪器",
   "app.loading": "加载中...",
   "app.error.title": "未找到使用统计",
-  "app.error.description": "请确保已安装Claude Code、Codex或OpenCode，并已使用至少一次。",
+  "app.error.description": "请确保已安装 Claude Code 或 Codex，并已使用至少一次。",
 
   "tab.overview": "概览",
   "tab.analytics": "分析",
@@ -13,9 +13,6 @@
   "sources.title": "来源",
   "sources.claude": "Claude",
   "sources.codex": "Codex",
-  "sources.opencode": "OpenCode",
-  "sources.kimi": "Kimi",
-  "sources.glm": "GLM",
   "sources.summary.count": "{{total}} 个中 {{active}} 个启用",
   "sources.open": "打开来源菜单",
 

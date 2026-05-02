@@ -5,7 +5,7 @@
 
 > **[English](../README.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Türkçe](README.tr.md) | [Italiano](README.it.md)**
 
-macOS / Windows 시스템 트레이에서 **Claude Code**, **Codex**, **OpenCode**의 토큰 사용량·비용·활동을 실시간으로 추적하는 앱입니다. 리더보드, 채팅, 웹훅 알림까지 한 화면에서 확인할 수 있습니다.
+macOS / Windows 시스템 트레이에서 **Claude Code** 및 **Codex**의 토큰 사용량·비용·활동을 실시간으로 추적하는 앱입니다. 리더보드, 채팅, 웹훅 알림까지 한 화면에서 확인할 수 있습니다.
 
 | Overview | Analytics | Leaderboard |
 |:---:|:---:|:---:|
@@ -24,8 +24,8 @@ macOS / Windows 시스템 트레이에서 **Claude Code**, **Codex**, **OpenCode
 ## 주요 기능
 
 ### 추적 & 시각화
-- **실시간 토큰 추적** — Claude Code / Codex / OpenCode 세션 JSONL 파일을 직접 파싱해 정확한 사용량 집계
-- **멀티 프로바이더** — Claude / Codex / OpenCode 간 자유 전환, 프로바이더별 가격 모델 적용
+- **실시간 토큰 추적** — Claude Code / Codex 세션 JSONL 파일을 직접 파싱해 정확한 사용량 집계
+- **멀티 프로바이더** — Claude / Codex 간 자유 전환, 프로바이더별 가격 모델 적용
 - **여러 설정 디렉토리** — 업무/개인 계정을 동시에 합산하도록 Claude/Codex 루트 경로를 여러 개 등록
 - **일별 차트** — 7/30일 토큰 사용량 또는 비용 바 차트 (Y축 레이블 포함)
 - **활동 그래프** — GitHub 스타일 컨트리뷰션 히트맵 (2D/3D 토글, 연도 네비게이션)
@@ -64,7 +64,7 @@ macOS / Windows 시스템 트레이에서 **Claude Code**, **Codex**, **OpenCode
 - [Node.js](https://nodejs.org/) 18+
 - [Rust](https://rustup.rs/) 툴체인
 - [Tauri CLI v2](https://v2.tauri.app/start/prerequisites/)
-- [Claude Code](https://claude.ai/claude-code), [Codex](https://openai.com/index/introducing-codex/), 또는 [OpenCode](https://opencode.ai) 중 하나 이상이 설치되어 있고 최소 1회 이상 사용한 상태
+- [Claude Code](https://claude.ai/claude-code) 또는 [Codex](https://openai.com/index/introducing-codex/) 중 하나 이상이 설치되어 있고 최소 1회 이상 사용한 상태
 
 ### 빌드
 
@@ -128,7 +128,6 @@ npm run tauri build   # 프로덕션 빌드
 |-----------|------|------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | `~/.claude/stats-cache.json`에서 세션/툴 호출 수 보조. 여러 루트 지원. |
 | **Codex** | `~/.codex/sessions/**/*.jsonl` | 여러 루트 지원. |
-| **OpenCode** | `~/.local/share/opencode/**/*.jsonl` | 내장 가격 레지스트리 기반 모델별 비용 계산. |
 
 **네트워크 요청**: 리더보드/채팅 opt-in 시 Supabase로 집계 데이터 전송, 웹훅 발화 시 외부 전송. 이 기능을 쓰지 않으면 앱은 완전히 오프라인으로 동작합니다. AI 번역 키를 설정한 경우에만 해당 프로바이더로 직접 요청이 전송됩니다.
 
@@ -149,7 +148,7 @@ npm run tauri build   # 프로덕션 빌드
 │  └── SettingsOverlay (4탭)         │
 ├────────────────────────────────────┤
 │  Backend (Tauri v2 / Rust)         │
-│  ├── JSONL 세션 파서 (Claude/Codex/OpenCode)│
+│  ├── JSONL 세션 파서 (Claude/Codex)│
 │  ├── 파일 감시 (notify)            │
 │  ├── 트레이 아이콘 + 비용 표시     │
 │  ├── 자동 업데이터                 │

@@ -5,52 +5,37 @@ import type { AllStats, DailyUsage, ModelUsage } from "../lib/types";
 interface UseCombinedStatsProps {
   includeClaude: boolean;
   includeCodex: boolean;
-  includeOpencode: boolean;
-  includeKimi: boolean;
-  includeGlm: boolean;
 }
 
-export function useCombinedStats({ includeClaude, includeCodex, includeOpencode, includeKimi, includeGlm }: UseCombinedStatsProps) {
+export function useCombinedStats({ includeClaude, includeCodex }: UseCombinedStatsProps) {
   const claude = useTokenStats("claude", includeClaude);
   const codex = useTokenStats("codex", includeCodex);
-  const opencode = useTokenStats("opencode", includeOpencode);
-  const kimi = useTokenStats("kimi", includeKimi);
-  const glm = useTokenStats("glm", includeGlm);
 
   const stats = useMemo<AllStats | null>(() => {
     const sources: (AllStats | null)[] = [];
     if (includeClaude) sources.push(claude.stats);
     if (includeCodex) sources.push(codex.stats);
-    if (includeOpencode) sources.push(opencode.stats);
-    if (includeKimi) sources.push(kimi.stats);
-    if (includeGlm) sources.push(glm.stats);
 
     const validStats = sources.filter((s): s is AllStats => s !== null);
     if (validStats.length === 0) {
       if (includeClaude) return claude.stats;
       if (includeCodex) return codex.stats;
-      if (includeOpencode) return opencode.stats;
-      if (includeKimi) return kimi.stats;
-      if (includeGlm) return glm.stats;
       return null;
     }
     if (validStats.length === 1) return validStats[0];
 
     return mergeStats(validStats);
-  }, [claude.stats, codex.stats, opencode.stats, kimi.stats, glm.stats, includeClaude, includeCodex, includeOpencode, includeKimi, includeGlm]);
+  }, [claude.stats, codex.stats, includeClaude, includeCodex]);
 
-  const loading = (includeClaude && claude.loading) || (includeCodex && codex.loading) || (includeOpencode && opencode.loading) || (includeKimi && kimi.loading) || (includeGlm && glm.loading);
+  const loading = (includeClaude && claude.loading) || (includeCodex && codex.loading);
   const error = useMemo(() => {
     if (stats) return null;
 
     if (includeClaude && claude.error) return claude.error;
     if (includeCodex && codex.error) return codex.error;
-    if (includeOpencode && opencode.error) return opencode.error;
-    if (includeKimi && kimi.error) return kimi.error;
-    if (includeGlm && glm.error) return glm.error;
 
     return null;
-  }, [stats, includeClaude, includeCodex, includeOpencode, includeKimi, includeGlm, claude.error, codex.error, opencode.error, kimi.error, glm.error]);
+  }, [stats, includeClaude, includeCodex, claude.error, codex.error]);
 
   return { stats, loading, error };
 }

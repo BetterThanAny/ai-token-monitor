@@ -5,10 +5,7 @@ import { useI18n } from "../i18n/I18nContext";
 
 type SourceKey =
   | "include_claude"
-  | "include_codex"
-  | "include_opencode"
-  | "include_kimi"
-  | "include_glm";
+  | "include_codex";
 
 interface SourceDef {
   key: SourceKey;
@@ -20,9 +17,6 @@ export function SourceSelector() {
   const { prefs, updatePrefs } = useSettings();
   const t = useI18n();
   const [codexAvailable, setCodexAvailable] = useState(false);
-  const [opencodeAvailable, setOpencodeAvailable] = useState(false);
-  const [kimiAvailable, setKimiAvailable] = useState(false);
-  const [glmAvailable, setGlmAvailable] = useState(false);
   const [availabilityLoaded, setAvailabilityLoaded] = useState(false);
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -30,32 +24,19 @@ export function SourceSelector() {
   useEffect(() => {
     Promise.all([
       invoke<boolean>("is_codex_available").catch(() => false),
-      invoke<boolean>("is_opencode_available").catch(() => false),
-      invoke<boolean>("is_kimi_available").catch(() => false),
-      invoke<boolean>("is_glm_available").catch(() => false),
-    ]).then(([codex, opencode, kimi, glm]) => {
+    ]).then(([codex]) => {
       setCodexAvailable(codex);
-      setOpencodeAvailable(opencode);
-      setKimiAvailable(kimi);
-      setGlmAvailable(glm);
       setAvailabilityLoaded(true);
     });
   }, []);
 
-  // Reconcile persisted prefs with current runtime availability. If a provider
-  // was toggled on before but is_*_available() now returns false (e.g. GLM was
-  // gated off, or a CLI was uninstalled), silently clear that flag so every
-  // downstream consumer (Leaderboard tabs, uploaders, combined stats) sees a
-  // single source of truth via prefs alone.
+  // Reconcile persisted prefs with current runtime availability.
   useEffect(() => {
     if (!availabilityLoaded) return;
     const patch: Partial<typeof prefs> = {};
     if (prefs.include_codex && !codexAvailable) patch.include_codex = false;
-    if (prefs.include_opencode && !opencodeAvailable) patch.include_opencode = false;
-    if (prefs.include_kimi && !kimiAvailable) patch.include_kimi = false;
-    if (prefs.include_glm && !glmAvailable) patch.include_glm = false;
     if (Object.keys(patch).length > 0) updatePrefs(patch);
-  }, [availabilityLoaded, codexAvailable, opencodeAvailable, kimiAvailable, glmAvailable, prefs.include_codex, prefs.include_opencode, prefs.include_kimi, prefs.include_glm, updatePrefs]);
+  }, [availabilityLoaded, codexAvailable, prefs.include_codex, updatePrefs]);
 
   useEffect(() => {
     if (!open) return;
@@ -82,10 +63,7 @@ export function SourceSelector() {
   const sources: SourceDef[] = useMemo(() => [
     { key: "include_claude", label: t("sources.claude"), available: true },
     { key: "include_codex", label: t("sources.codex"), available: codexAvailable },
-    { key: "include_opencode", label: t("sources.opencode"), available: opencodeAvailable },
-    { key: "include_kimi", label: t("sources.kimi"), available: kimiAvailable },
-    { key: "include_glm", label: t("sources.glm"), available: glmAvailable },
-  ], [t, codexAvailable, opencodeAvailable, kimiAvailable, glmAvailable]);
+  ], [t, codexAvailable]);
 
   const visibleSources = sources.filter((s) => s.available);
   const totalCount = visibleSources.length;

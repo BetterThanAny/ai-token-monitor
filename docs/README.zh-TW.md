@@ -5,7 +5,7 @@
 
 > **[English](../README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Türkçe](README.tr.md) | [Italiano](README.it.md)**
 
-一款 macOS 和 Windows 系統托盤應用,可即時追蹤 **Claude Code**、**Codex** 和 **OpenCode** 的權杖使用量、費用與活動,並內建排行榜、聊天與 Webhook 提醒。
+一款 macOS 和 Windows 系統托盤應用,可即時追蹤 **Claude Code** 和 **Codex** 的權杖使用量、費用與活動,並內建排行榜、聊天與 Webhook 提醒。
 
 | 總覽 | 分析 | 排行榜 |
 |:---:|:---:|:---:|
@@ -24,8 +24,8 @@
 ## 主要功能
 
 ### 追蹤與視覺化
-- **即時權杖追蹤** — 直接解析 Claude Code / Codex / OpenCode 的工作階段 JSONL 檔案,準確統計使用量
-- **多供應商支援** — 可在 Claude / Codex / OpenCode 之間切換,各供應商採用獨立價格模型
+- **即時權杖追蹤** — 直接解析 Claude Code / Codex 的工作階段 JSONL 檔案,準確統計使用量
+- **多供應商支援** — 可在 Claude / Codex 之間切換,各供應商採用獨立價格模型
 - **多設定目錄** — 可同時新增多個 Claude/Codex 根目錄,彙總工作與個人帳號使用量
 - **每日圖表** — 7/30 天權杖或費用柱狀圖(含 Y 軸標籤)
 - **活動圖** — GitHub 風格貢獻熱力圖(支援 2D/3D 切換與按年瀏覽)
@@ -64,7 +64,7 @@
 - [Node.js](https://nodejs.org/) 18+
 - [Rust](https://rustup.rs/) 工具鏈
 - [Tauri CLI v2](https://v2.tauri.app/start/prerequisites/)
-- 已安裝 [Claude Code](https://claude.ai/claude-code)、[Codex](https://openai.com/index/introducing-codex/) 或 [OpenCode](https://opencode.ai) 其中至少一個,且至少使用過一次
+- 已安裝 [Claude Code](https://claude.ai/claude-code) 或 [Codex](https://openai.com/index/introducing-codex/) 其中至少一個,且至少使用過一次
 
 ### 建置
 
@@ -128,7 +128,6 @@ npm run tauri build   # 生產建置
 |--------|------|------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | 從 `~/.claude/stats-cache.json` 補充工作階段/工具呼叫數。支援多個根目錄。 |
 | **Codex** | `~/.codex/sessions/**/*.jsonl` | 支援多個根目錄。 |
-| **OpenCode** | `~/.local/share/opencode/**/*.jsonl` | 內建價格資料按模型計算費用。 |
 
 **網路請求**:僅在啟用排行榜/聊天時(向 Supabase 傳送彙總資料)或 Webhook 觸發時才會發起網路請求。未使用這些功能時,應用完全離線運作。設定 AI 翻譯金鑰後,才會直接向對應供應商傳送請求。
 
@@ -149,7 +148,7 @@ npm run tauri build   # 生產建置
 │  └── SettingsOverlay (4 分頁)      │
 ├────────────────────────────────────┤
 │  後端 (Tauri v2 / Rust)            │
-│  ├── JSONL 工作階段解析器 (Claude/Codex/OpenCode)│
+│  ├── JSONL 工作階段解析器 (Claude/Codex)│
 │  ├── 檔案監視 (notify)             │
 │  ├── 托盤圖示 + 費用顯示           │
 │  ├── 自動更新器                    │

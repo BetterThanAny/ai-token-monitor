@@ -5,7 +5,7 @@
 
 > **[English](../README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [繁體中文](README.zh-TW.md) | [Türkçe](README.tr.md) | [Italiano](README.it.md)**
 
-一款 macOS 和 Windows 系统托盘应用,可实时追踪 **Claude Code**、**Codex** 和 **OpenCode** 的令牌使用量、费用和活动,并内置排行榜、聊天和 Webhook 提醒。
+一款 macOS 和 Windows 系统托盘应用,可实时追踪 **Claude Code** 和 **Codex** 的令牌使用量、费用和活动,并内置排行榜、聊天和 Webhook 提醒。
 
 | 概览 | 分析 | 排行榜 |
 |:---:|:---:|:---:|
@@ -24,8 +24,8 @@
 ## 主要功能
 
 ### 追踪与可视化
-- **实时令牌追踪** — 直接解析 Claude Code / Codex / OpenCode 的会话 JSONL 文件,准确统计使用量
-- **多提供商支持** — 在 Claude / Codex / OpenCode 之间切换,每个提供商使用独立的价格模型
+- **实时令牌追踪** — 直接解析 Claude Code / Codex 的会话 JSONL 文件,准确统计使用量
+- **多提供商支持** — 在 Claude / Codex 之间切换,每个提供商使用独立的价格模型
 - **多配置目录** — 可同时添加多个 Claude/Codex 根目录,聚合工作与个人帐号的使用量
 - **日图表** — 7/30 天令牌或费用柱状图(含 Y 轴标签)
 - **活动图** — GitHub 风格贡献热力图(支持 2D/3D 切换与按年浏览)
@@ -64,7 +64,7 @@
 - [Node.js](https://nodejs.org/) 18+
 - [Rust](https://rustup.rs/) 工具链
 - [Tauri CLI v2](https://v2.tauri.app/start/prerequisites/)
-- 已安装 [Claude Code](https://claude.ai/claude-code)、[Codex](https://openai.com/index/introducing-codex/) 或 [OpenCode](https://opencode.ai) 中至少一个,并且至少使用过一次
+- 已安装 [Claude Code](https://claude.ai/claude-code) 或 [Codex](https://openai.com/index/introducing-codex/) 中至少一个,并且至少使用过一次
 
 ### 构建
 
@@ -128,7 +128,6 @@ npm run tauri build   # 生产构建
 |--------|------|------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | 从 `~/.claude/stats-cache.json` 补充会话/工具调用数。支持多根目录。 |
 | **Codex** | `~/.codex/sessions/**/*.jsonl` | 支持多根目录。 |
-| **OpenCode** | `~/.local/share/opencode/**/*.jsonl` | 内置价格注册表按模型计算费用。 |
 
 **网络请求**:仅在开启排行榜/聊天时(向 Supabase 发送汇总数据)或 Webhook 触发时才会发起网络请求。不使用这些功能时,应用完全离线运行。配置 AI 翻译密钥后,才会直接向相应提供商发送请求。
 
@@ -149,7 +148,7 @@ npm run tauri build   # 生产构建
 │  └── SettingsOverlay (4 标签)      │
 ├────────────────────────────────────┤
 │  后端 (Tauri v2 / Rust)            │
-│  ├── JSONL 会话解析器 (Claude/Codex/OpenCode)│
+│  ├── JSONL 会话解析器 (Claude/Codex)│
 │  ├── 文件监视 (notify)             │
 │  ├── 托盘图标 + 费用显示           │
 │  ├── 自动更新器                    │

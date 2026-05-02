@@ -1,17 +1,20 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
 use super::traits::TokenProvider;
-use super::types::{ActivityCategory, AllStats, AnalyticsData, DailyUsage, McpServerUsage, ModelUsage, ProjectUsage, ToolCount};
+use super::types::{
+    ActivityCategory, AllStats, AnalyticsData, DailyUsage, McpServerUsage, ModelUsage,
+    ProjectUsage, ToolCount,
+};
 
 /// Unified incremental cache: stats + per-file metadata for mtime-based change detection.
 struct IncrementalCache {
@@ -29,6 +32,14 @@ static CACHE_INVALIDATED: AtomicBool = AtomicBool::new(false);
 static CONFIG_DIRS_HASH: Mutex<u64> = Mutex::new(0);
 const CACHE_TTL: Duration = Duration::from_secs(120);
 
+fn pricing_for_entry(entry: &SessionEntry) -> pricing::ClaudePricing {
+    pricing::get_claude_pricing_for_speed(
+        &entry.model,
+        entry.speed.as_deref(),
+        entry.service_tier.as_deref(),
+    )
+}
+
 /// Invalidate the stats cache so the next fetch re-checks file metadata.
 /// Called by the file watcher when JSONL/JSON changes are detected.
 pub fn invalidate_stats_cache() {
@@ -45,8 +56,11 @@ use super::pricing;
 
 fn calculate_cost(
     pricing: &pricing::ClaudePricing,
-    input: u64, output: u64, cache_read: u64,
-    cache_write_5m: u64, cache_write_1h: u64,
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_write_5m: u64,
+    cache_write_1h: u64,
     web_search_requests: u32,
 ) -> f64 {
     (input as f64 / 1_000_000.0) * pricing.input
@@ -63,7 +77,8 @@ fn calculate_cost(
 /// v1 (missing/0): dates stored as UTC strings (bug)
 /// v2: dates stored as local-timezone strings (correct)
 /// v3: total_tokens now includes cache tokens; cache TTL-aware cost calculation
-const CACHE_VERSION: u32 = 4;
+/// v5: Claude fast-mode pricing is included in stored historical cost data
+const CACHE_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DiskCache {
@@ -159,7 +174,10 @@ impl ClaudeCodeProvider {
             all_dirs.insert(0, primary.clone());
         }
 
-        Self { primary_dir: primary, all_dirs }
+        Self {
+            primary_dir: primary,
+            all_dirs,
+        }
     }
 
     /// Collect current file metadata (mtime, size) for all JSONL files across all config dirs.
@@ -167,7 +185,11 @@ impl ClaudeCodeProvider {
         let mut meta = HashMap::new();
         for claude_dir in &self.all_dirs {
             let projects_dir = claude_dir.join("projects");
-            let pattern = projects_dir.join("**").join("*.jsonl").to_string_lossy().to_string();
+            let pattern = projects_dir
+                .join("**")
+                .join("*.jsonl")
+                .to_string_lossy()
+                .to_string();
             let files = glob::glob(&pattern).unwrap_or_else(|_| glob::glob("").unwrap());
             for path in files.flatten() {
                 if let Ok(m) = fs::metadata(&path) {
@@ -205,8 +227,11 @@ impl ClaudeCodeProvider {
         let mut changed_files: Vec<&PathBuf> = Vec::new();
         for (path, (mtime, size)) in current_meta {
             match cached_meta.get(path) {
-                Some((cached_mtime, cached_size)) if cached_mtime == mtime && cached_size == size => {}
-                _ => { changed_files.push(path); }
+                Some((cached_mtime, cached_size))
+                    if cached_mtime == mtime && cached_size == size => {}
+                _ => {
+                    changed_files.push(path);
+                }
             }
         }
 
@@ -229,7 +254,9 @@ impl ClaudeCodeProvider {
             }
             eprintln!(
                 "[PERF] Incremental parse: {} changed files in {:?} (total {} files)",
-                changed_count, start.elapsed(), current_meta.len()
+                changed_count,
+                start.elapsed(),
+                current_meta.len()
             );
         }
 
@@ -250,21 +277,35 @@ impl ClaudeCodeProvider {
                 first_date = Some(entry.date.clone());
             }
 
-            let pricing = pricing::get_claude_pricing(&entry.model);
+            let pricing = pricing_for_entry(entry);
             let cost = calculate_cost(
-                &pricing, entry.input_tokens, entry.output_tokens,
+                &pricing,
+                entry.input_tokens,
+                entry.output_tokens,
                 entry.cache_read_input_tokens,
-                entry.cache_creation_5m_tokens, entry.cache_creation_1h_tokens,
+                entry.cache_creation_5m_tokens,
+                entry.cache_creation_1h_tokens,
                 entry.web_search_requests,
             );
-            let total_tokens = entry.input_tokens + entry.output_tokens
-                + entry.cache_read_input_tokens + entry.cache_creation_input_tokens;
+            let total_tokens = entry.input_tokens
+                + entry.output_tokens
+                + entry.cache_read_input_tokens
+                + entry.cache_creation_input_tokens;
 
-            let daily = daily_map.entry(entry.date.clone()).or_insert_with(|| DailyUsage {
-                date: entry.date.clone(), tokens: HashMap::new(), cost_usd: 0.0,
-                messages: 0, sessions: 0, tool_calls: 0,
-                input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
-            });
+            let daily = daily_map
+                .entry(entry.date.clone())
+                .or_insert_with(|| DailyUsage {
+                    date: entry.date.clone(),
+                    tokens: HashMap::new(),
+                    cost_usd: 0.0,
+                    messages: 0,
+                    sessions: 0,
+                    tool_calls: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                });
             *daily.tokens.entry(entry.model.clone()).or_insert(0) += total_tokens;
             daily.cost_usd += cost;
             daily.messages += 1;
@@ -277,9 +318,15 @@ impl ClaudeCodeProvider {
                 // session_id tracking is only used for counting here
             }
 
-            let mu = model_usage_map.entry(entry.model.clone()).or_insert_with(|| ModelUsage {
-                input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0, cost_usd: 0.0,
-            });
+            let mu = model_usage_map
+                .entry(entry.model.clone())
+                .or_insert_with(|| ModelUsage {
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_read: 0,
+                    cache_write: 0,
+                    cost_usd: 0.0,
+                });
             mu.input_tokens += entry.input_tokens;
             mu.output_tokens += entry.output_tokens;
             mu.cache_read += entry.cache_read_input_tokens;
@@ -298,8 +345,10 @@ impl ClaudeCodeProvider {
         }
 
         // Merge with disk cache for historical months
-        let disk_cache = load_disk_cache(&self.primary_dir)
-            .unwrap_or(DiskCache { version: CACHE_VERSION, months: HashMap::new() });
+        let disk_cache = load_disk_cache(&self.primary_dir).unwrap_or(DiskCache {
+            version: CACHE_VERSION,
+            months: HashMap::new(),
+        });
         for month_data in disk_cache.months.values() {
             total_messages += month_data.total_messages;
             for d in &month_data.daily {
@@ -309,9 +358,15 @@ impl ClaudeCodeProvider {
                 daily_map.entry(d.date.clone()).or_insert_with(|| d.clone());
             }
             for (model, mu) in &month_data.model_usage {
-                let existing = model_usage_map.entry(model.clone()).or_insert_with(|| ModelUsage {
-                    input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0, cost_usd: 0.0,
-                });
+                let existing = model_usage_map
+                    .entry(model.clone())
+                    .or_insert_with(|| ModelUsage {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cache_read: 0,
+                        cache_write: 0,
+                        cost_usd: 0.0,
+                    });
                 existing.input_tokens += mu.input_tokens;
                 existing.output_tokens += mu.output_tokens;
                 existing.cache_read += mu.cache_read;
@@ -344,7 +399,6 @@ impl ClaudeCodeProvider {
         serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse stats-cache.json: {}", e))
     }
-
 }
 
 #[derive(Clone)]
@@ -361,6 +415,8 @@ struct SessionEntry {
     cache_creation_input_tokens: u64,
     cache_creation_5m_tokens: u64,
     cache_creation_1h_tokens: u64,
+    speed: Option<String>,
+    service_tier: Option<String>,
     web_search_requests: u32,
     // Analytics fields
     cwd: String,
@@ -382,13 +438,19 @@ fn extract_bash_commands(command: &str) -> Vec<String> {
             for or_part in and_part.split("||") {
                 for segment in or_part.split('|') {
                     let trimmed = segment.trim();
-                    if trimmed.is_empty() { continue; }
+                    if trimmed.is_empty() {
+                        continue;
+                    }
                     // Strip leading & (background operator remnant)
                     let trimmed = trimmed.trim_start_matches('&').trim();
-                    if trimmed.is_empty() { continue; }
+                    if trimmed.is_empty() {
+                        continue;
+                    }
                     // Take first token (the command name)
                     let first_token = trimmed.split_whitespace().next().unwrap_or("");
-                    if first_token.is_empty() { continue; }
+                    if first_token.is_empty() {
+                        continue;
+                    }
                     // Extract basename (after last '/')
                     let basename = first_token.rsplit('/').next().unwrap_or(first_token);
                     // Skip cd and empty tokens
@@ -426,7 +488,10 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
     let date = {
         use chrono::{DateTime, Utc};
         if let Ok(utc_dt) = timestamp.parse::<DateTime<Utc>>() {
-            utc_dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()
+            utc_dt
+                .with_timezone(&chrono::Local)
+                .format("%Y-%m-%d")
+                .to_string()
         } else {
             timestamp.get(..10)?.to_string()
         }
@@ -439,39 +504,82 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
         return None;
     }
 
-    let session_id = value.get("sessionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let message_id = message.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let request_id = value.get("requestId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let session_id = value
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let message_id = message
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let request_id = value
+        .get("requestId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    let input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let cache_read_input_tokens = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let cache_read_input_tokens = usage
+        .get("cache_read_input_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let speed = usage
+        .get("speed")
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string);
+    let service_tier = usage
+        .get("service_tier")
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string);
 
     // Parse cache TTL-specific fields (newer API format)
-    let cache_creation_5m = usage.pointer("/cache_creation/ephemeral_5m_input_tokens")
-        .and_then(|v| v.as_u64()).unwrap_or(0);
-    let cache_creation_1h = usage.pointer("/cache_creation/ephemeral_1h_input_tokens")
-        .and_then(|v| v.as_u64()).unwrap_or(0);
+    let cache_creation_5m = usage
+        .pointer("/cache_creation/ephemeral_5m_input_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let cache_creation_1h = usage
+        .pointer("/cache_creation/ephemeral_1h_input_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
 
     // Fallback to flat field when TTL-specific fields are absent (older API format)
     let cache_creation_input_tokens = if cache_creation_5m > 0 || cache_creation_1h > 0 {
         cache_creation_5m + cache_creation_1h
     } else {
-        usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+        usage
+            .get("cache_creation_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
     };
     // When only the flat field is available, treat all as 5m (the original default TTL)
-    let (cache_creation_5m_tokens, cache_creation_1h_tokens) = if cache_creation_5m > 0 || cache_creation_1h > 0 {
-        (cache_creation_5m, cache_creation_1h)
-    } else {
-        (cache_creation_input_tokens, 0)
-    };
+    let (cache_creation_5m_tokens, cache_creation_1h_tokens) =
+        if cache_creation_5m > 0 || cache_creation_1h > 0 {
+            (cache_creation_5m, cache_creation_1h)
+        } else {
+            (cache_creation_input_tokens, 0)
+        };
 
     // Parse web search requests
-    let web_search_requests = usage.pointer("/server_tool_use/web_search_requests")
-        .and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let web_search_requests = usage
+        .pointer("/server_tool_use/web_search_requests")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
 
     // Extract cwd (project path)
-    let cwd = value.get("cwd").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let cwd = value
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     // Extract tool names and bash commands from content blocks
     let mut tool_names: Vec<String> = Vec::new();
@@ -483,7 +591,8 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
                     tool_names.push(name.to_string());
                     // Extract individual commands from Bash tool_use
                     if name == "Bash" {
-                        if let Some(cmd) = block.pointer("/input/command").and_then(|c| c.as_str()) {
+                        if let Some(cmd) = block.pointer("/input/command").and_then(|c| c.as_str())
+                        {
                             for part in extract_bash_commands(cmd) {
                                 bash_commands.push(part);
                             }
@@ -495,10 +604,24 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
     }
 
     Some(SessionEntry {
-        date, timestamp: timestamp.to_string(), model, session_id, message_id, request_id,
-        input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens,
-        cache_creation_5m_tokens, cache_creation_1h_tokens, web_search_requests,
-        cwd, tool_names, bash_commands,
+        date,
+        timestamp: timestamp.to_string(),
+        model,
+        session_id,
+        message_id,
+        request_id,
+        input_tokens,
+        output_tokens,
+        cache_read_input_tokens,
+        cache_creation_input_tokens,
+        cache_creation_5m_tokens,
+        cache_creation_1h_tokens,
+        speed,
+        service_tier,
+        web_search_requests,
+        cwd,
+        tool_names,
+        bash_commands,
     })
 }
 
@@ -525,20 +648,35 @@ fn build_analytics(entries: &HashMap<String, SessionEntry>) -> AnalyticsData {
     for entry in entries.values() {
         // Project usage — derive project name from cwd
         if !entry.cwd.is_empty() {
-            let project_name = entry.cwd.rsplit('/').next().unwrap_or(&entry.cwd).to_string();
-            let pricing = pricing::get_claude_pricing(&entry.model);
+            let project_name = entry
+                .cwd
+                .rsplit('/')
+                .next()
+                .unwrap_or(&entry.cwd)
+                .to_string();
+            let pricing = pricing_for_entry(entry);
             let cost = calculate_cost(
-                &pricing, entry.input_tokens, entry.output_tokens,
+                &pricing,
+                entry.input_tokens,
+                entry.output_tokens,
                 entry.cache_read_input_tokens,
-                entry.cache_creation_5m_tokens, entry.cache_creation_1h_tokens,
+                entry.cache_creation_5m_tokens,
+                entry.cache_creation_1h_tokens,
                 entry.web_search_requests,
             );
-            let total_tokens = entry.input_tokens + entry.output_tokens
-                + entry.cache_read_input_tokens + entry.cache_creation_input_tokens;
+            let total_tokens = entry.input_tokens
+                + entry.output_tokens
+                + entry.cache_read_input_tokens
+                + entry.cache_creation_input_tokens;
 
-            let acc = project_map.entry(project_name).or_insert_with(|| ProjectAcc {
-                cost_usd: 0.0, tokens: 0, sessions: HashSet::new(), messages: 0,
-            });
+            let acc = project_map
+                .entry(project_name)
+                .or_insert_with(|| ProjectAcc {
+                    cost_usd: 0.0,
+                    tokens: 0,
+                    sessions: HashSet::new(),
+                    messages: 0,
+                });
             acc.cost_usd += cost;
             acc.tokens += total_tokens;
             acc.messages += 1;
@@ -567,62 +705,99 @@ fn build_analytics(entries: &HashMap<String, SessionEntry>) -> AnalyticsData {
 
         // Activity classification (tool-pattern based)
         let category = classify_activity(&entry.tool_names, &entry.bash_commands);
-        let pricing = pricing::get_claude_pricing(&entry.model);
+        let pricing = pricing_for_entry(entry);
         let entry_cost = calculate_cost(
-            &pricing, entry.input_tokens, entry.output_tokens,
+            &pricing,
+            entry.input_tokens,
+            entry.output_tokens,
             entry.cache_read_input_tokens,
-            entry.cache_creation_5m_tokens, entry.cache_creation_1h_tokens,
+            entry.cache_creation_5m_tokens,
+            entry.cache_creation_1h_tokens,
             entry.web_search_requests,
         );
         let acc = activity_map.entry(category).or_insert_with(|| ActivityAcc {
-            cost_usd: 0.0, messages: 0,
+            cost_usd: 0.0,
+            messages: 0,
         });
         acc.cost_usd += entry_cost;
         acc.messages += 1;
     }
 
     // Convert to sorted Vecs
-    let mut project_usage: Vec<ProjectUsage> = project_map.into_iter()
+    let mut project_usage: Vec<ProjectUsage> = project_map
+        .into_iter()
         .map(|(name, acc)| ProjectUsage {
-            name, cost_usd: acc.cost_usd, tokens: acc.tokens,
-            sessions: acc.sessions.len() as u32, messages: acc.messages,
+            name,
+            cost_usd: acc.cost_usd,
+            tokens: acc.tokens,
+            sessions: acc.sessions.len() as u32,
+            messages: acc.messages,
         })
         .collect();
-    project_usage.sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal));
+    project_usage.sort_by(|a, b| {
+        b.cost_usd
+            .partial_cmp(&a.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    let mut tool_usage: Vec<ToolCount> = tool_map.into_iter()
+    let mut tool_usage: Vec<ToolCount> = tool_map
+        .into_iter()
         .map(|(name, count)| ToolCount { name, count })
         .collect();
     tool_usage.sort_by(|a, b| b.count.cmp(&a.count));
 
-    let mut shell_commands: Vec<ToolCount> = shell_map.into_iter()
+    let mut shell_commands: Vec<ToolCount> = shell_map
+        .into_iter()
         .map(|(name, count)| ToolCount { name, count })
         .collect();
     shell_commands.sort_by(|a, b| b.count.cmp(&a.count));
 
-    let mut mcp_usage: Vec<McpServerUsage> = mcp_map.into_iter()
+    let mut mcp_usage: Vec<McpServerUsage> = mcp_map
+        .into_iter()
         .map(|(server, calls)| McpServerUsage { server, calls })
         .collect();
     mcp_usage.sort_by(|a, b| b.calls.cmp(&a.calls));
 
-    let mut activity_breakdown: Vec<ActivityCategory> = activity_map.into_iter()
+    let mut activity_breakdown: Vec<ActivityCategory> = activity_map
+        .into_iter()
         .map(|(category, acc)| ActivityCategory {
-            category, cost_usd: acc.cost_usd, messages: acc.messages,
+            category,
+            cost_usd: acc.cost_usd,
+            messages: acc.messages,
         })
         .collect();
-    activity_breakdown.sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal));
+    activity_breakdown.sort_by(|a, b| {
+        b.cost_usd
+            .partial_cmp(&a.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    AnalyticsData { project_usage, tool_usage, shell_commands, mcp_usage, activity_breakdown }
+    AnalyticsData {
+        project_usage,
+        tool_usage,
+        shell_commands,
+        mcp_usage,
+        activity_breakdown,
+    }
 }
 
 /// Classify an assistant message into an activity category based on tool usage patterns.
 fn classify_activity(tool_names: &[String], bash_commands: &[String]) -> String {
     static EDIT_TOOLS: &[&str] = &["Edit", "Write", "NotebookEdit"];
     static READ_TOOLS: &[&str] = &["Read", "Grep", "Glob"];
-    static AGENT_TOOLS: &[&str] = &["Agent", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskOutput"];
+    static AGENT_TOOLS: &[&str] = &[
+        "Agent",
+        "TaskCreate",
+        "TaskUpdate",
+        "TaskGet",
+        "TaskList",
+        "TaskOutput",
+    ];
     static TEST_CMDS: &[&str] = &["pytest", "vitest", "jest", "mocha", "npx"];
     static GIT_CMDS: &[&str] = &["git"];
-    static BUILD_CMDS: &[&str] = &["docker", "make", "cargo", "npm", "yarn", "pnpm", "pip", "brew"];
+    static BUILD_CMDS: &[&str] = &[
+        "docker", "make", "cargo", "npm", "yarn", "pnpm", "pip", "brew",
+    ];
 
     if tool_names.is_empty() {
         return "Conversation".to_string();
@@ -632,35 +807,55 @@ fn classify_activity(tool_names: &[String], bash_commands: &[String]) -> String 
     let has_bash = tool_names.iter().any(|t| t == "Bash");
     let has_read = tool_names.iter().any(|t| READ_TOOLS.contains(&t.as_str()));
     let has_agent = tool_names.iter().any(|t| AGENT_TOOLS.contains(&t.as_str()));
-    let has_search = tool_names.iter().any(|t| t == "WebSearch" || t == "WebFetch");
+    let has_search = tool_names
+        .iter()
+        .any(|t| t == "WebSearch" || t == "WebFetch");
     let has_plan = tool_names.iter().any(|t| t == "ExitPlanMode");
 
     // Special cases first
-    if has_plan { return "Planning".to_string(); }
-    if has_agent { return "Delegation".to_string(); }
+    if has_plan {
+        return "Planning".to_string();
+    }
+    if has_agent {
+        return "Delegation".to_string();
+    }
 
     // Bash-only patterns (no edits)
     if has_bash && !has_edit {
-        if bash_commands.iter().any(|c| TEST_CMDS.contains(&c.as_str())) {
+        if bash_commands
+            .iter()
+            .any(|c| TEST_CMDS.contains(&c.as_str()))
+        {
             return "Testing".to_string();
         }
         if bash_commands.iter().any(|c| GIT_CMDS.contains(&c.as_str())) {
             return "Git Ops".to_string();
         }
-        if bash_commands.iter().any(|c| BUILD_CMDS.contains(&c.as_str())) {
+        if bash_commands
+            .iter()
+            .any(|c| BUILD_CMDS.contains(&c.as_str()))
+        {
             return "Build/Deploy".to_string();
         }
     }
 
     // Edit tools → Coding (most common)
-    if has_edit { return "Coding".to_string(); }
+    if has_edit {
+        return "Coding".to_string();
+    }
 
     // Read + Bash → Exploration
-    if has_bash && has_read { return "Exploration".to_string(); }
-    if has_bash { return "Exploration".to_string(); }
+    if has_bash && has_read {
+        return "Exploration".to_string();
+    }
+    if has_bash {
+        return "Exploration".to_string();
+    }
 
     // Search/read only
-    if has_search || has_read { return "Exploration".to_string(); }
+    if has_search || has_read {
+        return "Exploration".to_string();
+    }
 
     "Conversation".to_string()
 }
@@ -668,7 +863,12 @@ fn classify_activity(tool_names: &[String], bash_commands: &[String]) -> String 
 /// Aggregate session entries into daily and model maps (for disk cache building).
 fn aggregate_entries(
     entries: &[&SessionEntry],
-) -> (HashMap<String, DailyUsage>, HashMap<String, ModelUsage>, u32, Option<String>) {
+) -> (
+    HashMap<String, DailyUsage>,
+    HashMap<String, ModelUsage>,
+    u32,
+    Option<String>,
+) {
     let mut daily_map: HashMap<String, DailyUsage> = HashMap::new();
     let mut model_usage_map: HashMap<String, ModelUsage> = HashMap::new();
     let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
@@ -682,21 +882,35 @@ fn aggregate_entries(
             first_date = Some(entry.date.clone());
         }
 
-        let pricing = pricing::get_claude_pricing(&entry.model);
+        let pricing = pricing_for_entry(entry);
         let cost = calculate_cost(
-            &pricing, entry.input_tokens, entry.output_tokens,
+            &pricing,
+            entry.input_tokens,
+            entry.output_tokens,
             entry.cache_read_input_tokens,
-            entry.cache_creation_5m_tokens, entry.cache_creation_1h_tokens,
+            entry.cache_creation_5m_tokens,
+            entry.cache_creation_1h_tokens,
             entry.web_search_requests,
         );
-        let total_tokens = entry.input_tokens + entry.output_tokens
-            + entry.cache_read_input_tokens + entry.cache_creation_input_tokens;
+        let total_tokens = entry.input_tokens
+            + entry.output_tokens
+            + entry.cache_read_input_tokens
+            + entry.cache_creation_input_tokens;
 
-        let daily = daily_map.entry(entry.date.clone()).or_insert_with(|| DailyUsage {
-            date: entry.date.clone(), tokens: HashMap::new(), cost_usd: 0.0,
-            messages: 0, sessions: 0, tool_calls: 0,
-            input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
-        });
+        let daily = daily_map
+            .entry(entry.date.clone())
+            .or_insert_with(|| DailyUsage {
+                date: entry.date.clone(),
+                tokens: HashMap::new(),
+                cost_usd: 0.0,
+                messages: 0,
+                sessions: 0,
+                tool_calls: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+            });
         *daily.tokens.entry(entry.model.clone()).or_insert(0) += total_tokens;
         daily.cost_usd += cost;
         daily.messages += 1;
@@ -706,12 +920,21 @@ fn aggregate_entries(
         daily.cache_write_tokens += entry.cache_creation_input_tokens;
 
         if !entry.session_id.is_empty() {
-            daily_session_ids.entry(entry.date.clone()).or_default().insert(entry.session_id.clone());
+            daily_session_ids
+                .entry(entry.date.clone())
+                .or_default()
+                .insert(entry.session_id.clone());
         }
 
-        let mu = model_usage_map.entry(entry.model.clone()).or_insert_with(|| ModelUsage {
-            input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0, cost_usd: 0.0,
-        });
+        let mu = model_usage_map
+            .entry(entry.model.clone())
+            .or_insert_with(|| ModelUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read: 0,
+                cache_write: 0,
+                cost_usd: 0.0,
+            });
         mu.input_tokens += entry.input_tokens;
         mu.output_tokens += entry.output_tokens;
         mu.cache_read += entry.cache_read_input_tokens;
@@ -766,7 +989,10 @@ impl TokenProvider for ClaudeCodeProvider {
         }
 
         // Prevent thundering herd: if another thread is already parsing, return stale cache
-        if PARSING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        if PARSING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             if let Ok(cache) = STATS_CACHE.lock() {
                 if let Some(ref cached) = *cache {
                     return Ok(cached.stats.clone());
@@ -808,7 +1034,10 @@ impl ClaudeCodeProvider {
                             cached.computed_at = Instant::now();
                         }
                     }
-                    eprintln!("[PERF] No files changed, reusing cache ({:?})", start.elapsed());
+                    eprintln!(
+                        "[PERF] No files changed, reusing cache ({:?})",
+                        start.elapsed()
+                    );
                     if let Ok(cache) = STATS_CACHE.lock() {
                         if let Some(ref cached) = *cache {
                             return Ok(cached.stats.clone());
@@ -822,12 +1051,17 @@ impl ClaudeCodeProvider {
             } else {
                 // First run — full parse
                 drop(cache);
-                eprintln!("[PERF] First run, full parse of {} files...", current_meta.len());
+                eprintln!(
+                    "[PERF] First run, full parse of {} files...",
+                    current_meta.len()
+                );
                 let full_start = Instant::now();
 
                 // Check disk cache for historical months to speed up cold start
-                let mut disk_cache = load_disk_cache(&self.primary_dir)
-                    .unwrap_or(DiskCache { version: CACHE_VERSION, months: HashMap::new() });
+                let mut disk_cache = load_disk_cache(&self.primary_dir).unwrap_or(DiskCache {
+                    version: CACHE_VERSION,
+                    months: HashMap::new(),
+                });
                 let has_historical = !disk_cache.months.is_empty();
 
                 let current_month = current_month_str();
@@ -844,7 +1078,8 @@ impl ClaudeCodeProvider {
                     for (path, (_, _)) in &current_meta {
                         if let Ok(metadata) = fs::metadata(path) {
                             if let Ok(modified) = metadata.modified() {
-                                let modified_date: chrono::DateTime<chrono::Local> = modified.into();
+                                let modified_date: chrono::DateTime<chrono::Local> =
+                                    modified.into();
                                 let file_month = modified_date.format("%Y-%m").to_string();
                                 if file_month < current_month {
                                     continue;
@@ -877,11 +1112,14 @@ impl ClaudeCodeProvider {
                         for (month, month_data) in &month_buckets {
                             let refs: Vec<&SessionEntry> = month_data.iter().collect();
                             let (daily_map, model_map, messages, _) = aggregate_entries(&refs);
-                            disk_cache.months.insert(month.clone(), MonthData {
-                                daily: daily_map.into_values().collect(),
-                                model_usage: model_map,
-                                total_messages: messages,
-                            });
+                            disk_cache.months.insert(
+                                month.clone(),
+                                MonthData {
+                                    daily: daily_map.into_values().collect(),
+                                    model_usage: model_map,
+                                    total_messages: messages,
+                                },
+                            );
                         }
                         save_disk_cache(&self.primary_dir, &disk_cache);
                     }
@@ -945,12 +1183,20 @@ mod tests {
         r#"{"sessionId":"abc-789","type":"assistant","timestamp":"2026-03-23T10:00:00Z","requestId":"req-3","message":{"id":"msg-3","model":"claude-sonnet-4-6-20260320","usage":{"input_tokens":2000,"output_tokens":1000,"cache_read_input_tokens":10000,"cache_creation_input_tokens":0,"server_tool_use":{"web_search_requests":3}}}}"#
     }
 
+    fn sample_jsonl_line_fast() -> &'static str {
+        r#"{"sessionId":"fast-123","type":"assistant","timestamp":"2026-03-23T10:00:00Z","requestId":"req-fast","message":{"id":"msg-fast","model":"claude-opus-4-6-20260320","usage":{"input_tokens":1000000,"output_tokens":1000000,"cache_read_input_tokens":1000000,"cache_creation_input_tokens":2000000,"cache_creation":{"ephemeral_5m_input_tokens":1000000,"ephemeral_1h_input_tokens":1000000},"service_tier":"fast","speed":"fast"}}}"#
+    }
+
     #[test]
     fn parse_session_line_extracts_fields() {
         let entry = parse_session_line(sample_jsonl_line()).expect("should parse");
         // Date depends on local timezone: UTC 10:00 may be 23rd or 24th depending on offset.
         // Just verify it is a valid date string in YYYY-MM-DD format.
-        assert!(entry.date.starts_with("2026-03-2"), "unexpected date: {}", entry.date);
+        assert!(
+            entry.date.starts_with("2026-03-2"),
+            "unexpected date: {}",
+            entry.date
+        );
         assert!(entry.model.contains("sonnet"));
         assert_eq!(entry.session_id, "abc-123");
         assert_eq!(entry.message_id, "msg-1");
@@ -963,6 +1209,8 @@ mod tests {
         assert_eq!(entry.cache_creation_5m_tokens, 2000);
         assert_eq!(entry.cache_creation_1h_tokens, 0);
         assert_eq!(entry.web_search_requests, 0);
+        assert_eq!(entry.speed, None);
+        assert_eq!(entry.service_tier, None);
     }
 
     #[test]
@@ -982,8 +1230,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_session_line_extracts_fast_mode_fields() {
+        let entry = parse_session_line(sample_jsonl_line_fast()).expect("should parse");
+        assert_eq!(entry.speed.as_deref(), Some("fast"));
+        assert_eq!(entry.service_tier.as_deref(), Some("fast"));
+    }
+
+    #[test]
     fn parse_session_line_rejects_non_assistant() {
-        let line = r#"{"type":"human","timestamp":"2026-03-23T10:00:00Z","message":{"content":"hello"}}"#;
+        let line =
+            r#"{"type":"human","timestamp":"2026-03-23T10:00:00Z","message":{"content":"hello"}}"#;
         assert!(parse_session_line(line).is_none());
     }
 
@@ -999,16 +1255,24 @@ mod tests {
         // 1M each: input, output, cache_read, cache_write_5m=1M, cache_write_1h=0, web_search=0
         let cost = calculate_cost(&pricing, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 0, 0);
         let expected = 3.0 + 15.0 + 0.30 + 3.75;
-        assert!((cost - expected).abs() < 0.001, "cost={cost}, expected={expected}");
+        assert!(
+            (cost - expected).abs() < 0.001,
+            "cost={cost}, expected={expected}"
+        );
     }
 
     #[test]
     fn cost_calculation_sonnet_with_1h_cache() {
         let pricing = pricing::get_claude_pricing("claude-sonnet-4-6-20260320");
         // 500K 5m cache + 500K 1h cache
-        let cost = calculate_cost(&pricing, 1_000_000, 1_000_000, 1_000_000, 500_000, 500_000, 0);
+        let cost = calculate_cost(
+            &pricing, 1_000_000, 1_000_000, 1_000_000, 500_000, 500_000, 0,
+        );
         let expected = 3.0 + 15.0 + 0.30 + (0.5 * 3.75) + (0.5 * 6.0);
-        assert!((cost - expected).abs() < 0.001, "cost={cost}, expected={expected}");
+        assert!(
+            (cost - expected).abs() < 0.001,
+            "cost={cost}, expected={expected}"
+        );
     }
 
     #[test]
@@ -1016,7 +1280,10 @@ mod tests {
         let pricing = pricing::get_claude_pricing("claude-sonnet-4-6-20260320");
         let cost = calculate_cost(&pricing, 1_000_000, 0, 0, 0, 0, 5);
         let expected = 3.0 + 0.05; // input + 5 web searches * $0.01
-        assert!((cost - expected).abs() < 0.001, "cost={cost}, expected={expected}");
+        assert!(
+            (cost - expected).abs() < 0.001,
+            "cost={cost}, expected={expected}"
+        );
     }
 
     #[test]
@@ -1024,6 +1291,26 @@ mod tests {
         let pricing = pricing::get_claude_pricing("claude-opus-4-6-20260320");
         let cost = calculate_cost(&pricing, 1_000_000, 0, 0, 0, 0, 0);
         assert!((cost - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn cost_calculation_opus_fast_mode() {
+        let entry = parse_session_line(sample_jsonl_line_fast()).expect("should parse");
+        let pricing = pricing_for_entry(&entry);
+        let cost = calculate_cost(
+            &pricing,
+            entry.input_tokens,
+            entry.output_tokens,
+            entry.cache_read_input_tokens,
+            entry.cache_creation_5m_tokens,
+            entry.cache_creation_1h_tokens,
+            0,
+        );
+        let expected = 30.0 + 150.0 + 3.0 + 37.5 + 60.0;
+        assert!(
+            (cost - expected).abs() < 0.001,
+            "cost={cost}, expected={expected}"
+        );
     }
 
     #[test]
