@@ -32,7 +32,6 @@ macOS / Windows 시스템 트레이에서 **Claude Code**, **Codex**, **OpenCode
 - **기간 네비게이션** — 주간/월간 집계를 `< >` 화살표로 과거까지 탐색
 - **모델별 분석** — Input/Output/Cache 비율 시각화
 - **캐시 효율** — 캐시 히트율 도넛 차트
-- **사용량 알림 바** — Claude Code 5시간 세션 + 주간 한도 실시간 표시 (선택적 Claude OAuth 연동)
 
 ### 소셜 & 공유
 - **리더보드** — 일/주/월 사용량을 다른 개발자와 비교 (GitHub OAuth, opt-in)
@@ -89,7 +88,7 @@ npm run tauri build   # 프로덕션 빌드
 
 | 탭 | 내용 |
 |-----|------|
-| **Overview** | 오늘의 요약, 7일 차트, 주간/월간 집계, 8주 히트맵, 사용량 알림 바 |
+| **Overview** | 오늘의 요약, 7일 차트, 주간/월간 집계, 8주 히트맵 |
 | **Analytics** | 연간 활동 그래프 (2D/3D), 30일 차트, 모델별 사용량, 캐시 효율 |
 | **Leaderboard** | 사용량 랭킹, 7일 TOP 10 그리드, 배지, 미니 프로필 |
 | **Chat** | 리더보드 멤버들과 실시간 채팅 — 멘션, 답글, 이미지, AI 번역 |
@@ -110,7 +109,7 @@ npm run tauri build   # 프로덕션 빌드
 
 | 탭 | 옵션 |
 |-----|------|
-| **General** | 테마, 언어, 외관, 숫자 포맷, 메뉴바 비용, 자동 시작, 월급, 사용량 알림, Claude/Codex 디렉토리, Claude 사용량 추적(OAuth) |
+| **General** | 테마, 언어, 외관, 숫자 포맷, 메뉴바 비용, 자동 시작, 월급, Claude/Codex 디렉토리, Claude 사용량 추적(OAuth) |
 | **Account** | GitHub 로그인, 리더보드 opt-in, 프로필 링크 |
 | **AI** | Gemini / OpenAI / Anthropic API 키 (채팅 번역, 로컬 암호화 저장) |
 | **Webhooks** | Discord / Slack / Telegram 웹훅 URL, 알림 임계치, 모니터링 윈도우, 리셋 알림 |
@@ -146,7 +145,7 @@ npm run tauri build   # 프로덕션 빌드
 │  ├── Leaderboard + Grid + Badges   │
 │  ├── Chat + MentionAutocomplete    │
 │  ├── MiniProfile / Wrapped / Receipt│
-│  ├── SalaryComparator / UsageAlertBar│
+│  ├── SalaryComparator              │
 │  └── SettingsOverlay (4탭)         │
 ├────────────────────────────────────┤
 │  Backend (Tauri v2 / Rust)         │

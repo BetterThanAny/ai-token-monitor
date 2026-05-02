@@ -428,14 +428,7 @@ pub fn get_preferences() -> UserPreferences {
         prefs_changed = true;
     }
 
-    // Older builds auto-enabled Claude OAuth usage tracking for existing users.
-    // Undo that implicit migration so network access only happens after an
-    // explicit current-version opt-in.
-    if prefs.usage_tracking_migrated {
-        prefs.usage_tracking_enabled = false;
-        prefs.usage_tracking_migrated = false;
-        prefs_changed = true;
-    }
+    prefs_changed |= clear_usage_tracking_migration_marker(&mut prefs);
 
     if prefs_changed {
         if let Ok(json) = serde_json::to_string_pretty(&prefs) {
@@ -445,6 +438,18 @@ pub fn get_preferences() -> UserPreferences {
 
     // ai_keys are loaded separately via get_ai_keys command
     prefs
+}
+
+fn clear_usage_tracking_migration_marker(prefs: &mut UserPreferences) -> bool {
+    // Older builds marked accounts migrated after changing the stored tracking
+    // preference. At this point we cannot reliably tell an implicit migration
+    // from a later manual user opt-in, so preserve the stored choice and only
+    // clear the legacy marker.
+    if prefs.usage_tracking_migrated {
+        prefs.usage_tracking_migrated = false;
+        return true;
+    }
+    false
 }
 
 /// Load AI keys from encrypted local file on-demand.
@@ -735,4 +740,22 @@ pub fn get_pricing_table() -> pricing::PricingTable {
 pub async fn test_webhook(platform: String) -> Result<String, String> {
     let secrets = load_ai_keys().ok_or("No webhook credentials configured")?;
     crate::webhooks::test_webhook_endpoint(&platform, &secrets).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clearing_usage_tracking_migration_preserves_enabled_choice() {
+        let mut prefs = UserPreferences {
+            usage_tracking_enabled: true,
+            usage_tracking_migrated: true,
+            ..UserPreferences::default()
+        };
+
+        assert!(clear_usage_tracking_migration_marker(&mut prefs));
+        assert!(prefs.usage_tracking_enabled);
+        assert!(!prefs.usage_tracking_migrated);
+    }
 }

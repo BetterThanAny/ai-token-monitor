@@ -45,7 +45,6 @@ A system tray app for macOS and Windows that tracks **Claude Code**, **Codex**, 
 - **Period navigation** — browse weekly/monthly totals with `< >` arrows
 - **Model breakdown** — Input/Output/Cache ratio visualization
 - **Cache efficiency** — donut chart showing cache hit ratio
-- **Usage alerts bar** — live 5-hour session + weekly plan limits (optional Claude OAuth sign-in)
 
 ### Social & Sharing
 - **Leaderboard** — compare daily/weekly/monthly usage with other developers (GitHub OAuth, opt-in)

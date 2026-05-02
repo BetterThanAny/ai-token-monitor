@@ -32,7 +32,6 @@
 - **期間導覽** — 使用 `< >` 箭頭瀏覽過去的週/月彙總
 - **模型分析** — Input/Output/Cache 比例視覺化
 - **快取效率** — 快取命中率環形圖
-- **用量提醒列** — 即時顯示 Claude Code 5 小時工作階段與每週用量上限(可選 Claude OAuth 登入)
 
 ### 社交與分享
 - **排行榜** — 與其他開發者比較日/週/月使用量(GitHub OAuth,需主動開啟)
@@ -89,7 +88,7 @@ npm run tauri build   # 生產建置
 
 | 分頁 | 內容 |
 |------|------|
-| **總覽** | 今日摘要、7 天圖表、週/月彙總、8 週熱力圖、用量提醒列 |
+| **總覽** | 今日摘要、7 天圖表、週/月彙總、8 週熱力圖 |
 | **分析** | 全年活動圖(2D/3D)、30 天圖表、模型分析、快取效率 |
 | **排行榜** | 使用量排名、7 天 TOP 10 網格、徽章、迷你個人資料 |
 | **聊天** | 與排行榜成員即時聊天 — 提及、回覆、圖片、AI 翻譯 |
@@ -110,7 +109,7 @@ npm run tauri build   # 生產建置
 
 | 分頁 | 選項 |
 |------|------|
-| **一般** | 主題、語言、外觀、數字格式、選單列費用、開機自動啟動、月薪、用量提醒、Claude/Codex 目錄、Claude 用量追蹤(OAuth) |
+| **一般** | 主題、語言、外觀、數字格式、選單列費用、開機自動啟動、月薪、Claude/Codex 目錄、Claude 用量追蹤(OAuth) |
 | **帳戶** | GitHub 登入、排行榜公開、個人資料連結 |
 | **AI** | Gemini / OpenAI / Anthropic API 金鑰(聊天翻譯,本機加密儲存) |
 | **Webhooks** | Discord / Slack / Telegram Webhook URL、提醒閾值、監控視窗、重置通知 |
@@ -146,7 +145,7 @@ npm run tauri build   # 生產建置
 │  ├── Leaderboard + Grid + Badges   │
 │  ├── Chat + MentionAutocomplete    │
 │  ├── MiniProfile / Wrapped / Receipt│
-│  ├── SalaryComparator / UsageAlertBar│
+│  ├── SalaryComparator              │
 │  └── SettingsOverlay (4 分頁)      │
 ├────────────────────────────────────┤
 │  後端 (Tauri v2 / Rust)            │
