@@ -822,7 +822,7 @@ impl CodexProvider {
         let mut first_date: Option<String> = None;
         let mut all_session_ids: HashSet<String> = HashSet::new();
         let mut daily_session_ids: HashMap<String, HashSet<String>> = HashMap::new();
-        let mut long_context_sessions: HashSet<(String, &'static str)> = HashSet::new();
+        let long_context_sessions = collect_long_context_sessions(entries);
         let mut project_map: HashMap<String, ProjectAcc> = HashMap::new();
         let mut tool_map: HashMap<String, u32> = HashMap::new();
         let mut shell_map: HashMap<String, u32> = HashMap::new();
@@ -842,7 +842,7 @@ impl CodexProvider {
                 first_date = Some(entry.date.clone());
             }
 
-            let cost = calculate_entry_cost(entry, &mut long_context_sessions);
+            let cost = calculate_entry_cost(entry, &long_context_sessions);
             let total_tokens = entry.total_tokens;
 
             let daily = daily_map
@@ -966,7 +966,7 @@ impl CodexProvider {
 
         let mut latest_snapshot: Option<CodexRateLimitSnapshot> = None;
         let mut client_map: HashMap<String, ClientAcc> = HashMap::new();
-        let mut long_context_sessions: HashSet<(String, &'static str)> = HashSet::new();
+        let long_context_sessions = collect_long_context_sessions(entries);
         let mut total_requests = 0_u32;
 
         for (_, entry) in sorted_entries(entries) {
@@ -984,7 +984,7 @@ impl CodexProvider {
                 continue;
             }
 
-            let cost = calculate_entry_cost(entry, &mut long_context_sessions);
+            let cost = calculate_entry_cost(entry, &long_context_sessions);
             let client_name = if entry.client_name.trim().is_empty() {
                 "Codex".to_string()
             } else {
@@ -1316,26 +1316,30 @@ fn sorted_entries(entries: &HashMap<String, CodexEntry>) -> Vec<(&String, &Codex
     ordered_entries
 }
 
+fn long_context_session_key(entry: &CodexEntry) -> Option<(String, &'static str)> {
+    long_context_model_family(&entry.model).map(|family| (entry.session_id.clone(), family))
+}
+
+fn collect_long_context_sessions(
+    entries: &HashMap<String, CodexEntry>,
+) -> HashSet<(String, &'static str)> {
+    entries
+        .values()
+        .filter(|entry| entry.counts_usage)
+        .filter(|entry| entry.usage_source == TokenUsageSource::Last)
+        .filter(|entry| entry.input_tokens > LONG_CONTEXT_THRESHOLD)
+        .filter_map(long_context_session_key)
+        .collect()
+}
+
 fn calculate_entry_cost(
     entry: &CodexEntry,
-    long_context_sessions: &mut HashSet<(String, &'static str)>,
+    long_context_sessions: &HashSet<(String, &'static str)>,
 ) -> f64 {
     let pricing = pricing::get_codex_pricing(&entry.model);
-    let is_long_context = match long_context_model_family(&entry.model) {
-        Some(family) => {
-            let key = (entry.session_id.clone(), family);
-            let already_long_context = long_context_sessions.contains(&key);
-            let triggers_long_context = entry.usage_source == TokenUsageSource::Last
-                && entry.input_tokens > LONG_CONTEXT_THRESHOLD;
-
-            if triggers_long_context {
-                long_context_sessions.insert(key);
-            }
-
-            already_long_context || triggers_long_context
-        }
-        None => false,
-    };
+    let is_long_context = long_context_session_key(entry)
+        .map(|key| long_context_sessions.contains(&key))
+        .unwrap_or(false);
     let (input_multiplier, output_multiplier) = if is_long_context {
         (
             LONG_CONTEXT_INPUT_MULTIPLIER,
@@ -2773,6 +2777,49 @@ memories = true
     }
 
     #[test]
+    fn test_build_account_state_uses_full_session_long_context_cost() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                client_name: "Codex CLI".to_string(),
+                input_tokens: 1_000,
+                output_tokens: 1_000,
+                cached_tokens: 0,
+                total_tokens: 2_000,
+                usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
+                ..test_entry()
+            },
+        );
+        entries.insert(
+            "session-a:2".to_string(),
+            CodexEntry {
+                date: "2026-05-03".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                client_name: "Codex CLI".to_string(),
+                input_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                output_tokens: 0,
+                cached_tokens: 0,
+                total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
+                ..test_entry()
+            },
+        );
+
+        let state = CodexProvider::build_account_state(&entries).unwrap();
+        let client = &state.client_distribution[0];
+        assert_eq!(client.name, "Codex CLI");
+        assert_eq!(client.requests, 2);
+        assert!((client.cost_usd - 2.785).abs() < 0.0001);
+    }
+
+    #[test]
     fn test_build_stats_applies_fast_multiplier_to_gpt55_session() {
         let mut entries = HashMap::new();
         entries.insert(
@@ -2923,7 +2970,7 @@ memories = true
     }
 
     #[test]
-    fn test_long_context_does_not_reprice_entries_before_first_trigger() {
+    fn test_long_context_reprices_entries_before_trigger_for_full_session() {
         let mut entries = HashMap::new();
         entries.insert(
             "session-a:1".to_string(),
@@ -2960,7 +3007,7 @@ memories = true
         let before = stats.daily.iter().find(|d| d.date == "2026-05-02").unwrap();
         let trigger = stats.daily.iter().find(|d| d.date == "2026-05-03").unwrap();
 
-        assert!((before.cost_usd - 0.035).abs() < 0.0001);
+        assert!((before.cost_usd - 0.055).abs() < 0.0001);
         assert!((trigger.cost_usd - 2.73).abs() < 0.0001);
     }
 
@@ -3002,6 +3049,46 @@ memories = true
         let daily = &stats.daily[0];
         let expected = 2.73 + 0.01 + 0.045;
         assert!((daily.cost_usd - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_non_billable_entry_does_not_trigger_long_context_session() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                output_tokens: 0,
+                cached_tokens: 0,
+                total_tokens: LONG_CONTEXT_THRESHOLD + 1_000,
+                usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
+                counts_usage: false,
+                ..test_entry()
+            },
+        );
+        entries.insert(
+            "session-a:2".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: 1_000,
+                output_tokens: 1_000,
+                cached_tokens: 0,
+                total_tokens: 2_000,
+                usage_source: TokenUsageSource::Last,
+                service_tier: ServiceTier::Standard,
+                ..test_entry()
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        let daily = &stats.daily[0];
+        assert!((daily.cost_usd - 0.035).abs() < 0.0001);
     }
 
     #[test]
