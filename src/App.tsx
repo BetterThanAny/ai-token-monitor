@@ -94,6 +94,7 @@ function AppContent() {
   const { states: accountStates, loading: accountStatesLoading } = useAccountStates({
     includeClaude: prefs.include_claude,
     includeCodex: prefs.include_codex,
+    codexDirs: prefs.codex_dirs,
   });
   const t = useI18n();
   const updater = useUpdater();
