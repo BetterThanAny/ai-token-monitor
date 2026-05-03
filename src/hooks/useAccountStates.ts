@@ -53,8 +53,14 @@ export function useAccountStates({ includeClaude, includeCodex, codexDirs }: Pro
     setLoading(true);
     fetchStates();
 
-    const statsUnlisten = listen("stats-updated", fetchStates).catch(() => null);
-    const usageUnlisten = listen("usage-updated", fetchStates).catch(() => null);
+    const statsUnlisten = listen("stats-updated", fetchStates).catch((err) => {
+      console.error("[account-states] failed to subscribe to stats-updated", err);
+      return null;
+    });
+    const usageUnlisten = listen("usage-updated", fetchStates).catch((err) => {
+      console.error("[account-states] failed to subscribe to usage-updated", err);
+      return null;
+    });
     const interval = setInterval(fetchStates, ACCOUNT_STATE_POLL_INTERVAL_MS);
 
     return () => {

@@ -50,7 +50,10 @@ export function useTokenStats(provider: StatsProvider = "claude", enabled = true
     // Listen for file watcher events
     const unlisten = listen("stats-updated", () => {
       fetchStats();
-    }).catch(() => null);
+    }).catch((err) => {
+      console.error("[stats] failed to subscribe to stats-updated", err);
+      return null;
+    });
 
     // Fallback polling every 60s
     const interval = setInterval(fetchStats, 60_000);

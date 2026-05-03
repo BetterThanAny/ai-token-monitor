@@ -17,11 +17,16 @@ use super::types::{
     LimitWindowStatus, McpServerUsage, ModelUsage, ProjectUsage, ToolCount,
 };
 
-fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        dirs::home_dir().unwrap_or_default().join(rest)
+fn expand_tilde(path: &str) -> Option<PathBuf> {
+    let path = path.trim();
+    if path.is_empty() {
+        None
+    } else if path == "~" {
+        dirs::home_dir()
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        dirs::home_dir().map(|home| home.join(rest))
     } else {
-        PathBuf::from(path)
+        Some(PathBuf::from(path))
     }
 }
 
@@ -47,7 +52,7 @@ const CACHE_TTL: Duration = Duration::from_secs(120);
 
 /// Invalidate cache — called by file watcher on .codex/ changes.
 pub fn invalidate_stats_cache() {
-    CACHE_INVALIDATED.store(true, Ordering::Relaxed);
+    CACHE_INVALIDATED.store(true, Ordering::Release);
 }
 
 /// Return cached stats without triggering a re-parse (used by tray update).
@@ -376,29 +381,33 @@ struct CodexEntry {
 
 pub struct CodexProvider {
     #[allow(dead_code)]
-    primary_dir: PathBuf,
+    primary_dir: Option<PathBuf>,
     all_dirs: Vec<PathBuf>,
     service_tier_overrides: Vec<ServiceTierOverrideWindow>,
 }
 
 impl CodexProvider {
     pub fn new(codex_dirs: Vec<String>) -> Self {
-        let home = dirs::home_dir().unwrap_or_default();
-        let primary = home.join(".codex");
+        let primary = dirs::home_dir().map(|home| home.join(".codex"));
         let mut all_dirs: Vec<PathBuf> = Vec::new();
         let mut seen: HashSet<PathBuf> = HashSet::new();
 
         for d in &codex_dirs {
-            let expanded = expand_tilde(d);
+            let Some(expanded) = expand_tilde(d) else {
+                eprintln!("[Codex] Skipping unavailable config dir {d:?}");
+                continue;
+            };
             let canonical = expanded.canonicalize().unwrap_or_else(|_| expanded.clone());
             if seen.insert(canonical) {
                 all_dirs.push(expanded);
             }
         }
 
-        let primary_canonical = primary.canonicalize().unwrap_or_else(|_| primary.clone());
-        if !seen.contains(&primary_canonical) {
-            all_dirs.insert(0, primary.clone());
+        if let Some(primary) = &primary {
+            let primary_canonical = primary.canonicalize().unwrap_or_else(|_| primary.clone());
+            if !seen.contains(&primary_canonical) {
+                all_dirs.insert(0, primary.clone());
+            }
         }
 
         Self {
@@ -613,7 +622,9 @@ impl CodexProvider {
                             true
                         };
 
-                        let date = resolve_entry_date(path_date.as_deref(), &value);
+                        let Some(date) = resolve_entry_date(path_date.as_deref(), &value) else {
+                            continue;
+                        };
 
                         let model = if current_model.is_empty() {
                             "codex".to_string()
@@ -1085,7 +1096,7 @@ impl TokenProvider for CodexProvider {
     }
 
     fn fetch_stats(&self) -> Result<AllStats, String> {
-        let was_invalidated = CACHE_INVALIDATED.swap(false, Ordering::Relaxed);
+        let was_invalidated = CACHE_INVALIDATED.swap(false, Ordering::Acquire);
         let current_context_hash = self.cache_context_hash();
 
         // Return cached if still fresh and not invalidated
@@ -1161,17 +1172,13 @@ fn extract_date_from_path(path: &Path) -> Option<String> {
 /// Fallback: extract date from timestamp field, converting UTC → local timezone.
 fn extract_date_from_timestamp(value: &Value) -> Option<String> {
     let timestamp = value.get("timestamp")?.as_str()?;
-    if let Ok(utc_dt) = timestamp.parse::<chrono::DateTime<chrono::Utc>>() {
-        Some(
-            utc_dt
-                .with_timezone(&chrono::Local)
-                .format("%Y-%m-%d")
-                .to_string(),
-        )
-    } else {
-        // Fallback: substring (less accurate but safe)
-        timestamp.get(..10).map(ToString::to_string)
-    }
+    let utc_dt = timestamp.parse::<chrono::DateTime<chrono::Utc>>().ok()?;
+    Some(
+        utc_dt
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d")
+            .to_string(),
+    )
 }
 
 /// Extract token usage from a token_count event's info field.
@@ -1622,15 +1629,40 @@ fn currency_number_at(value: &Value, keys: &[&str]) -> Option<f64> {
 }
 
 fn parse_currency_number(raw: &str) -> Option<f64> {
-    let cleaned: String = raw
-        .chars()
-        .filter(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+'))
-        .collect();
-    if cleaned.trim().is_empty() {
-        None
-    } else {
-        cleaned.parse::<f64>().ok()
+    let chars: Vec<char> = raw.chars().collect();
+    for start in 0..chars.len() {
+        let mut index = start;
+        let mut number = String::new();
+        if matches!(chars[index], '-' | '+') {
+            number.push(chars[index]);
+            index += 1;
+        }
+
+        let mut seen_digit = false;
+        let mut seen_dot = false;
+        while index < chars.len() {
+            let c = chars[index];
+            if c.is_ascii_digit() {
+                seen_digit = true;
+                number.push(c);
+            } else if c == '.' && !seen_dot {
+                seen_dot = true;
+                number.push(c);
+            } else if c == ',' {
+                // Thousands separator.
+            } else {
+                break;
+            }
+            index += 1;
+        }
+
+        if seen_digit {
+            if let Ok(parsed) = number.parse::<f64>() {
+                return Some(parsed);
+            }
+        }
     }
+    None
 }
 
 fn bool_at(value: &Value, keys: &[&str]) -> bool {
@@ -1756,10 +1788,8 @@ fn number_at(value: &Value, keys: &[&str]) -> Option<f64> {
     })
 }
 
-fn resolve_entry_date(path_date: Option<&str>, value: &Value) -> String {
-    extract_date_from_timestamp(value)
-        .or_else(|| path_date.map(ToString::to_string))
-        .unwrap_or_else(|| "1970-01-01".to_string())
+fn resolve_entry_date(path_date: Option<&str>, value: &Value) -> Option<String> {
+    extract_date_from_timestamp(value).or_else(|| path_date.map(ToString::to_string))
 }
 
 fn dedup_key_line_index(key: &str) -> u32 {
@@ -2148,7 +2178,7 @@ mod tests {
             "timestamp": "2026-03-27T12:00:00.000Z"
         });
         let resolved = resolve_entry_date(Some("2026-03-20"), &value);
-        assert_eq!(resolved, "2026-03-27");
+        assert_eq!(resolved.as_deref(), Some("2026-03-27"));
     }
 
     #[test]
@@ -2157,7 +2187,23 @@ mod tests {
             "type": "event_msg"
         });
         let resolved = resolve_entry_date(Some("2026-03-27"), &value);
-        assert_eq!(resolved, "2026-03-27");
+        assert_eq!(resolved.as_deref(), Some("2026-03-27"));
+    }
+
+    #[test]
+    fn test_resolve_entry_date_skips_unparseable_date_without_path_date() {
+        let value: Value = serde_json::json!({
+            "timestamp": "not-a-valid-timestamp"
+        });
+        assert_eq!(resolve_entry_date(None, &value), None);
+    }
+
+    #[test]
+    fn test_parse_currency_number_handles_symbols_and_separators() {
+        assert_eq!(parse_currency_number("$-50.00 USD"), Some(-50.0));
+        assert_eq!(parse_currency_number("--50"), Some(-50.0));
+        assert_eq!(parse_currency_number("USD +1,234.50"), Some(1234.5));
+        assert_eq!(parse_currency_number("no balance"), None);
     }
 
     #[test]
@@ -2599,21 +2645,21 @@ mod tests {
     #[test]
     fn test_cache_context_hash_tracks_dirs_and_overrides() {
         let base = CodexProvider {
-            primary_dir: PathBuf::from("/tmp/codex-a"),
+            primary_dir: Some(PathBuf::from("/tmp/codex-a")),
             all_dirs: vec![PathBuf::from("/tmp/codex-a")],
             service_tier_overrides: Vec::new(),
         };
         let base_hash = base.cache_context_hash();
 
         let with_dir = CodexProvider {
-            primary_dir: PathBuf::from("/tmp/codex-a"),
+            primary_dir: Some(PathBuf::from("/tmp/codex-a")),
             all_dirs: vec![PathBuf::from("/tmp/codex-a"), PathBuf::from("/tmp/codex-b")],
             service_tier_overrides: Vec::new(),
         };
         assert_ne!(base_hash, with_dir.cache_context_hash());
 
         let with_override = CodexProvider {
-            primary_dir: PathBuf::from("/tmp/codex-a"),
+            primary_dir: Some(PathBuf::from("/tmp/codex-a")),
             all_dirs: vec![PathBuf::from("/tmp/codex-a")],
             service_tier_overrides: vec![ServiceTierOverrideWindow {
                 starts_at: DateTime::parse_from_rfc3339("2026-05-02T13:00:00+08:00")

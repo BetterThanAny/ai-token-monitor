@@ -64,7 +64,7 @@ fn project_name_from_cwd(cwd: &str) -> Option<String> {
 /// Invalidate the stats cache so the next fetch re-checks file metadata.
 /// Called by the file watcher when JSONL/JSON changes are detected.
 pub fn invalidate_stats_cache() {
-    CACHE_INVALIDATED.store(true, Ordering::Relaxed);
+    CACHE_INVALIDATED.store(true, Ordering::Release);
 }
 
 /// Return cached stats without triggering a re-parse.
@@ -96,33 +96,41 @@ pub struct ClaudeCodeProvider {
     all_dirs: Vec<PathBuf>,
 }
 
-fn expand_tilde(path: &str) -> PathBuf {
-    if path.starts_with("~/") || path == "~" {
-        let home = dirs::home_dir().unwrap_or_default();
-        home.join(path.strip_prefix("~/").unwrap_or(""))
+fn expand_tilde(path: &str) -> Option<PathBuf> {
+    let path = path.trim();
+    if path.is_empty() {
+        None
+    } else if path == "~" {
+        dirs::home_dir()
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        dirs::home_dir().map(|home| home.join(rest))
     } else {
-        PathBuf::from(path)
+        Some(PathBuf::from(path))
     }
 }
 
 impl ClaudeCodeProvider {
     pub fn new(config_dirs: Vec<String>) -> Self {
-        let home = dirs::home_dir().unwrap_or_default();
-        let primary = home.join(".claude");
+        let primary = dirs::home_dir().map(|home| home.join(".claude"));
         let mut all_dirs: Vec<PathBuf> = Vec::new();
         let mut seen: HashSet<PathBuf> = HashSet::new();
 
         for d in &config_dirs {
-            let expanded = expand_tilde(d);
+            let Some(expanded) = expand_tilde(d) else {
+                eprintln!("[Claude] Skipping unavailable config dir {d:?}");
+                continue;
+            };
             let canonical = expanded.canonicalize().unwrap_or_else(|_| expanded.clone());
             if seen.insert(canonical) {
                 all_dirs.push(expanded);
             }
         }
 
-        let primary_canonical = primary.canonicalize().unwrap_or_else(|_| primary.clone());
-        if !seen.contains(&primary_canonical) {
-            all_dirs.insert(0, primary.clone());
+        if let Some(primary) = &primary {
+            let primary_canonical = primary.canonicalize().unwrap_or_else(|_| primary.clone());
+            if !seen.contains(&primary_canonical) {
+                all_dirs.insert(0, primary.clone());
+            }
         }
 
         Self { all_dirs }
@@ -452,17 +460,15 @@ fn parse_session_line(line: &str) -> Option<SessionEntry> {
 
     let timestamp = value.get("timestamp")?.as_str()?;
     // Convert UTC timestamp to local date so early-morning sessions (before midnight UTC)
-    // are attributed to the correct local calendar day.
+    // are attributed to the correct local calendar day. Invalid timestamps are skipped
+    // instead of being folded into a synthetic or malformed date bucket.
     let date = {
         use chrono::{DateTime, Utc};
-        if let Ok(utc_dt) = timestamp.parse::<DateTime<Utc>>() {
-            utc_dt
-                .with_timezone(&chrono::Local)
-                .format("%Y-%m-%d")
-                .to_string()
-        } else {
-            timestamp.get(..10)?.to_string()
-        }
+        let utc_dt = timestamp.parse::<DateTime<Utc>>().ok()?;
+        utc_dt
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d")
+            .to_string()
     };
 
     let model = message.get("model")?.as_str()?.to_string();
@@ -845,7 +851,7 @@ impl TokenProvider for ClaudeCodeProvider {
             changed
         };
 
-        let was_invalidated = dirs_changed || CACHE_INVALIDATED.swap(false, Ordering::Relaxed);
+        let was_invalidated = dirs_changed || CACHE_INVALIDATED.swap(false, Ordering::Acquire);
 
         // If not invalidated, return cached stats if fresh
         if !was_invalidated {
@@ -1037,6 +1043,12 @@ mod tests {
         assert_eq!(entry.web_search_requests, 0);
         assert_eq!(entry.speed, None);
         assert_eq!(entry.service_tier, None);
+    }
+
+    #[test]
+    fn parse_session_line_rejects_invalid_timestamp() {
+        let line = sample_jsonl_line().replace("2026-03-23T10:00:00Z", "not-a-date");
+        assert!(parse_session_line(&line).is_none());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import type { DailyUsage } from "../lib/types";
 import { formatTokens, formatCost, getTotalTokens, formatDate, toLocalDateStr } from "../lib/format";
 import { useSettings } from "../contexts/SettingsContext";
@@ -17,6 +17,13 @@ export function DailyChart({ daily, days = 7 }: Props) {
   const [view, setView] = useState<"chart" | "list">("chart");
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   const dailyMap = useMemo(() => {
     const map = new Map<string, DailyUsage>();
@@ -64,6 +71,20 @@ export function DailyChart({ daily, days = 7 }: Props) {
     if (v >= 1_000) return `${(v / 1_000).toFixed(0)}K`;
     return `${v}`;
   };
+
+  const handleCopyList = useCallback(async () => {
+    const lines = chartData
+      .filter((d) => d.tokens > 0 || d.cost > 0)
+      .map((d) => `${d.date}: ${mode === "tokens" ? d.tokens.toLocaleString() : formatCost(d.cost)}`)
+      .join("\n");
+    await writeText(lines);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    setCopied(true);
+    copiedTimerRef.current = setTimeout(() => {
+      setCopied(false);
+      copiedTimerRef.current = null;
+    }, 2000);
+  }, [chartData, mode]);
 
   return (
     <div style={{
@@ -270,15 +291,7 @@ export function DailyChart({ daily, days = 7 }: Props) {
         mode={mode}
         numberFormat={prefs.number_format}
         copied={copied}
-        onCopy={async () => {
-          const lines = chartData
-            .filter((d) => d.tokens > 0 || d.cost > 0)
-            .map((d) => `${d.date}: ${mode === "tokens" ? d.tokens.toLocaleString() : formatCost(d.cost)}`)
-            .join("\n");
-          await writeText(lines);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        }}
+        onCopy={handleCopyList}
         t={t}
       />
       )}

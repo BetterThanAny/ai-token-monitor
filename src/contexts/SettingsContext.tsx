@@ -49,6 +49,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefs] = useState<UserPreferences>(defaultPrefs);
   const [ready, setReady] = useState(false);
   const skipNextPersist = useRef(true);
+  const pendingPrefsRef = useRef<Partial<UserPreferences> | null>(null);
   const prevConfigDirsRef = useRef<string>(JSON.stringify(defaultPrefs.config_dirs));
   const prevCodexDirsRef = useRef<string>(JSON.stringify(defaultPrefs.codex_dirs));
   const prevIncludeClaudeRef = useRef(defaultPrefs.include_claude);
@@ -56,15 +57,25 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     loadPreferencesWithKeys().then((p) => {
-      setPrefs(p);
-      // Skip the persist effect triggered by the initial load from disk.
-      skipNextPersist.current = true;
+      const pending = pendingPrefsRef.current;
+      pendingPrefsRef.current = null;
+      const nextPrefs = pending ? { ...p, ...pending } : p;
+      setPrefs(nextPrefs);
+      // Skip only the plain initial load. Pending early updates must persist.
+      skipNextPersist.current = !pending;
       prevConfigDirsRef.current = JSON.stringify(p.config_dirs);
       prevCodexDirsRef.current = JSON.stringify(p.codex_dirs);
       prevIncludeClaudeRef.current = p.include_claude;
       prevIncludeCodexRef.current = p.include_codex;
       setReady(true);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn("[settings] failed to load preferences", err);
+      const pending = pendingPrefsRef.current;
+      pendingPrefsRef.current = null;
+      if (pending) {
+        setPrefs((prev) => ({ ...prev, ...pending }));
+        skipNextPersist.current = false;
+      }
       setReady(true);
     });
   }, []);
@@ -123,6 +134,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   // Persist to disk when prefs change
   useEffect(() => {
+    if (!ready) return;
     if (skipNextPersist.current) {
       skipNextPersist.current = false;
       prevConfigDirsRef.current = JSON.stringify(prefs.config_dirs);
@@ -131,7 +143,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       prevIncludeCodexRef.current = prefs.include_codex;
       return;
     }
-    if (!ready) return;
 
     // If source selection or config dirs changed, refresh after prefs are persisted.
     const newDirsJson = JSON.stringify(prefs.config_dirs);
@@ -155,7 +166,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [prefs, ready]);
 
   const updatePrefs = useCallback((partial: Partial<UserPreferences>) => {
-    if (!ready) return; // Block updates until loaded
+    if (!ready) {
+      console.warn("[settings] queued preference update before preferences finished loading");
+      pendingPrefsRef.current = { ...pendingPrefsRef.current, ...partial };
+    }
     setPrefs((prev) => ({ ...prev, ...partial }));
   }, [ready]);
 
