@@ -49,6 +49,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefs] = useState<UserPreferences>(defaultPrefs);
   const [ready, setReady] = useState(false);
   const skipNextPersist = useRef(true);
+  const prevConfigDirsRef = useRef<string>(JSON.stringify(defaultPrefs.config_dirs));
+  const prevCodexDirsRef = useRef<string>(JSON.stringify(defaultPrefs.codex_dirs));
+  const prevIncludeClaudeRef = useRef(defaultPrefs.include_claude);
+  const prevIncludeCodexRef = useRef(defaultPrefs.include_codex);
 
   useEffect(() => {
     loadPreferencesWithKeys().then((p) => {
@@ -57,6 +61,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       skipNextPersist.current = true;
       prevConfigDirsRef.current = JSON.stringify(p.config_dirs);
       prevCodexDirsRef.current = JSON.stringify(p.codex_dirs);
+      prevIncludeClaudeRef.current = p.include_claude;
+      prevIncludeCodexRef.current = p.include_codex;
       setReady(true);
     }).catch(() => {
       setReady(true);
@@ -116,26 +122,36 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [ready, prefs.autostart_enabled]);
 
   // Persist to disk when prefs change
-  const prevConfigDirsRef = useRef<string>(JSON.stringify(defaultPrefs.config_dirs));
-  const prevCodexDirsRef = useRef<string>(JSON.stringify(defaultPrefs.codex_dirs));
   useEffect(() => {
     if (skipNextPersist.current) {
       skipNextPersist.current = false;
       prevConfigDirsRef.current = JSON.stringify(prefs.config_dirs);
       prevCodexDirsRef.current = JSON.stringify(prefs.codex_dirs);
+      prevIncludeClaudeRef.current = prefs.include_claude;
+      prevIncludeCodexRef.current = prefs.include_codex;
       return;
     }
     if (!ready) return;
-    invoke("set_preferences", { prefs }).catch(() => {});
 
-    // If config_dirs or codex_dirs changed, trigger stats refresh
+    // If source selection or config dirs changed, refresh after prefs are persisted.
     const newDirsJson = JSON.stringify(prefs.config_dirs);
     const newCodexDirsJson = JSON.stringify(prefs.codex_dirs);
-    if (newDirsJson !== prevConfigDirsRef.current || newCodexDirsJson !== prevCodexDirsRef.current) {
-      prevConfigDirsRef.current = newDirsJson;
-      prevCodexDirsRef.current = newCodexDirsJson;
-      emit("stats-updated").catch(() => {});
-    }
+    const shouldRefreshStats =
+      newDirsJson !== prevConfigDirsRef.current ||
+      newCodexDirsJson !== prevCodexDirsRef.current ||
+      prefs.include_claude !== prevIncludeClaudeRef.current ||
+      prefs.include_codex !== prevIncludeCodexRef.current;
+
+    prevConfigDirsRef.current = newDirsJson;
+    prevCodexDirsRef.current = newCodexDirsJson;
+    prevIncludeClaudeRef.current = prefs.include_claude;
+    prevIncludeCodexRef.current = prefs.include_codex;
+
+    invoke("set_preferences", { prefs })
+      .then(() => {
+        if (shouldRefreshStats) emit("stats-updated").catch(() => {});
+      })
+      .catch(() => {});
   }, [prefs, ready]);
 
   const updatePrefs = useCallback((partial: Partial<UserPreferences>) => {
@@ -149,6 +165,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       skipNextPersist.current = true;
       prevConfigDirsRef.current = JSON.stringify(p.config_dirs);
       prevCodexDirsRef.current = JSON.stringify(p.codex_dirs);
+      prevIncludeClaudeRef.current = p.include_claude;
+      prevIncludeCodexRef.current = p.include_codex;
       setPrefs(p);
     } catch {
       // ignore

@@ -4,12 +4,15 @@ import { listen } from "@tauri-apps/api/event";
 import type { AccountState } from "../lib/types";
 
 interface Props {
-  enabled: boolean;
+  includeClaude: boolean;
+  includeCodex: boolean;
 }
 
 const ACCOUNT_STATE_POLL_INTERVAL_MS = 5 * 60_000;
 
-export function useAccountStates({ enabled }: Props) {
+export function useAccountStates({ includeClaude, includeCodex }: Props) {
+  const enabled = includeClaude || includeCodex;
+  const sourceSelectionKey = `${includeClaude}:${includeCodex}`;
   const [states, setStates] = useState<AccountState[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(enabled);
@@ -31,7 +34,7 @@ export function useAccountStates({ enabled }: Props) {
       if (requestId !== requestIdRef.current) return;
       setLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, sourceSelectionKey]);
 
   useEffect(() => {
     if (!enabled) {

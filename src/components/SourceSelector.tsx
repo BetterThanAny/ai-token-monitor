@@ -18,25 +18,46 @@ export function SourceSelector() {
   const t = useI18n();
   const [codexAvailable, setCodexAvailable] = useState(false);
   const [availabilityLoaded, setAvailabilityLoaded] = useState(false);
+  const [checkedCodexDirs, setCheckedCodexDirs] = useState("");
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const codexDirsKey = useMemo(() => JSON.stringify(prefs.codex_dirs), [prefs.codex_dirs]);
 
   useEffect(() => {
+    let cancelled = false;
+    setAvailabilityLoaded(false);
+    const dirs = prefs.codex_dirs.length > 0 ? prefs.codex_dirs : ["~/.codex"];
     Promise.all([
       invoke<boolean>("is_codex_available").catch(() => false),
-    ]).then(([codex]) => {
-      setCodexAvailable(codex);
+      ...dirs.map((dir) =>
+        invoke<boolean>("validate_codex_dir", { path: dir }).catch(() => false)
+      ),
+    ]).then(([codex, ...validDirs]) => {
+      if (cancelled) return;
+      setCodexAvailable(codex || validDirs.some(Boolean));
+      setCheckedCodexDirs(codexDirsKey);
       setAvailabilityLoaded(true);
     });
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [codexDirsKey, prefs.codex_dirs]);
 
   // Reconcile persisted prefs with current runtime availability.
   useEffect(() => {
     if (!availabilityLoaded) return;
+    if (checkedCodexDirs !== codexDirsKey) return;
     const patch: Partial<typeof prefs> = {};
     if (prefs.include_codex && !codexAvailable) patch.include_codex = false;
     if (Object.keys(patch).length > 0) updatePrefs(patch);
-  }, [availabilityLoaded, codexAvailable, prefs.include_codex, updatePrefs]);
+  }, [
+    availabilityLoaded,
+    checkedCodexDirs,
+    codexAvailable,
+    codexDirsKey,
+    prefs.include_codex,
+    updatePrefs,
+  ]);
 
   useEffect(() => {
     if (!open) return;

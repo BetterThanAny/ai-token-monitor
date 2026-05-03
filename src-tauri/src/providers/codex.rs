@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,6 +36,8 @@ struct IncrementalCache {
     entry_keys_by_file: HashMap<PathBuf, HashSet<String>>,
     /// File metadata for mtime-based change detection
     file_meta: HashMap<PathBuf, (SystemTime, u64)>,
+    /// Provider configuration fingerprint used to invalidate parsed entries.
+    cache_context_hash: u64,
 }
 
 static STATS_CACHE: Mutex<Option<IncrementalCache>> = Mutex::new(None);
@@ -50,6 +53,20 @@ pub fn invalidate_stats_cache() {
 /// Return cached stats without triggering a re-parse (used by tray update).
 pub fn get_cached_stats() -> Option<AllStats> {
     STATS_CACHE.lock().ok()?.as_ref().map(|c| c.stats.clone())
+}
+
+fn hash_system_time<H: Hasher>(time: SystemTime, hasher: &mut H) {
+    match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(duration) => {
+            duration.as_secs().hash(hasher);
+            duration.subsec_nanos().hash(hasher);
+        }
+        Err(err) => {
+            0_u8.hash(hasher);
+            err.duration().as_secs().hash(hasher);
+            err.duration().subsec_nanos().hash(hasher);
+        }
+    }
 }
 
 use super::pricing;
@@ -121,7 +138,7 @@ enum TokenUsageSource {
     TotalFallback,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 enum ServiceTier {
     Standard,
     Fast,
@@ -515,6 +532,25 @@ impl CodexProvider {
         roots
     }
 
+    fn cache_context_hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.all_dirs.hash(&mut hasher);
+        if let Some((tier, modified)) = self.config_service_tier {
+            tier.hash(&mut hasher);
+            hash_system_time(modified, &mut hasher);
+        }
+        self.service_tier_overrides.len().hash(&mut hasher);
+        for window in &self.service_tier_overrides {
+            window.starts_at.timestamp_millis().hash(&mut hasher);
+            window
+                .ends_at
+                .map(|ends_at| ends_at.timestamp_millis())
+                .hash(&mut hasher);
+            window.tier.hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
     /// Collect mtime/size metadata for all JSONL files.
     fn collect_file_meta(&self) -> HashMap<PathBuf, (SystemTime, u64)> {
         let mut meta = HashMap::new();
@@ -635,21 +671,29 @@ impl CodexProvider {
 
                     let payload_type = value.pointer("/payload/type").and_then(|v| v.as_str());
                     if let Some("token_count") = payload_type {
-                        let Some(info) = value.pointer("/payload/info") else {
-                            continue;
-                        };
-                        if info.is_null() {
-                            continue;
-                        }
-
-                        let Some(usage) = extract_token_usage(info) else {
-                            continue;
-                        };
-                        if let Some(service_tier) = extract_service_tier(info) {
-                            current_service_tier = service_tier;
-                        }
-
                         let rate_limits = extract_codex_rate_limits(&value);
+                        let info = value
+                            .pointer("/payload/info")
+                            .and_then(|info| (!info.is_null()).then_some(info));
+                        let usage = info.and_then(extract_token_usage);
+                        if let Some(info) = info {
+                            if let Some(service_tier) = extract_service_tier(info) {
+                                current_service_tier = service_tier;
+                            }
+                        }
+
+                        if usage.is_none() && rate_limits.is_none() {
+                            continue;
+                        }
+
+                        let usage = usage.unwrap_or(TokenUsage {
+                            input_tokens: 0,
+                            output_tokens: 0,
+                            cached_tokens: 0,
+                            total_tokens: 0,
+                            source: TokenUsageSource::Last,
+                            cumulative: None,
+                        });
 
                         let has_usage = usage.input_tokens != 0
                             || usage.output_tokens != 0
@@ -696,10 +740,6 @@ impl CodexProvider {
                             prev_snapshot = Some(snap);
                             true
                         };
-
-                        if !has_usage && rate_limits.is_none() {
-                            continue;
-                        }
 
                         let date = resolve_entry_date(path_date.as_deref(), &value);
 
@@ -1078,10 +1118,13 @@ impl CodexProvider {
     fn do_fetch_stats(&self) -> Result<AllStats, String> {
         let start = Instant::now();
         let current_meta = self.collect_file_meta();
+        let current_context_hash = self.cache_context_hash();
 
         let (entries, entry_keys_by_file) = if let Ok(mut cache) = STATS_CACHE.lock() {
             if let Some(ref mut cached) = *cache {
-                if cached.file_meta == current_meta {
+                if cached.file_meta == current_meta
+                    && cached.cache_context_hash == current_context_hash
+                {
                     // No files changed — refresh timestamp and return cached
                     cached.computed_at = Instant::now();
                     let stats = cached.stats.clone();
@@ -1092,15 +1135,42 @@ impl CodexProvider {
                     return Ok(stats);
                 }
 
-                // Incremental parse
-                Self::parse_incremental(
-                    &current_meta,
-                    &cached.entries,
-                    &cached.entry_keys_by_file,
-                    &cached.file_meta,
-                    self.config_service_tier,
-                    &self.service_tier_overrides,
-                )
+                if cached.cache_context_hash != current_context_hash {
+                    // Provider configuration changed. Parsed service tier and directory
+                    // membership may be stale, so all current files must be reparsed.
+                    eprintln!(
+                        "[PERF][Codex] Provider config changed, full parse of {} files...",
+                        current_meta.len()
+                    );
+                    let full_start = Instant::now();
+                    let mut entries = HashMap::new();
+                    let mut entry_keys_by_file = HashMap::new();
+                    for path in current_meta.keys() {
+                        let file_entries = Self::parse_single_file(
+                            path,
+                            self.config_service_tier,
+                            &self.service_tier_overrides,
+                        );
+                        entry_keys_by_file
+                            .insert(path.clone(), file_entries.keys().cloned().collect());
+                        entries.extend(file_entries);
+                    }
+                    eprintln!(
+                        "[PERF][Codex] Full parse completed in {:?}",
+                        full_start.elapsed()
+                    );
+                    (entries, entry_keys_by_file)
+                } else {
+                    // Incremental parse
+                    Self::parse_incremental(
+                        &current_meta,
+                        &cached.entries,
+                        &cached.entry_keys_by_file,
+                        &cached.file_meta,
+                        self.config_service_tier,
+                        &self.service_tier_overrides,
+                    )
+                }
             } else {
                 // First run — full parse
                 drop(cache);
@@ -1139,6 +1209,7 @@ impl CodexProvider {
                 entries,
                 entry_keys_by_file,
                 file_meta: current_meta,
+                cache_context_hash: current_context_hash,
             });
         }
 
@@ -1154,12 +1225,15 @@ impl TokenProvider for CodexProvider {
 
     fn fetch_stats(&self) -> Result<AllStats, String> {
         let was_invalidated = CACHE_INVALIDATED.swap(false, Ordering::Relaxed);
+        let current_context_hash = self.cache_context_hash();
 
         // Return cached if still fresh and not invalidated
         if !was_invalidated {
             if let Ok(cache) = STATS_CACHE.lock() {
                 if let Some(ref cached) = *cache {
-                    if cached.computed_at.elapsed() < CACHE_TTL {
+                    if cached.cache_context_hash == current_context_hash
+                        && cached.computed_at.elapsed() < CACHE_TTL
+                    {
                         return Ok(cached.stats.clone());
                     }
                 }
@@ -2368,6 +2442,37 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_single_file_keeps_rate_limit_snapshot_with_null_info() {
+        let path = temp_jsonl_path("rate-only-null-info");
+        std::fs::write(
+            &path,
+            [
+                r#"{"type":"session_meta","payload":{"id":"same-session","cwd":"/tmp/project","cli_version":"1.0.0"}}"#,
+                r#"{"type":"turn_context","payload":{"model":"gpt-5.5"}}"#,
+                r#"{"timestamp":"2026-05-02T10:00:00Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"codex","primary":{"used_percent":77.0,"window_minutes":300,"resets_at":1777734000},"secondary":{"used_percent":50.0,"window_minutes":10080,"resets_at":1778338800}}}}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let entries = CodexProvider::parse_single_file(&path, None, &[]);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(entries.len(), 1);
+        let entry = entries.values().next().unwrap();
+        assert!(!entry.counts_usage);
+        assert_eq!(entry.total_tokens, 0);
+        assert!(entry.rate_limits.is_some());
+
+        let stats = CodexProvider::build_stats(&entries);
+        assert_eq!(stats.total_messages, 0);
+
+        let state = CodexProvider::build_account_state(&entries).unwrap();
+        assert_eq!(state.limit_windows[0].used_percent, Some(77.0));
+        assert!(state.client_distribution.is_empty());
+    }
+
+    #[test]
     fn test_parse_incremental_removes_stale_entries_for_changed_file() {
         let path = temp_jsonl_path("changed-file");
         std::fs::write(
@@ -2632,6 +2737,50 @@ memories = true
             default_service_tier_for_event(&outside, &path, None, &overrides),
             ServiceTier::Standard
         );
+    }
+
+    #[test]
+    fn test_cache_context_hash_tracks_dirs_config_and_overrides() {
+        let base = CodexProvider {
+            primary_dir: PathBuf::from("/tmp/codex-a"),
+            all_dirs: vec![PathBuf::from("/tmp/codex-a")],
+            config_service_tier: None,
+            service_tier_overrides: Vec::new(),
+        };
+        let base_hash = base.cache_context_hash();
+
+        let with_dir = CodexProvider {
+            primary_dir: PathBuf::from("/tmp/codex-a"),
+            all_dirs: vec![PathBuf::from("/tmp/codex-a"), PathBuf::from("/tmp/codex-b")],
+            config_service_tier: None,
+            service_tier_overrides: Vec::new(),
+        };
+        assert_ne!(base_hash, with_dir.cache_context_hash());
+
+        let with_config = CodexProvider {
+            primary_dir: PathBuf::from("/tmp/codex-a"),
+            all_dirs: vec![PathBuf::from("/tmp/codex-a")],
+            config_service_tier: Some((
+                ServiceTier::Fast,
+                SystemTime::UNIX_EPOCH + Duration::from_secs(60),
+            )),
+            service_tier_overrides: Vec::new(),
+        };
+        assert_ne!(base_hash, with_config.cache_context_hash());
+
+        let with_override = CodexProvider {
+            primary_dir: PathBuf::from("/tmp/codex-a"),
+            all_dirs: vec![PathBuf::from("/tmp/codex-a")],
+            config_service_tier: None,
+            service_tier_overrides: vec![ServiceTierOverrideWindow {
+                starts_at: DateTime::parse_from_rfc3339("2026-05-02T13:00:00+08:00")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                ends_at: None,
+                tier: ServiceTier::Fast,
+            }],
+        };
+        assert_ne!(base_hash, with_override.cache_context_hash());
     }
 
     #[test]

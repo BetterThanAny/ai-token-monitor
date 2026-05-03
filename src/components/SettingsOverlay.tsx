@@ -324,6 +324,15 @@ function AccountTab({
   prefs: ReturnType<typeof useSettings>["prefs"];
   updatePrefs: ReturnType<typeof useSettings>["updatePrefs"];
 }) {
+  const handleCodexDirsChange = useCallback((dirs: string[]) => {
+    updatePrefs({
+      codex_dirs: dirs,
+      ...(!prefs.include_codex && dirs.length > prefs.codex_dirs.length
+        ? { include_codex: true }
+        : {}),
+    });
+  }, [prefs.codex_dirs.length, prefs.include_codex, updatePrefs]);
+
   return (
     <div>
       <ConfigDirsSection
@@ -332,20 +341,16 @@ function AccountTab({
         onChange={(dirs) => updatePrefs({ config_dirs: dirs })}
       />
 
-      {prefs.include_codex && (
-        <>
-          <div style={{
-            height: 1,
-            background: "var(--heat-0)",
-            margin: "8px 0",
-          }} />
-          <ConfigDirsSection
-            provider="codex"
-            dirs={prefs.codex_dirs}
-            onChange={(dirs) => updatePrefs({ codex_dirs: dirs })}
-          />
-        </>
-      )}
+      <div style={{
+        height: 1,
+        background: "var(--heat-0)",
+        margin: "8px 0",
+      }} />
+      <ConfigDirsSection
+        provider="codex"
+        dirs={prefs.codex_dirs}
+        onChange={handleCodexDirsChange}
+      />
     </div>
   );
 }
