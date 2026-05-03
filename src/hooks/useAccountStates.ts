@@ -6,13 +6,14 @@ import type { AccountState } from "../lib/types";
 interface Props {
   includeClaude: boolean;
   includeCodex: boolean;
+  codexDirs: string[];
 }
 
 const ACCOUNT_STATE_POLL_INTERVAL_MS = 5 * 60_000;
 
-export function useAccountStates({ includeClaude, includeCodex }: Props) {
+export function useAccountStates({ includeClaude, includeCodex, codexDirs }: Props) {
   const enabled = includeClaude || includeCodex;
-  const sourceSelectionKey = `${includeClaude}:${includeCodex}`;
+  const sourceSelectionKey = `${includeClaude}:${includeCodex}:${JSON.stringify(codexDirs)}`;
   const [states, setStates] = useState<AccountState[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(enabled);
@@ -23,7 +24,11 @@ export function useAccountStates({ includeClaude, includeCodex }: Props) {
 
     const requestId = ++requestIdRef.current;
     try {
-      const data = await invoke<AccountState[]>("get_account_states");
+      const data = await invoke<AccountState[]>("get_account_states", {
+        includeClaude,
+        includeCodex,
+        codexDirs,
+      });
       if (requestId !== requestIdRef.current) return;
       setStates(data);
       setError(null);

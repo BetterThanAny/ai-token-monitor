@@ -78,11 +78,18 @@ pub async fn get_codex_stats(app: tauri::AppHandle) -> Result<AllStats, String> 
 }
 
 #[tauri::command]
-pub async fn get_account_states() -> Result<Vec<AccountState>, String> {
+pub async fn get_account_states(
+    include_claude: Option<bool>,
+    include_codex: Option<bool>,
+    codex_dirs: Option<Vec<String>>,
+) -> Result<Vec<AccountState>, String> {
     let prefs = get_preferences();
+    let include_claude = include_claude.unwrap_or(prefs.include_claude);
+    let include_codex = include_codex.unwrap_or(prefs.include_codex);
+    let codex_dirs = codex_dirs.unwrap_or_else(|| prefs.codex_dirs.clone());
     let mut states = Vec::new();
 
-    if prefs.include_claude {
+    if include_claude {
         match crate::claude_usage::get_statusline_rate_limits_usage() {
             Ok(Some(usage)) => {
                 states.push(claude_quota_to_account_state_with_source(
@@ -102,8 +109,7 @@ pub async fn get_account_states() -> Result<Vec<AccountState>, String> {
         }
     }
 
-    if prefs.include_codex {
-        let codex_dirs = prefs.codex_dirs.clone();
+    if include_codex {
         let state = tauri::async_runtime::spawn_blocking(move || {
             let provider = CodexProvider::new(codex_dirs);
             if !provider.is_available() {
