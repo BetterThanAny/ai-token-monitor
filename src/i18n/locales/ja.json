@@ -4,6 +4,8 @@
   "app.loading": "読み込み中...",
   "app.error.title": "使用統計が見つかりません",
   "app.error.description": "Claude Code または Codex がインストールされ、少なくとも一度使用されていることを確認してください。",
+  "app.partialStats.title": "一部のソースを読み込めませんでした",
+  "app.partialStats.description": "合計が不完全な可能性があります: {{error}}",
   "tab.overview": "概要",
   "tab.analytics": "分析",
   "sources.title": "ソース",

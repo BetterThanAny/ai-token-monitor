@@ -4,6 +4,8 @@
   "app.loading": "Yükleniyor...",
   "app.error.title": "Kullanım istatistiği bulunamadı",
   "app.error.description": "Claude Code veya Codex'in en az bir kez kullanıldığından emin olun.",
+  "app.partialStats.title": "Bazı kaynaklar yüklenemedi",
+  "app.partialStats.description": "Toplamlar eksik olabilir: {{error}}",
   "tab.overview": "Genel Bakış",
   "tab.analytics": "Analitik",
   "sources.title": "Kaynaklar",

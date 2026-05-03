@@ -4,6 +4,8 @@
   "app.loading": "로딩 중...",
   "app.error.title": "사용 통계를 찾을 수 없습니다",
   "app.error.description": "Claude Code 또는 Codex가 설치되어 있고 한 번 이상 사용되었는지 확인하세요.",
+  "app.partialStats.title": "일부 소스를 불러오지 못했습니다",
+  "app.partialStats.description": "합계가 불완전할 수 있습니다: {{error}}",
   "tab.overview": "개요",
   "tab.analytics": "분석",
   "sources.title": "소스",
