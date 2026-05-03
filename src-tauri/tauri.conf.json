@@ -63,7 +63,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY5ODM1N0M5RUJBODQ0NTgKUldSWVJLanJ5VmVEK1dOZjg0WWVySGZJaFVPNTJpNjFwOEhlRXZ5Z2t5bzNoYUdEZ2tsaG1QekwK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdGN0U3QjQyNDQxMjQ3NEYKUldSUFJ4SkVRbnQrZjQ0eWJGRUJxVlh1bk1nUTVWajNvako0NFovTzZhSUtPQzZCSnRsaStrY1QK",
       "endpoints": [
         "https://github.com/BetterThanAny/ai-token-monitor/releases/latest/download/latest.json"
       ],
