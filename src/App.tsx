@@ -65,7 +65,8 @@ function AppContent() {
     includeCodex: prefs.include_codex,
   });
   const { states: accountStates, loading: accountStatesLoading } = useAccountStates({
-    enabled: prefs.include_claude || prefs.include_codex,
+    includeClaude: prefs.include_claude,
+    includeCodex: prefs.include_codex,
   });
   const t = useI18n();
   const updater = useUpdater();
@@ -184,7 +185,11 @@ function AppContent() {
         )}
 
         {analyticsSubTab === "tools" && (
-          stats.analytics && stats.analytics.tool_usage.length > 0
+          stats.analytics && (
+            stats.analytics.tool_usage.length > 0 ||
+            stats.analytics.shell_commands.length > 0 ||
+            stats.analytics.mcp_usage.length > 0
+          )
             ? <>
                 <ToolUsage data={stats.analytics.tool_usage} />
                 <ShellCommands
