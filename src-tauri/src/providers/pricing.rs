@@ -457,4 +457,12 @@ mod tests {
         assert!((p.cached_input - 0.175).abs() < 0.001);
         assert!((p.output - 14.00).abs() < 0.001);
     }
+
+    #[test]
+    fn codex_auto_review_uses_gpt53_codex_price() {
+        let p = get_codex_pricing("codex-auto-review");
+        assert!((p.input - 1.75).abs() < 0.001);
+        assert!((p.cached_input - 0.175).abs() < 0.001);
+        assert!((p.output - 14.00).abs() < 0.001);
+    }
 }
