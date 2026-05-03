@@ -152,11 +152,13 @@ fn pricing_version(contents: &str) -> Option<Vec<u32>> {
 }
 
 fn find_pricing<'a>(provider: &'a ProviderConfig, model: &str) -> Option<&'a PricingEntry> {
-    // First match wins (order in JSON matters)
+    // Prefer the most specific substring match so broad patterns cannot shadow
+    // newer model-specific entries by appearing earlier in pricing.json.
     provider
         .models
         .iter()
-        .find(|e| model.contains(&e.match_pattern))
+        .filter(|e| model.contains(&e.match_pattern))
+        .max_by_key(|e| e.match_pattern.len())
         .or_else(|| {
             // Fallback to default model
             provider
@@ -261,11 +263,11 @@ pub struct PricingTable {
 }
 
 fn format_price(val: f64) -> String {
-    if val == 0.0 {
+    if !val.is_finite() || val == 0.0 {
         "—".to_string()
     } else if val < 0.01 {
         format!("${:.3}", val)
-    } else if val == val.floor() {
+    } else if (val - val.round()).abs() < 1e-9 {
         format!("${:.0}", val)
     } else {
         format!("${:.2}", val)
@@ -364,6 +366,44 @@ mod tests {
         };
 
         assert!(find_pricing(&provider, "future-model").is_none());
+    }
+
+    fn pricing_entry(match_pattern: &str, input: f64) -> PricingEntry {
+        PricingEntry {
+            match_pattern: match_pattern.to_string(),
+            label: String::new(),
+            input,
+            output: input,
+            cache_read: 0.0,
+            cache_write: 0.0,
+            cache_write_1h: 0.0,
+            cached_input: 0.0,
+        }
+    }
+
+    #[test]
+    fn find_pricing_prefers_longest_matching_pattern() {
+        let provider = ProviderConfig {
+            default: "gpt".to_string(),
+            models: vec![
+                pricing_entry("gpt", 1.0),
+                pricing_entry("gpt-5.5", 5.0),
+                pricing_entry("gpt-5.5-pro", 30.0),
+            ],
+        };
+
+        let exact = find_pricing(&provider, "gpt-5.5-pro").unwrap();
+        assert!((exact.input - 30.0).abs() < 0.001);
+
+        let snapshot = find_pricing(&provider, "gpt-5.5-2026-04-23").unwrap();
+        assert!((snapshot.input - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn format_price_handles_non_finite_and_near_integer_values() {
+        assert_eq!(format_price(f64::NAN), "—");
+        assert_eq!(format_price(f64::INFINITY), "—");
+        assert_eq!(format_price(3.0000000001), "$3");
     }
 
     #[test]

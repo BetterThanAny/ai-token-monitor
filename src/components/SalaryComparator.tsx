@@ -16,7 +16,7 @@ export function SalaryComparator({ stats }: Props) {
   const { prefs } = useSettings();
   const t = useI18n();
   const cardRef = useRef<HTMLDivElement>(null);
-  const { capture, captured, error: shareError } = useShareImage(cardRef);
+  const { capture, captured, saved, error: shareError, canCopyImage } = useShareImage(cardRef);
   const shareErrorText = shareError
     ? t(shareError.action === "save" ? "shareImage.saveFailed" : "shareImage.copyFailed")
     : null;
@@ -120,13 +120,13 @@ export function SalaryComparator({ stats }: Props) {
           )}
           <button
             onClick={capture}
-            title={shareError?.message ?? t("salary.share")}
+            title={shareError?.message ?? (canCopyImage ? t("salary.share") : "Save PNG")}
             style={{
               background: "none",
               border: "none",
               cursor: "pointer",
               padding: 2,
-              color: shareErrorText ? "#ef4444" : captured ? "var(--accent-mint)" : "var(--text-secondary)",
+              color: shareErrorText ? "#ef4444" : captured || saved ? "var(--accent-mint)" : "var(--text-secondary)",
               transition: "color 0.2s ease",
               flexShrink: 0,
             }}
@@ -138,13 +138,23 @@ export function SalaryComparator({ stats }: Props) {
                   <line x1="15" y1="9" x2="9" y2="15"/>
                   <line x1="9" y1="9" x2="15" y2="15"/>
                 </>
-              ) : captured ? (
+              ) : captured || saved ? (
                 <polyline points="20 6 9 17 4 12"/>
               ) : (
                 <>
-                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                  <polyline points="16 6 12 2 8 6"/>
-                  <line x1="12" y1="2" x2="12" y2="15"/>
+                  {canCopyImage ? (
+                    <>
+                      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                      <polyline points="16 6 12 2 8 6"/>
+                      <line x1="12" y1="2" x2="12" y2="15"/>
+                    </>
+                  ) : (
+                    <>
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </>
+                  )}
                 </>
               )}
             </svg>

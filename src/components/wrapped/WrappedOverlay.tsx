@@ -27,7 +27,7 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [period, setPeriod] = useState<WrappedPeriod>("month");
   const cardRef = useRef<HTMLDivElement>(null);
-  const { capture, captured, error: shareError } = useShareImage(cardRef);
+  const { capture, captured, saved, error: shareError, canCopyImage } = useShareImage(cardRef);
   const touchStartX = useRef(0);
   const { prefs } = useSettings();
   const t = useI18n();
@@ -75,12 +75,18 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
   useEffect(() => {
     if (!visible) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight" || e.key === " ") goNext();
-      else if (e.key === "ArrowLeft") goPrev();
-      else if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      } else if (e.key === "ArrowRight" || e.key === " ") {
+        goNext();
+      } else if (e.key === "ArrowLeft") {
+        goPrev();
+      }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
   }, [visible, goNext, goPrev, onClose]);
 
   if (!visible) return null;
@@ -223,11 +229,11 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
           {/* Share */}
           <button
             onClick={capture}
-            title={shareError?.message}
+            title={shareError?.message ?? (canCopyImage ? t("wrapped.share") : "Save PNG")}
             style={{
               background: shareErrorText
                 ? "#ef4444"
-                : captured
+                : captured || saved
                   ? "var(--accent-mint)"
                   : "rgba(255,255,255,0.2)",
               border: "none",
@@ -252,21 +258,31 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
                 </svg>
                 {shareErrorText}
               </>
-            ) : captured ? (
+            ) : captured || saved ? (
               <>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12"/>
                 </svg>
-                {t("wrapped.copied")}
+                {canCopyImage ? t("wrapped.copied") : "PNG"}
               </>
             ) : (
               <>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                  <polyline points="16 6 12 2 8 6"/>
-                  <line x1="12" y1="2" x2="12" y2="15"/>
+                  {canCopyImage ? (
+                    <>
+                      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                      <polyline points="16 6 12 2 8 6"/>
+                      <line x1="12" y1="2" x2="12" y2="15"/>
+                    </>
+                  ) : (
+                    <>
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </>
+                  )}
                 </svg>
-                {t("wrapped.share")}
+                {canCopyImage ? t("wrapped.share") : "PNG"}
               </>
             )}
           </button>

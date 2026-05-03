@@ -91,7 +91,7 @@ function AppContent() {
     includeClaude: prefs.include_claude,
     includeCodex: prefs.include_codex,
   });
-  const { states: accountStates, loading: accountStatesLoading } = useAccountStates({
+  const { states: accountStates, loading: accountStatesLoading, error: accountStatesError } = useAccountStates({
     includeClaude: prefs.include_claude,
     includeCodex: prefs.include_codex,
     codexDirs: prefs.codex_dirs,
@@ -167,7 +167,7 @@ function AppContent() {
           </div>
           <div>{t("app.error.title")}</div>
           <div style={{ fontSize: 10, color: "var(--text-secondary)" }}>
-            {t("app.error.description")}
+            {error ?? t("app.error.description")}
           </div>
         </div>
       </PopoverShell>
@@ -230,7 +230,11 @@ function AppContent() {
         )}
 
         {analyticsSubTab === "limits" && (
-          <AccountLimits states={accountStates} loading={accountStatesLoading} />
+          <AccountLimits
+            states={accountStates}
+            loading={accountStatesLoading}
+            error={accountStatesError}
+          />
         )}
       </div>
 

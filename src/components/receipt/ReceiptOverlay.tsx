@@ -23,7 +23,7 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
   const [period, setPeriod] = useState<Period>("today");
   const [appVersion, setAppVersion] = useState("0.0.0");
   const receiptRef = useRef<HTMLDivElement>(null);
-  const { capture, captured, error: shareError } = useShareImage(receiptRef);
+  const { capture, captured, saved, error: shareError, canCopyImage } = useShareImage(receiptRef);
   const t = useI18n();
   const shareErrorText = shareError
     ? t(shareError.action === "save" ? "shareImage.saveFailed" : "shareImage.copyFailed")
@@ -32,6 +32,19 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
   useEffect(() => {
     getVersion().then(setAppVersion);
   }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleEsc, true);
+    return () => document.removeEventListener("keydown", handleEsc, true);
+  }, [visible, onClose]);
 
   if (!visible) return null;
 
@@ -129,7 +142,7 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
         {/* Share button */}
         <button
           onClick={capture}
-          title={shareError?.message}
+          title={shareError?.message ?? (canCopyImage ? t("receipt.share") : "Save PNG")}
           style={{
             marginTop: 12,
             padding: "8px 24px",
@@ -138,7 +151,7 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
             cursor: "pointer",
             background: shareErrorText
               ? "#ef4444"
-              : captured
+            : captured || saved
               ? "var(--accent-mint)"
               : "linear-gradient(135deg, var(--accent-purple), var(--accent-pink))",
             color: "#fff",
@@ -159,21 +172,31 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
               </svg>
               {shareErrorText}
             </>
-          ) : captured ? (
+          ) : captured || saved ? (
             <>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12"/>
               </svg>
-              {t("receipt.copied")}
+              {canCopyImage ? t("receipt.copied") : "PNG"}
             </>
           ) : (
             <>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                <polyline points="16 6 12 2 8 6"/>
-                <line x1="12" y1="2" x2="12" y2="15"/>
+                {canCopyImage ? (
+                  <>
+                    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                    <polyline points="16 6 12 2 8 6"/>
+                    <line x1="12" y1="2" x2="12" y2="15"/>
+                  </>
+                ) : (
+                  <>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                  </>
+                )}
               </svg>
-              {t("receipt.share")}
+              {canCopyImage ? t("receipt.share") : "PNG"}
             </>
           )}
         </button>
