@@ -82,10 +82,16 @@ fn parse_statusline_rate_limits_snapshot(
         parse_statusline_usage_window(rate_limits.get("seven_day_sonnet"), "seven_day_sonnet")?;
     let seven_day_opus =
         parse_statusline_usage_window(rate_limits.get("seven_day_opus"), "seven_day_opus")?;
+    let extra_usage = parse_statusline_extra_usage(
+        rate_limits
+            .get("extra_usage")
+            .or_else(|| rate_limits.get("extraUsage")),
+    );
     if five_hour.is_none()
         && seven_day.is_none()
         && seven_day_sonnet.is_none()
         && seven_day_opus.is_none()
+        && extra_usage.is_none()
     {
         return Err(
             "Claude statusLine quota snapshot does not contain usable rate_limits.".to_string(),
@@ -118,7 +124,7 @@ fn parse_statusline_rate_limits_snapshot(
         seven_day,
         seven_day_sonnet,
         seven_day_opus,
-        extra_usage: None,
+        extra_usage,
         fetched_at,
         is_stale,
     })
@@ -151,6 +157,73 @@ fn parse_statusline_usage_window(
         utilization: used_percentage,
         resets_at: parse_reset_value(value.get("resets_at")),
     }))
+}
+
+fn parse_statusline_extra_usage(value: Option<&Value>) -> Option<ExtraUsage> {
+    let value = value?;
+    if value.is_null() || !value.is_object() {
+        return None;
+    }
+
+    let is_enabled = value
+        .get("is_enabled")
+        .or_else(|| value.get("isEnabled"))
+        .or_else(|| value.get("enabled"))
+        .and_then(value_as_bool)
+        .unwrap_or(true);
+    let monthly_limit_value = value
+        .get("monthly_limit")
+        .or_else(|| value.get("monthlyLimit"))
+        .or_else(|| value.get("limit"))
+        .or_else(|| value.get("total"));
+    let used_credits_value = value
+        .get("used_credits")
+        .or_else(|| value.get("usedCredits"))
+        .or_else(|| value.get("used"));
+    let remaining_value = value.get("remaining");
+    let utilization_value = value
+        .get("utilization")
+        .or_else(|| value.get("used_percentage"))
+        .or_else(|| value.get("used_percent"));
+
+    if monthly_limit_value.is_none()
+        && used_credits_value.is_none()
+        && remaining_value.is_none()
+        && utilization_value.is_none()
+    {
+        return None;
+    }
+
+    let monthly_limit = monthly_limit_value
+        .and_then(value_as_f64)
+        .unwrap_or(0.0)
+        .max(0.0);
+    let used_credits = used_credits_value
+        .and_then(value_as_f64)
+        .or_else(|| {
+            remaining_value
+                .and_then(value_as_f64)
+                .map(|remaining| monthly_limit - remaining)
+        })
+        .unwrap_or(0.0)
+        .clamp(0.0, monthly_limit.max(0.0));
+    let utilization = utilization_value
+        .and_then(value_as_f64)
+        .map(clamp_percentage)
+        .unwrap_or_else(|| {
+            if monthly_limit > 0.0 {
+                clamp_percentage((used_credits / monthly_limit) * 100.0)
+            } else {
+                0.0
+            }
+        });
+
+    Some(ExtraUsage {
+        is_enabled,
+        monthly_limit,
+        used_credits,
+        utilization,
+    })
 }
 
 fn parse_reset_value(value: Option<&Value>) -> Option<String> {
@@ -195,6 +268,20 @@ fn value_as_f64(value: &Value) -> Option<f64> {
     } else {
         None
     }
+}
+
+fn value_as_bool(value: &Value) -> Option<bool> {
+    value.as_bool().or_else(|| {
+        value.as_str().and_then(|value| {
+            if value.eq_ignore_ascii_case("true") {
+                Some(true)
+            } else if value.eq_ignore_ascii_case("false") {
+                Some(false)
+            } else {
+                None
+            }
+        })
+    })
 }
 
 fn clamp_percentage(value: f64) -> f64 {
@@ -266,6 +353,30 @@ mod tests {
 
         assert_eq!(usage.seven_day_sonnet.unwrap().utilization, 33.0);
         assert_eq!(usage.seven_day_opus.unwrap().utilization, 44.0);
+    }
+
+    #[test]
+    fn parses_statusline_extra_usage() {
+        let usage = parse_statusline_rate_limits_snapshot(
+            r#"{
+                "captured_at": "2026-05-02T12:00:00Z",
+                "rate_limits": {
+                    "extra_usage": {
+                        "is_enabled": true,
+                        "monthly_limit": 200,
+                        "used_credits": 75
+                    }
+                }
+            }"#,
+            None,
+        )
+        .unwrap();
+
+        let extra = usage.extra_usage.unwrap();
+        assert!(extra.is_enabled);
+        assert_eq!(extra.monthly_limit, 200.0);
+        assert_eq!(extra.used_credits, 75.0);
+        assert_eq!(extra.utilization, 37.5);
     }
 
     #[test]

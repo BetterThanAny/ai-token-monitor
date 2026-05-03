@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
@@ -74,7 +74,6 @@ fn calculate_cost(
 }
 
 pub struct ClaudeCodeProvider {
-    primary_dir: PathBuf,
     all_dirs: Vec<PathBuf>,
 }
 
@@ -107,10 +106,7 @@ impl ClaudeCodeProvider {
             all_dirs.insert(0, primary.clone());
         }
 
-        Self {
-            primary_dir: primary,
-            all_dirs,
-        }
+        Self { all_dirs }
     }
 
     /// Collect current file metadata (mtime, size) for all JSONL files across all config dirs.
@@ -265,6 +261,7 @@ impl ClaudeCodeProvider {
             daily.output_tokens += entry.output_tokens;
             daily.cache_read_tokens += entry.cache_read_input_tokens;
             daily.cache_write_tokens += entry.cache_creation_input_tokens;
+            daily.tool_calls += entry.tool_names.len() as u32;
 
             if !entry.session_id.is_empty() {
                 all_session_ids.insert(entry.session_id.clone());
@@ -290,19 +287,19 @@ impl ClaudeCodeProvider {
             mu.cost_usd += cost;
         }
 
-        // Count sessions and tool calls from stats-cache.json
         for (date, session_ids) in &daily_session_ids {
             if let Some(daily) = daily_map.get_mut(date) {
                 daily.sessions = session_ids.len() as u32;
             }
         }
 
-        if let Ok(cache) = self.parse_stats_cache() {
-            for activity in &cache.daily_activity {
-                if let Some(daily) = daily_map.get_mut(&activity.date) {
-                    daily.sessions = activity.session_count;
-                    daily.tool_calls = activity.tool_call_count;
-                }
+        // stats-cache.json is supplementary. Aggregate it across every configured
+        // Claude root, and never let a partial or stale cache lower JSONL-derived
+        // session/tool counts.
+        for activity in self.parse_stats_caches().values() {
+            if let Some(daily) = daily_map.get_mut(&activity.date) {
+                daily.sessions = daily.sessions.max(activity.session_count);
+                daily.tool_calls = daily.tool_calls.max(activity.tool_call_count);
             }
         }
 
@@ -323,8 +320,30 @@ impl ClaudeCodeProvider {
         }
     }
 
-    fn parse_stats_cache(&self) -> Result<StatsCache, String> {
-        let path = self.primary_dir.join("stats-cache.json");
+    fn parse_stats_caches(&self) -> HashMap<String, DailyActivity> {
+        let mut daily_activity = HashMap::new();
+
+        for claude_dir in &self.all_dirs {
+            let Ok(cache) = Self::parse_stats_cache_at(claude_dir) else {
+                continue;
+            };
+            for activity in cache.daily_activity {
+                let date = activity.date.clone();
+                let entry = daily_activity.entry(date.clone()).or_insert(DailyActivity {
+                    date,
+                    session_count: 0,
+                    tool_call_count: 0,
+                });
+                entry.session_count += activity.session_count;
+                entry.tool_call_count += activity.tool_call_count;
+            }
+        }
+
+        daily_activity
+    }
+
+    fn parse_stats_cache_at(claude_dir: &Path) -> Result<StatsCache, String> {
+        let path = claude_dir.join("stats-cache.json");
         let content = fs::read_to_string(&path)
             .map_err(|e| format!("Failed to read stats-cache.json: {}", e))?;
         serde_json::from_str(&content)
@@ -970,6 +989,17 @@ mod tests {
         ))
     }
 
+    fn temp_dir_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "ai-token-monitor-claude-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
     #[test]
     fn parse_session_line_extracts_fields() {
         let entry = parse_session_line(sample_jsonl_line()).expect("should parse");
@@ -1065,7 +1095,6 @@ mod tests {
     #[test]
     fn build_stats_counts_total_sessions_uniquely_across_days() {
         let provider = ClaudeCodeProvider {
-            primary_dir: temp_jsonl_path("missing-dir"),
             all_dirs: Vec::new(),
         };
         let mut first = parse_session_line(sample_jsonl_line()).unwrap();
@@ -1086,6 +1115,49 @@ mod tests {
         assert_eq!(stats.daily.len(), 2);
         assert_eq!(stats.daily.iter().map(|d| d.sessions).sum::<u32>(), 2);
         assert_eq!(stats.total_sessions, 1);
+    }
+
+    #[test]
+    fn build_stats_aggregates_stats_cache_across_config_dirs() {
+        let primary = temp_dir_path("stats-cache-primary");
+        let secondary = temp_dir_path("stats-cache-secondary");
+        std::fs::create_dir_all(&primary).unwrap();
+        std::fs::create_dir_all(&secondary).unwrap();
+        std::fs::write(
+            primary.join("stats-cache.json"),
+            r#"{"dailyActivity":[{"date":"2026-03-24","sessionCount":1,"toolCallCount":2}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            secondary.join("stats-cache.json"),
+            r#"{"dailyActivity":[{"date":"2026-03-24","sessionCount":1,"toolCallCount":3}]}"#,
+        )
+        .unwrap();
+
+        let provider = ClaudeCodeProvider {
+            all_dirs: vec![primary.clone(), secondary.clone()],
+        };
+        let mut first = parse_session_line(sample_jsonl_line()).unwrap();
+        first.date = "2026-03-24".to_string();
+        first.session_id = "session-a".to_string();
+        first.message_id = "msg-a".to_string();
+        first.request_id = "req-a".to_string();
+        let mut second = first.clone();
+        second.session_id = "session-b".to_string();
+        second.message_id = "msg-b".to_string();
+        second.request_id = "req-b".to_string();
+
+        let mut entries = HashMap::new();
+        entries.insert("msg-a:req-a".to_string(), first);
+        entries.insert("msg-b:req-b".to_string(), second);
+
+        let stats = provider.build_stats(&entries);
+        let _ = std::fs::remove_dir_all(primary);
+        let _ = std::fs::remove_dir_all(secondary);
+
+        let daily = stats.daily.iter().find(|d| d.date == "2026-03-24").unwrap();
+        assert_eq!(daily.sessions, 2);
+        assert_eq!(daily.tool_calls, 5);
     }
 
     #[test]

@@ -39,6 +39,10 @@ struct AlertState {
 
 static ALERT_STATE: Mutex<Option<AlertState>> = Mutex::new(None);
 
+fn utilization_reset_detected(prev_utilization: f64, utilization: f64) -> bool {
+    prev_utilization > 5.0 && utilization <= 1.0
+}
+
 fn request_shutdown() {
     SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
 }
@@ -190,7 +194,10 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle, usage: &claude_usage::Cl
             });
 
         // Reset detection: if window changed or utilization dropped to ~0
-        if win_state.window_id != *window_id {
+        let window_changed = win_state.window_id != *window_id;
+        let utilization_reset =
+            utilization_reset_detected(win_state.prev_utilization, *utilization);
+        if window_changed || utilization_reset {
             // Check if this is a reset (prev was > 0)
             let was_active = win_state.prev_utilization > 5.0;
             win_state.window_id = window_id.clone();
@@ -286,6 +293,19 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle, usage: &claude_usage::Cl
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utilization_reset_requires_active_drop_to_near_zero() {
+        assert!(utilization_reset_detected(42.0, 0.0));
+        assert!(utilization_reset_detected(42.0, 1.0));
+        assert!(!utilization_reset_detected(42.0, 2.0));
+        assert!(!utilization_reset_detected(0.0, 0.0));
     }
 }
 

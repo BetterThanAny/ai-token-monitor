@@ -64,7 +64,7 @@ export function Heatmap({ daily, weeks: WEEKS = DEFAULT_WEEKS }: Props) {
     for (let i = 0; i < WEEKS * DAYS; i++) {
       const d = new Date(startDate);
       d.setDate(startDate.getDate() + i);
-      const dateStr = d.toISOString().slice(0, 10);
+      const dateStr = toLocalDateStr(d);
       const usage = dateMap.get(dateStr);
       const tokens = usage ? getTotalTokens(usage.tokens) : 0;
       const cost = usage?.cost_usd ?? 0;

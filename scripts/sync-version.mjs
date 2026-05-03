@@ -25,4 +25,16 @@ const cargoPath = join(root, 'src-tauri/Cargo.toml');
 const cargo = readFileSync(cargoPath, 'utf8');
 writeFileSync(cargoPath, cargo.replace(/^version = ".*"/m, `version = "${version}"`));
 
+// Cargo.lock
+const cargoLockPath = join(root, 'src-tauri/Cargo.lock');
+const cargoLock = readFileSync(cargoLockPath, 'utf8');
+const cargoLockPattern = /(\[\[package\]\]\nname = "ai-token-monitor"\nversion = ")[^"]+(")/;
+if (!cargoLockPattern.test(cargoLock)) {
+  throw new Error('Could not find ai-token-monitor package version in src-tauri/Cargo.lock');
+}
+writeFileSync(
+  cargoLockPath,
+  cargoLock.replace(cargoLockPattern, `$1${version}$2`)
+);
+
 console.log(`Synced version to ${version}`);

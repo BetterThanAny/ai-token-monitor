@@ -7,6 +7,7 @@ import {
   computeTotalTokens,
   computeStreaks,
   computeCacheSavings,
+  getModelTotalTokens,
   shortenModelName,
 } from "../../lib/statsHelpers";
 import type { Period } from "../../lib/statsHelpers";
@@ -58,7 +59,7 @@ export const Receipt = forwardRef<HTMLDivElement, Props>(
       for (const [model, info] of modelMap) {
         const overallUsage = stats.model_usage[model];
         if (overallUsage) {
-          const overallTotal = overallUsage.input_tokens + overallUsage.output_tokens + overallUsage.cache_read;
+          const overallTotal = getModelTotalTokens(overallUsage);
           if (overallTotal > 0) {
             info.cost = (info.tokens / overallTotal) * overallUsage.cost_usd;
           }
