@@ -48,10 +48,14 @@ export function findBusiestDay(daily: DailyUsage[]): { date: string; tokens: num
   return best;
 }
 
+export function getModelTotalTokens(usage: ModelUsage): number {
+  return usage.input_tokens + usage.output_tokens + usage.cache_read + usage.cache_write;
+}
+
 export function getMostUsedModel(modelUsage: Record<string, ModelUsage>): { name: string; totalTokens: number; cost: number } | null {
   let best: { name: string; totalTokens: number; cost: number } | null = null;
   for (const [name, u] of Object.entries(modelUsage)) {
-    const total = u.input_tokens + u.output_tokens + u.cache_read;
+    const total = getModelTotalTokens(u);
     if (!best || total > best.totalTokens) {
       best = { name, totalTokens: total, cost: u.cost_usd };
     }

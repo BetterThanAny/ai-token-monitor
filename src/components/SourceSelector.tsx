@@ -49,12 +49,18 @@ export function SourceSelector() {
     if (checkedCodexDirs !== codexDirsKey) return;
     const patch: Partial<typeof prefs> = {};
     if (prefs.include_codex && !codexAvailable) patch.include_codex = false;
+    const nextIncludeClaude = patch.include_claude ?? prefs.include_claude;
+    const nextIncludeCodex = patch.include_codex ?? prefs.include_codex;
+    if (!nextIncludeClaude && !(nextIncludeCodex && codexAvailable)) {
+      patch.include_claude = true;
+    }
     if (Object.keys(patch).length > 0) updatePrefs(patch);
   }, [
     availabilityLoaded,
     checkedCodexDirs,
     codexAvailable,
     codexDirsKey,
+    prefs.include_claude,
     prefs.include_codex,
     updatePrefs,
   ]);
