@@ -13,6 +13,7 @@ import { useI18n } from "../i18n/I18nContext";
 interface Props {
   states: AccountState[];
   loading?: boolean;
+  error?: string | null;
 }
 
 const MAX_CLIENTS = 8;
@@ -74,6 +75,28 @@ function DiagnosticRows({ items }: { items: Array<{ key: string; provider: strin
           {item.message}
         </div>
       ))}
+    </div>
+  );
+}
+
+function ErrorNotice({ message }: { message: string }) {
+  return (
+    <div
+      role="alert"
+      style={{
+        background: "rgba(244, 63, 94, 0.10)",
+        border: "1px solid rgba(244, 63, 94, 0.24)",
+        borderRadius: "var(--radius-lg)",
+        padding: "10px 12px",
+        boxShadow: "var(--shadow-card)",
+        color: "var(--text-primary)",
+        fontSize: 12,
+        fontWeight: 700,
+        lineHeight: 1.45,
+        wordBreak: "break-word",
+      }}
+    >
+      {message}
     </div>
   );
 }
@@ -268,7 +291,7 @@ function ClientRows({ clients }: { clients: Array<{ provider: string; client: Cl
   );
 }
 
-export function AccountLimits({ states, loading = false }: Props) {
+export function AccountLimits({ states, loading = false, error = null }: Props) {
   const t = useI18n();
   const windows = states.flatMap((state) =>
     state.limit_windows.map((window) => ({ provider: state.provider, window })),
@@ -299,6 +322,8 @@ export function AccountLimits({ states, loading = false }: Props) {
 
   return (
     <>
+      {error && <ErrorNotice message={error} />}
+
       {hasStale && (
         <div style={{
           background: "var(--bg-card)",
@@ -345,7 +370,7 @@ export function AccountLimits({ states, loading = false }: Props) {
         </Card>
       )}
 
-      {!hasData && diagnostics.length === 0 && (
+      {!hasData && diagnostics.length === 0 && !error && (
         <Card title={t("limits.title")}>
           <Empty text={t("limits.empty.all")} />
         </Card>

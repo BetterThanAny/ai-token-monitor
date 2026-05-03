@@ -166,7 +166,10 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle, usage: &claude_usage::Cl
 
     let mut state_guard = match ALERT_STATE.lock() {
         Ok(g) => g,
-        Err(_) => return,
+        Err(poisoned) => {
+            eprintln!("[ALERT] ALERT_STATE mutex poisoned; recovering alert state");
+            poisoned.into_inner()
+        }
     };
 
     let state = state_guard.get_or_insert_with(|| AlertState {

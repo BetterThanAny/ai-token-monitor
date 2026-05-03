@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { DailyUsage } from "../lib/types";
 import { getTotalTokens, toLocalDateStr, formatTokens } from "../lib/format";
+import { computeStreaks } from "../lib/statsHelpers";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../i18n/I18nContext";
 
@@ -19,6 +20,8 @@ function shortDate(dateStr: string): string {
 export function ActivityStats({ daily, year }: Props) {
   const { prefs } = useSettings();
   const t = useI18n();
+  const currentYear = new Date().getFullYear();
+  const isCurrentYear = year === currentYear;
 
   const stats = useMemo(() => {
     const yearData = daily
@@ -40,88 +43,31 @@ export function ActivityStats({ daily, year }: Props) {
       if (d.tokens > bestDay.tokens) bestDay = d;
     }
 
-    // This week
+    // This week only has a current-time meaning.
     const today = new Date();
-    const dow = today.getDay();
-    const mondayOffset = dow === 0 ? 6 : dow - 1;
-    const monday = new Date(today);
-    monday.setDate(today.getDate() - mondayOffset);
-    const mondayStr = toLocalDateStr(monday);
     const todayStr = toLocalDateStr(today);
-    const weekTotal = yearData
-      .filter((d) => d.date >= mondayStr && d.date <= todayStr)
-      .reduce((sum, d) => sum + d.tokens, 0);
-
-    // Streaks
-    const activeDates = new Set(
-      yearData.filter((d) => d.tokens > 0).map((d) => d.date)
-    );
-
-    // Current streak (from today backwards)
-    let currentStreak = 0;
-    let currentStart = todayStr;
-    const checkDate = new Date(today);
-    while (true) {
-      const ds = toLocalDateStr(checkDate);
-      if (activeDates.has(ds)) {
-        currentStreak++;
-        currentStart = ds;
-        checkDate.setDate(checkDate.getDate() - 1);
-      } else {
-        break;
-      }
+    let weekTotal = 0;
+    if (isCurrentYear) {
+      const dow = today.getDay();
+      const mondayOffset = dow === 0 ? 6 : dow - 1;
+      const monday = new Date(today);
+      monday.setDate(today.getDate() - mondayOffset);
+      const mondayStr = toLocalDateStr(monday);
+      weekTotal = yearData
+        .filter((d) => d.date >= mondayStr && d.date <= todayStr)
+        .reduce((sum, d) => sum + d.tokens, 0);
     }
 
-    // Longest streak
-    const sortedDates = Array.from(activeDates).sort();
-    let longestStreak = 0;
-    let longestStart = "";
-    let longestEnd = "";
-    let streak = 0;
-    let streakStart = "";
-    let prevDate = "";
-
-    for (const ds of sortedDates) {
-      if (prevDate) {
-        const prev = new Date(prevDate + "T00:00:00");
-        const curr = new Date(ds + "T00:00:00");
-        const diff = (curr.getTime() - prev.getTime()) / 86400000;
-        if (diff === 1) {
-          streak++;
-        } else {
-          if (streak > longestStreak) {
-            longestStreak = streak;
-            longestStart = streakStart;
-            longestEnd = prevDate;
-          }
-          streak = 1;
-          streakStart = ds;
-        }
-      } else {
-        streak = 1;
-        streakStart = ds;
-      }
-      prevDate = ds;
-    }
-    if (streak > longestStreak) {
-      longestStreak = streak;
-      longestStart = streakStart;
-      longestEnd = prevDate;
-    }
+    const streaks = computeStreaks(daily, year);
 
     return {
       total,
       weekTotal,
       bestDay,
       average,
-      currentStreak,
-      currentStart,
-      currentEnd: todayStr,
-      longestStreak,
-      longestStart,
-      longestEnd,
+      ...streaks,
     };
-  }, [daily, year]);
+  }, [daily, year, isCurrentYear]);
 
   const fmt = prefs.number_format;
 
@@ -136,12 +82,14 @@ export function ActivityStats({ daily, year }: Props) {
         <StatBox
           value={formatTokens(stats.total, fmt)}
           label={t("activity.total")}
-          sub={`${shortDate(`${year}-01-01`)} → ${year === new Date().getFullYear() ? shortDate(toLocalDateStr(new Date())) : shortDate(`${year}-12-31`)}`}
+          sub={`${shortDate(`${year}-01-01`)} → ${isCurrentYear ? shortDate(toLocalDateStr(new Date())) : shortDate(`${year}-12-31`)}`}
         />
-        <StatBox
-          value={formatTokens(stats.weekTotal, fmt)}
-          label={t("activity.thisWeek")}
-        />
+        {isCurrentYear && (
+          <StatBox
+            value={formatTokens(stats.weekTotal, fmt)}
+            label={t("activity.thisWeek")}
+          />
+        )}
         <StatBox
           value={stats.bestDay.tokens > 0 ? formatTokens(stats.bestDay.tokens, fmt) : "—"}
           label={t("activity.bestDay")}
@@ -178,12 +126,14 @@ export function ActivityStats({ daily, year }: Props) {
           start={stats.longestStart}
           end={stats.longestEnd}
         />
-        <StreakBox
-          days={stats.currentStreak}
-          label={t("activity.current")}
-          start={stats.currentStart}
-          end={stats.currentEnd}
-        />
+        {isCurrentYear && (
+          <StreakBox
+            days={stats.currentStreak}
+            label={t("activity.current")}
+            start={stats.currentStart}
+            end={stats.currentEnd}
+          />
+        )}
       </div>
     </div>
   );

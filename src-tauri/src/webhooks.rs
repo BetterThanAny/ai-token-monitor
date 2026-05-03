@@ -24,6 +24,10 @@ fn build_client() -> reqwest::Client {
         .unwrap_or_default()
 }
 
+fn webhook_request_failed(platform: &str) -> String {
+    format!("{} request failed", platform)
+}
+
 #[derive(Debug, Clone, Copy)]
 enum WebhookPlatform {
     Discord,
@@ -249,7 +253,7 @@ async fn send_discord(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| webhook_request_failed("Discord"))?;
     if !resp.status().is_success() {
         return Err(format!("Discord returned {}", resp.status()));
     }
@@ -294,7 +298,7 @@ async fn send_slack(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| webhook_request_failed("Slack"))?;
     if !resp.status().is_success() {
         return Err(format!("Slack returned {}", resp.status()));
     }
@@ -345,7 +349,7 @@ async fn send_telegram(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| webhook_request_failed("Telegram"))?;
     if !resp.status().is_success() {
         return Err(format!("Telegram returned {}", resp.status()));
     }
@@ -377,7 +381,7 @@ pub async fn test_webhook_endpoint(platform: &str, secrets: &AiKeys) -> Result<S
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| webhook_request_failed("Discord"))?;
             if resp.status().is_success() {
                 Ok("Discord test message sent!".to_string())
             } else {
@@ -398,7 +402,7 @@ pub async fn test_webhook_endpoint(platform: &str, secrets: &AiKeys) -> Result<S
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| webhook_request_failed("Slack"))?;
             if resp.status().is_success() {
                 Ok("Slack test message sent!".to_string())
             } else {
@@ -425,7 +429,7 @@ pub async fn test_webhook_endpoint(platform: &str, secrets: &AiKeys) -> Result<S
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| webhook_request_failed("Telegram"))?;
             if resp.status().is_success() {
                 Ok("Telegram test message sent!".to_string())
             } else {
@@ -490,5 +494,15 @@ mod tests {
             "https://discord.com/services/T000/B000/secret"
         )
         .is_err());
+    }
+
+    #[test]
+    fn request_failure_message_does_not_include_secrets() {
+        let message = webhook_request_failed("Telegram");
+
+        assert_eq!(message, "Telegram request failed");
+        assert!(!message.contains("bot"));
+        assert!(!message.contains("token"));
+        assert!(!message.contains("https://"));
     }
 }

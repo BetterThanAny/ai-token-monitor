@@ -12,6 +12,11 @@ function formatShareImageError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function canCopyPngToClipboard(): boolean {
+  const platform = `${navigator.userAgent} ${navigator.platform}`.toLowerCase();
+  return platform.includes("mac");
+}
+
 export function useShareImage(ref: RefObject<HTMLElement | null>) {
   const [capturing, setCapturing] = useState(false);
   const [captured, setCaptured] = useState(false);
@@ -58,41 +63,27 @@ export function useShareImage(ref: RefObject<HTMLElement | null>) {
     errorTimerRef.current = timer;
   }, []);
 
-  const capture = useCallback(async () => {
-    if (!ref.current || capturingRef.current) return;
-    capturingRef.current = true;
-    setCapturing(true);
-    clearError();
-    try {
-      const canvas = await html2canvas(ref.current, {
-        backgroundColor: null,
-        scale: 2,
-        useCORS: true,
-        logging: false,
-      });
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, "image/png")
-      );
-      if (!blob) {
-        throw new Error("PNG rendering produced no data");
-      }
-      const arrayBuffer = await blob.arrayBuffer();
-      const uint8Array = Array.from(new Uint8Array(arrayBuffer));
-      await invoke("copy_png_to_clipboard", { pngData: uint8Array });
-      setCaptured(true);
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => {
-        setCaptured(false);
-        timerRef.current = null;
-      }, 2000);
-    } catch (e) {
-      console.error("Share image capture failed:", e);
-      showError("copy", e);
-    } finally {
-      capturingRef.current = false;
-      setCapturing(false);
+  const renderPngData = useCallback(async () => {
+    if (!ref.current) {
+      throw new Error("No element to capture");
     }
-  }, [ref, clearError, showError]);
+
+    const canvas = await html2canvas(ref.current, {
+      backgroundColor: null,
+      scale: 2,
+      useCORS: true,
+      logging: false,
+    });
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/png")
+    );
+    if (!blob) {
+      throw new Error("PNG rendering produced no data");
+    }
+
+    const arrayBuffer = await blob.arrayBuffer();
+    return Array.from(new Uint8Array(arrayBuffer));
+  }, [ref]);
 
   const savePng = useCallback(async (defaultName = "ai-token-monitor-badge.png") => {
     if (!ref.current || capturingRef.current) return;
@@ -100,27 +91,13 @@ export function useShareImage(ref: RefObject<HTMLElement | null>) {
     setSaving(true);
     clearError();
     try {
-      const canvas = await html2canvas(ref.current, {
-        backgroundColor: null,
-        scale: 2,
-        useCORS: true,
-        logging: false,
-      });
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, "image/png")
-      );
-      if (!blob) {
-        throw new Error("PNG rendering produced no data");
-      }
-
+      const uint8Array = await renderPngData();
       const path = await save({
         defaultPath: defaultName,
         filters: [{ name: "PNG Image", extensions: ["png"] }],
       });
       if (!path) return;
 
-      const arrayBuffer = await blob.arrayBuffer();
-      const uint8Array = Array.from(new Uint8Array(arrayBuffer));
       await invoke("save_png_to_file", { pngData: uint8Array, path });
       setSaved(true);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -135,7 +112,45 @@ export function useShareImage(ref: RefObject<HTMLElement | null>) {
       capturingRef.current = false;
       setSaving(false);
     }
-  }, [ref, clearError, showError]);
+  }, [ref, clearError, renderPngData, showError]);
 
-  return { capture, capturing, captured, savePng, saving, saved, error, clearError };
+  const capture = useCallback(async () => {
+    if (!ref.current || capturingRef.current) return;
+    if (!canCopyPngToClipboard()) {
+      await savePng();
+      return;
+    }
+
+    capturingRef.current = true;
+    setCapturing(true);
+    clearError();
+    try {
+      const uint8Array = await renderPngData();
+      await invoke("copy_png_to_clipboard", { pngData: uint8Array });
+      setCaptured(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        setCaptured(false);
+        timerRef.current = null;
+      }, 2000);
+    } catch (e) {
+      console.error("Share image capture failed:", e);
+      showError("copy", e);
+    } finally {
+      capturingRef.current = false;
+      setCapturing(false);
+    }
+  }, [ref, clearError, renderPngData, savePng, showError]);
+
+  return {
+    capture,
+    capturing,
+    captured,
+    savePng,
+    saving,
+    saved,
+    error,
+    clearError,
+    canCopyImage: canCopyPngToClipboard(),
+  };
 }

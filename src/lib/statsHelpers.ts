@@ -92,6 +92,11 @@ export interface StreakInfo {
   longestEnd: string;
 }
 
+function dateDayNumber(dateStr: string): number {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return Date.UTC(year, month - 1, day) / 86400000;
+}
+
 export function computeStreaks(daily: DailyUsage[], year?: number): StreakInfo {
   const now = new Date();
   const todayStr = toLocalDateStr(now);
@@ -135,10 +140,7 @@ export function computeStreaks(daily: DailyUsage[], year?: number): StreakInfo {
 
   for (const ds of sortedDates) {
     if (prevDate) {
-      const prev = new Date(prevDate + "T00:00:00");
-      const curr = new Date(ds + "T00:00:00");
-      const diff = (curr.getTime() - prev.getTime()) / 86400000;
-      if (diff === 1) {
+      if (dateDayNumber(ds) - dateDayNumber(prevDate) === 1) {
         streak++;
       } else {
         if (streak > longestStreak) {

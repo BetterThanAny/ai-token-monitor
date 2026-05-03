@@ -84,9 +84,9 @@ export function Header({ stats, updater }: Props) {
       console.error("Capture failed:", e);
       showToast(t("header.captureFailed"));
     }
-  }, []);
+  }, [showToast, t]);
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async () => {
     if (!stats) return;
 
     const todayStr = toLocalDateStr(new Date());
@@ -118,15 +118,23 @@ export function Header({ stats, updater }: Props) {
       ),
     ];
 
-    writeText(lines.join("\n")).then(() => {
+    try {
+      await writeText(lines.join("\n"));
       showToast(t("header.summaryCopied"));
-    });
-  }, [stats]);
+    } catch (e) {
+      console.error("Export copy failed:", e);
+      showToast(t("shareImage.copyFailed"));
+    }
+  }, [stats, showToast, t]);
 
-  const handleShareApp = useCallback(() => {
-    writeText(t("share.appMessage")).then(() => {
+  const handleShareApp = useCallback(async () => {
+    try {
+      await writeText(t("share.appMessage"));
       showToast(t("share.copied"));
-    });
+    } catch (e) {
+      console.error("Share app copy failed:", e);
+      showToast(t("shareImage.copyFailed"));
+    }
   }, [t, showToast]);
 
   const menuItems: {

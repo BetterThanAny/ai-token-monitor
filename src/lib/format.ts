@@ -9,6 +9,7 @@ export function formatTokens(n: number, format: "compact" | "full" = "compact"):
 }
 
 export function formatCost(usd: number): string {
+  if (!Number.isFinite(usd)) return "—";
   if (usd >= 100) return `$${usd.toFixed(0)}`;
   if (usd >= 1) return `$${usd.toFixed(2)}`;
   return `$${usd.toFixed(4)}`;
