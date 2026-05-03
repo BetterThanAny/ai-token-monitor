@@ -17,12 +17,6 @@
     "notification:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
-    "autostart:allow-is-enabled",
-    "core:webview:allow-create-webview-window",
-    "core:window:allow-set-title",
-    "core:window:allow-set-size",
-    "core:window:allow-center",
-    "core:window:allow-show",
-    "core:window:allow-close"
+    "autostart:allow-is-enabled"
   ]
 }

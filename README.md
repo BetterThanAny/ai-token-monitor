@@ -51,7 +51,7 @@ A system tray app for macOS and Windows that tracks **Claude Code** and **Codex*
 
 ### Notifications & Alerts
 - **Tray cost** — today's cost shown next to the tray icon (macOS menu bar title, Windows tooltip)
-- **Webhook notifications** — Discord, Slack, and Telegram alerts when Claude OAuth usage tracking is enabled and usage crosses thresholds or resets
+- **Webhook notifications** — Discord, Slack, and Telegram alerts when local quota tracking is enabled and usage crosses thresholds or resets
 - **Auto-updater** — in-app update notifications with download progress
 
 ### Customization

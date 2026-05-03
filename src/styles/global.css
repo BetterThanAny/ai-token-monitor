@@ -17,7 +17,6 @@
   --radius-md: 12px;
   --radius-sm: 8px;
 
-  --chat-bubble-other: #f0f0f0;
   --heat-0: #ebedf0;
   --heat-1: #9be9a8;
   --heat-2: #40c463;
@@ -38,7 +37,6 @@
   --shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.3);
   --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.25);
 
-  --chat-bubble-other: #21262d;
   --heat-0: #161b22;
   --heat-1: #0e4429;
   --heat-2: #006d32;
@@ -59,7 +57,6 @@
   --shadow-soft: 0 2px 12px rgba(124, 92, 252, 0.08);
   --shadow-card: 0 4px 16px rgba(124, 92, 252, 0.06);
 
-  --chat-bubble-other: #F0ECF9;
   --heat-0: #F0ECF9;
   --heat-1: #D4C8F5;
   --heat-2: #B5A0EF;
@@ -75,7 +72,6 @@
   --shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.2);
   --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.15);
 
-  --chat-bubble-other: #332f4a;
   --heat-0: #2A2740;
   --heat-1: #3D3660;
   --heat-2: #5A4590;
@@ -96,7 +92,6 @@
   --shadow-soft: 0 2px 12px rgba(2, 132, 199, 0.08);
   --shadow-card: 0 4px 16px rgba(2, 132, 199, 0.06);
 
-  --chat-bubble-other: #e0f2fe;
   --heat-0: #e0f2fe;
   --heat-1: #7dd3fc;
   --heat-2: #38bdf8;
@@ -112,7 +107,6 @@
   --shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.3);
   --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.25);
 
-  --chat-bubble-other: #283548;
   --heat-0: #1e293b;
   --heat-1: #0c4a6e;
   --heat-2: #0369a1;
@@ -133,7 +127,6 @@
   --shadow-soft: 0 2px 12px rgba(217, 119, 6, 0.08);
   --shadow-card: 0 4px 16px rgba(217, 119, 6, 0.06);
 
-  --chat-bubble-other: #fef3c7;
   --heat-0: #fef3c7;
   --heat-1: #fcd34d;
   --heat-2: #f59e0b;
@@ -149,7 +142,6 @@
   --shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.3);
   --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.25);
 
-  --chat-bubble-other: #352f2c;
   --heat-0: #292524;
   --heat-1: #78350f;
   --heat-2: #b45309;
@@ -189,25 +181,6 @@ body {
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-
-@keyframes typingDot {
-  0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
-  30% { opacity: 1; transform: scale(1.1); }
-}
-
-@keyframes miniProfileFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes miniProfileScaleIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes miniProfileSpin {
-  to { transform: rotate(360deg); }
 }
 
 /* Header actions dropdown */

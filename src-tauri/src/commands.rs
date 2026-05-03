@@ -17,9 +17,24 @@ use crate::providers::types::{
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use tauri::Manager;
 
+#[cfg(test)]
+static TEST_HOME_DIR: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+fn app_home_dir() -> PathBuf {
+    #[cfg(test)]
+    {
+        if let Ok(guard) = TEST_HOME_DIR.lock() {
+            if let Some(path) = guard.clone() {
+                return path;
+            }
+        }
+    }
+
+    dirs::home_dir().unwrap_or_default()
+}
+
 pub(crate) fn prefs_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
+    app_home_dir()
         .join(".claude")
         .join("ai-token-monitor-prefs.json")
 }
@@ -87,19 +102,21 @@ pub async fn get_account_states() -> Result<Vec<AccountState>, String> {
         }
     }
 
-    let codex_dirs = prefs.codex_dirs.clone();
-    let state = tauri::async_runtime::spawn_blocking(move || {
-        let provider = CodexProvider::new(codex_dirs);
-        if !provider.is_available() {
-            return Ok(None);
-        }
-        provider.fetch_account_state()
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    if prefs.include_codex {
+        let codex_dirs = prefs.codex_dirs.clone();
+        let state = tauri::async_runtime::spawn_blocking(move || {
+            let provider = CodexProvider::new(codex_dirs);
+            if !provider.is_available() {
+                return Ok(None);
+            }
+            provider.fetch_account_state()
+        })
+        .await
+        .map_err(|e| e.to_string())??;
 
-    if let Some(state) = state {
-        states.push(state);
+        if let Some(state) = state {
+            states.push(state);
+        }
     }
 
     Ok(states)
@@ -321,8 +338,7 @@ const APP_SALT: &[u8] = b"ai-token-monitor-v1";
 static AI_KEYS_CACHE: std::sync::Mutex<Option<Option<AiKeys>>> = std::sync::Mutex::new(None);
 
 fn encrypted_keys_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
+    app_home_dir()
         .join(".claude")
         .join(".ai-token-monitor-keys.enc")
 }
@@ -449,6 +465,9 @@ fn save_ai_keys(keys: &Option<AiKeys>) {
         Some(k) if k.has_any_key() => {
             if let Ok(json) = serde_json::to_string(k) {
                 if let Some(encrypted) = encrypt_data(json.as_bytes()) {
+                    if let Some(parent) = path.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
                     let _ = fs::write(&path, &encrypted);
                 }
             }
@@ -507,17 +526,34 @@ pub fn get_ai_keys() -> Option<AiKeys> {
 }
 
 #[tauri::command]
-pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<(), String> {
-    // Save ai_keys to encrypted file, not to JSON file
-    save_ai_keys(&prefs.ai_keys);
+pub fn set_ai_keys(keys: Option<AiKeys>) -> Result<(), String> {
+    save_ai_keys(&keys);
+    Ok(())
+}
 
+#[tauri::command]
+pub fn clear_ai_keys() -> Result<(), String> {
+    save_ai_keys(&None);
+    Ok(())
+}
+
+fn persist_preferences(prefs: &UserPreferences) -> Result<(), String> {
     let mut file_prefs = prefs.clone();
-    file_prefs.ai_keys = None; // Never write keys to disk
+    file_prefs.ai_keys = None; // Never write keys to preferences JSON
 
     let path = prefs_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create preferences directory: {}", e))?;
+    }
     let json = serde_json::to_string_pretty(&file_prefs)
         .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
-    fs::write(&path, json).map_err(|e| format!("Failed to write preferences: {}", e))?;
+    fs::write(&path, json).map_err(|e| format!("Failed to write preferences: {}", e))
+}
+
+#[tauri::command]
+pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<(), String> {
+    persist_preferences(&prefs)?;
     crate::update_tray_title(&app);
     Ok(())
 }
@@ -770,4 +806,70 @@ pub fn get_pricing_table() -> pricing::PricingTable {
 pub async fn test_webhook(platform: String) -> Result<String, String> {
     let secrets = load_ai_keys().ok_or("No webhook credentials configured")?;
     crate::webhooks::test_webhook_endpoint(&platform, &secrets).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestHomeGuard {
+        path: PathBuf,
+    }
+
+    impl TestHomeGuard {
+        fn new() -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "ai-token-monitor-home-{}-{}",
+                std::process::id(),
+                nanos
+            ));
+            fs::create_dir_all(path.join(".claude")).unwrap();
+            *TEST_HOME_DIR.lock().unwrap() = Some(path.clone());
+            *AI_KEYS_CACHE.lock().unwrap() = None;
+            Self { path }
+        }
+    }
+
+    impl Drop for TestHomeGuard {
+        fn drop(&mut self) {
+            *AI_KEYS_CACHE.lock().unwrap() = None;
+            *TEST_HOME_DIR.lock().unwrap() = None;
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn persisting_plain_preferences_preserves_existing_encrypted_ai_keys() {
+        let _guard = TestHomeGuard::new();
+        let keys = Some(AiKeys {
+            webhook_discord_url: Some(
+                "https://discord.com/api/webhooks/123456789/token".to_string(),
+            ),
+            ..AiKeys::default()
+        });
+
+        save_ai_keys(&keys);
+        assert!(encrypted_keys_path().exists());
+
+        let prefs = UserPreferences {
+            ai_keys: None,
+            show_tray_cost: false,
+            ..UserPreferences::default()
+        };
+        persist_preferences(&prefs).unwrap();
+
+        assert_eq!(
+            load_ai_keys()
+                .and_then(|k| k.webhook_discord_url)
+                .as_deref(),
+            Some("https://discord.com/api/webhooks/123456789/token")
+        );
+        let stored_prefs = fs::read_to_string(prefs_path()).unwrap();
+        assert!(!stored_prefs.contains("webhook_discord_url"));
+    }
 }

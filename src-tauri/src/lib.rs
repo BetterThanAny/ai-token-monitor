@@ -305,9 +305,13 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
     } else {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-        let claude_cost = providers::claude_code::get_cached_stats()
-            .and_then(|s| s.daily.iter().find(|d| d.date == today).map(|d| d.cost_usd))
-            .unwrap_or(0.0);
+        let claude_cost = if prefs.include_claude {
+            providers::claude_code::get_cached_stats()
+                .and_then(|s| s.daily.iter().find(|d| d.date == today).map(|d| d.cost_usd))
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
 
         let codex_cost = if prefs.include_codex {
             providers::codex::get_cached_stats()
@@ -348,29 +352,31 @@ fn get_all_watch_dirs() -> Vec<PathBuf> {
             PathBuf::from(d)
         }
     };
-    let mut dirs: Vec<PathBuf> = prefs
-        .config_dirs
-        .iter()
-        .map(|d| expand(d).join("projects"))
-        .collect();
+    let mut dirs: Vec<PathBuf> = Vec::new();
 
-    // Add Codex session directories from preferences
-    // Always include ~/.codex because CodexProvider::new() unconditionally prepends it
-    let default_codex = home.join(".codex");
-    let mut codex_seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-    for codex_dir in &prefs.codex_dirs {
-        let expanded = expand(codex_dir);
-        let canonical = expanded.canonicalize().unwrap_or_else(|_| expanded.clone());
-        codex_seen.insert(canonical);
-        dirs.push(expanded.join("sessions"));
-        dirs.push(expanded.join("archived_sessions"));
+    if prefs.include_claude {
+        dirs.extend(prefs.config_dirs.iter().map(|d| expand(d).join("projects")));
     }
-    let default_canonical = default_codex
-        .canonicalize()
-        .unwrap_or_else(|_| default_codex.clone());
-    if !codex_seen.contains(&default_canonical) {
-        dirs.push(default_codex.join("sessions"));
-        dirs.push(default_codex.join("archived_sessions"));
+
+    if prefs.include_codex {
+        // Add Codex session directories from preferences. Include ~/.codex because
+        // CodexProvider::new() unconditionally prepends it when reading stats.
+        let default_codex = home.join(".codex");
+        let mut codex_seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        for codex_dir in &prefs.codex_dirs {
+            let expanded = expand(codex_dir);
+            let canonical = expanded.canonicalize().unwrap_or_else(|_| expanded.clone());
+            codex_seen.insert(canonical);
+            dirs.push(expanded.join("sessions"));
+            dirs.push(expanded.join("archived_sessions"));
+        }
+        let default_canonical = default_codex
+            .canonicalize()
+            .unwrap_or_else(|_| default_codex.clone());
+        if !codex_seen.contains(&default_canonical) {
+            dirs.push(default_codex.join("sessions"));
+            dirs.push(default_codex.join("archived_sessions"));
+        }
     }
 
     dirs
@@ -449,10 +455,12 @@ fn start_file_watcher(app_handle: tauri::AppHandle) {
                             return;
                         }
                         let prefs = commands::get_preferences();
-                        let provider = providers::claude_code::ClaudeCodeProvider::new(
-                            prefs.config_dirs.clone(),
-                        );
-                        let _ = provider.fetch_stats();
+                        if prefs.include_claude {
+                            let provider = providers::claude_code::ClaudeCodeProvider::new(
+                                prefs.config_dirs.clone(),
+                            );
+                            let _ = provider.fetch_stats();
+                        }
                         if prefs.include_codex {
                             let _ = providers::codex::CodexProvider::new(prefs.codex_dirs.clone())
                                 .fetch_stats();
@@ -814,6 +822,8 @@ pub fn run() {
             commands::is_codex_available,
             commands::get_preferences,
             commands::set_preferences,
+            commands::set_ai_keys,
+            commands::clear_ai_keys,
             commands::detect_claude_dirs,
             commands::validate_claude_dir,
             commands::detect_codex_dirs,
