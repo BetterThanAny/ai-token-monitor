@@ -4,6 +4,7 @@ import { getTotalTokens, toLocalDateStr } from "../lib/format";
 import { HeatmapCell } from "./HeatmapCell";
 import { Tooltip } from "./Tooltip";
 import { useI18n } from "../i18n/I18nContext";
+import { useToday } from "../hooks/useToday";
 
 interface Props {
   daily: DailyUsage[];
@@ -31,6 +32,7 @@ function getHeatLevel(value: number, thresholds: number[]): number {
 
 export function Heatmap({ daily, weeks: WEEKS = DEFAULT_WEEKS }: Props) {
   const t = useI18n();
+  const todayStr = useToday();
   const [tooltip, setTooltip] = useState<{
     date: string;
     tokens: number;
@@ -47,7 +49,7 @@ export function Heatmap({ daily, weeks: WEEKS = DEFAULT_WEEKS }: Props) {
     }
 
     // Calculate grid dates (last 12 weeks ending today)
-    const today = new Date();
+    const today = new Date(`${todayStr}T00:00:00`);
     const todayDow = today.getDay(); // 0=Sun
     // Adjust to Monday-based: Mon=0, Sun=6
     const mondayDow = todayDow === 0 ? 6 : todayDow - 1;
@@ -107,7 +109,7 @@ export function Heatmap({ daily, weeks: WEEKS = DEFAULT_WEEKS }: Props) {
     }
 
     return { grid, monthLabels, thresholds };
-  }, [daily, WEEKS]);
+  }, [daily, WEEKS, todayStr]);
 
   return (
     <div style={{
@@ -181,9 +183,7 @@ export function Heatmap({ daily, weeks: WEEKS = DEFAULT_WEEKS }: Props) {
           flexDirection: "column",
           gap: 4,
         }}>
-          {(() => {
-            const todayStr = toLocalDateStr(new Date());
-            return grid.map((row, rowIdx) => (
+          {grid.map((row, rowIdx) => (
             <div key={rowIdx} style={{ display: "flex", gap: 4 }}>
               {row.map((cell, colIdx) => {
                 const level = getHeatLevel(cell.tokens, thresholds);
@@ -207,8 +207,7 @@ export function Heatmap({ daily, weeks: WEEKS = DEFAULT_WEEKS }: Props) {
                 );
               })}
             </div>
-          ));
-          })()}
+          ))}
         </div>
       </div>
 
