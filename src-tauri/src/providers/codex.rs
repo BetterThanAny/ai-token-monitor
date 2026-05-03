@@ -1601,6 +1601,9 @@ fn extract_codex_rate_limits(value: &Value) -> Option<CodexRateLimitSnapshot> {
         .get("limit_id")
         .and_then(|v| v.as_str())
         .unwrap_or("codex");
+    // Model/feature-specific windows such as codex_bengalfox or premium do not
+    // represent the user-facing Codex quota. They are ignored because showing
+    // them in Limits would not help users judge remaining account capacity.
     if !limit_id.eq_ignore_ascii_case("codex") {
         return None;
     }
@@ -2642,29 +2645,33 @@ mod tests {
 
     #[test]
     fn test_extract_codex_rate_limits_ignores_non_primary_codex_limit() {
-        let value: Value = serde_json::json!({
-            "timestamp": "2026-05-02T10:00:00Z",
-            "type": "event_msg",
-            "payload": {
-                "type": "token_count",
-                "rate_limits": {
-                    "limit_id": "codex_bengalfox",
-                    "limit_name": "GPT-5.3-Codex-Spark",
-                    "primary": {
-                        "used_percent": 0.0,
-                        "window_minutes": 300,
-                        "resets_at": 1777734000
-                    },
-                    "secondary": {
-                        "used_percent": 0.0,
-                        "window_minutes": 10080,
-                        "resets_at": 1778338800
+        // codex_bengalfox and premium are model/feature-specific windows, not
+        // the user-facing Codex quota that helps users judge remaining capacity.
+        for limit_id in ["codex_bengalfox", "premium"] {
+            let value: Value = serde_json::json!({
+                "timestamp": "2026-05-02T10:00:00Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "rate_limits": {
+                        "limit_id": limit_id,
+                        "limit_name": "GPT-5.3-Codex-Spark",
+                        "primary": {
+                            "used_percent": 0.0,
+                            "window_minutes": 300,
+                            "resets_at": 1777734000
+                        },
+                        "secondary": {
+                            "used_percent": 0.0,
+                            "window_minutes": 10080,
+                            "resets_at": 1778338800
+                        }
                     }
                 }
-            }
-        });
+            });
 
-        assert!(extract_codex_rate_limits(&value).is_none());
+            assert!(extract_codex_rate_limits(&value).is_none());
+        }
     }
 
     #[test]
