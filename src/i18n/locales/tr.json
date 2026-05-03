@@ -74,6 +74,8 @@
   "header.github": "GitHub reposunu görüntüle",
   "share.appMessage": "Claude Code ve Codex token kullanımınızı AI Token Monitor ile tek bakışta takip edin — ücretsiz macOS/Windows uygulaması!\nhttps://github.com/BetterThanAny/ai-token-monitor",
   "share.copied": "Paylaşım mesajı kopyalandı!",
+  "shareImage.copyFailed": "Görsel kopyalanamadı",
+  "shareImage.saveFailed": "Görsel kaydedilemedi",
   "header.copySummary": "Özeti kopyala",
   "header.captureScreenshot": "Ekran görüntüsü al",
   "header.settings": "Ayarlar",

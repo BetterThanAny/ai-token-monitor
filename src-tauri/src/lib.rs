@@ -307,6 +307,28 @@ mod tests {
         assert!(!utilization_reset_detected(42.0, 2.0));
         assert!(!utilization_reset_detected(0.0, 0.0));
     }
+
+    #[test]
+    fn tray_popup_x_is_clamped_to_monitor_bounds() {
+        let monitor_pos = tauri::LogicalPosition { x: 100.0, y: 0.0 };
+        let monitor_size = tauri::LogicalSize {
+            width: 800.0,
+            height: 600.0,
+        };
+
+        assert_eq!(
+            clamp_window_x_to_monitor(120.0, 440.0, &monitor_pos, &monitor_size),
+            100.0
+        );
+        assert_eq!(
+            clamp_window_x_to_monitor(890.0, 440.0, &monitor_pos, &monitor_size),
+            460.0
+        );
+        assert_eq!(
+            clamp_window_x_to_monitor(500.0, 440.0, &monitor_pos, &monitor_size),
+            280.0
+        );
+    }
 }
 
 pub fn update_tray_title(app_handle: &tauri::AppHandle) {
@@ -997,7 +1019,9 @@ pub fn run() {
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 let prefs = commands::get_preferences();
                                 if prefs.include_claude {
-                                    match claude_usage::get_statusline_rate_limits_usage() {
+                                    match claude_usage::get_statusline_rate_limits_usage(
+                                        &prefs.config_dirs,
+                                    ) {
                                         Ok(Some(usage)) => {
                                             let _ = handle.emit("usage-updated", ());
                                             if prefs.usage_alerts_enabled {
@@ -1075,7 +1099,12 @@ fn position_window_near_tray(
             }));
 
             let window_size = window.outer_size()?.to_logical::<f64>(scale);
-            let x = tray_center_x - (window_size.width / 2.0);
+            let x = clamp_window_x_to_monitor(
+                tray_center_x,
+                window_size.width,
+                &monitor_pos,
+                &monitor_size,
+            );
             let y = tray_pos.y - window_size.height - padding;
 
             window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))?;
@@ -1092,7 +1121,12 @@ fn position_window_near_tray(
             }));
 
             let window_size = window.outer_size()?.to_logical::<f64>(scale);
-            let x = tray_center_x - (window_size.width / 2.0);
+            let x = clamp_window_x_to_monitor(
+                tray_center_x,
+                window_size.width,
+                &monitor_pos,
+                &monitor_size,
+            );
 
             window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))?;
         }
@@ -1106,4 +1140,16 @@ fn position_window_near_tray(
     }
 
     Ok(())
+}
+
+fn clamp_window_x_to_monitor(
+    tray_center_x: f64,
+    window_width: f64,
+    monitor_pos: &tauri::LogicalPosition<f64>,
+    monitor_size: &tauri::LogicalSize<f64>,
+) -> f64 {
+    let desired_x = tray_center_x - (window_width / 2.0);
+    let min_x = monitor_pos.x;
+    let max_x = monitor_pos.x + (monitor_size.width - window_width).max(0.0);
+    desired_x.clamp(min_x, max_x)
 }

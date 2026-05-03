@@ -70,21 +70,25 @@ pub struct CodexPricing {
 
 fn config() -> &'static PricingConfig {
     PRICING.get_or_init(|| {
-        let embedded_cfg: PricingConfig =
-            serde_json::from_str(EMBEDDED_PRICING).expect("embedded pricing.json must be valid");
+        let embedded_cfg =
+            parse_valid_pricing_config(EMBEDDED_PRICING).expect("embedded pricing.json must be valid");
 
         // Try loading from user's ~/.claude/pricing.json first
         if let Some(home) = dirs::home_dir() {
             let user_path = home.join(".claude").join("pricing.json");
             if let Ok(contents) = std::fs::read_to_string(&user_path) {
-                if !is_user_pricing_current(&contents, EMBEDDED_PRICING) {
-                    eprintln!(
-                        "[PRICING] Ignoring stale user pricing file {}; using embedded pricing data",
-                        user_path.display()
-                    );
-                } else if let Ok(cfg) = serde_json::from_str(&contents) {
-                    eprintln!("[PRICING] Loaded from {}", user_path.display());
-                    return cfg;
+                match load_user_pricing_config(&contents, EMBEDDED_PRICING) {
+                    Ok(cfg) => {
+                        eprintln!("[PRICING] Loaded from {}", user_path.display());
+                        return cfg;
+                    }
+                    Err(reason) => {
+                        eprintln!(
+                            "[PRICING] Ignoring user pricing file {}: {}; using embedded pricing data",
+                            user_path.display(),
+                            reason
+                        );
+                    }
                 }
             }
         }
@@ -93,6 +97,34 @@ fn config() -> &'static PricingConfig {
         eprintln!("[PRICING] Using embedded pricing data");
         embedded_cfg
     })
+}
+
+fn load_user_pricing_config(
+    user_contents: &str,
+    embedded_contents: &str,
+) -> Result<PricingConfig, String> {
+    if !is_user_pricing_current(user_contents, embedded_contents) {
+        return Err("stale or missing version".to_string());
+    }
+
+    parse_valid_pricing_config(user_contents)
+}
+
+fn parse_valid_pricing_config(contents: &str) -> Result<PricingConfig, String> {
+    let cfg: PricingConfig =
+        serde_json::from_str(contents).map_err(|e| format!("pricing JSON parse failed: {}", e))?;
+    validate_pricing_config(&cfg)?;
+    Ok(cfg)
+}
+
+fn validate_pricing_config(cfg: &PricingConfig) -> Result<(), String> {
+    if cfg.claude.models.is_empty() {
+        return Err("claude provider has no models".to_string());
+    }
+    if cfg.codex.models.is_empty() {
+        return Err("codex provider has no models".to_string());
+    }
+    Ok(())
 }
 
 fn is_user_pricing_current(user_contents: &str, embedded_contents: &str) -> bool {
@@ -119,26 +151,40 @@ fn pricing_version(contents: &str) -> Option<Vec<u32>> {
     }
 }
 
-fn find_pricing<'a>(provider: &'a ProviderConfig, model: &str) -> &'a PricingEntry {
+fn find_pricing<'a>(provider: &'a ProviderConfig, model: &str) -> Option<&'a PricingEntry> {
     // First match wins (order in JSON matters)
     provider
         .models
         .iter()
         .find(|e| model.contains(&e.match_pattern))
-        .unwrap_or_else(|| {
+        .or_else(|| {
             // Fallback to default model
             provider
                 .models
                 .iter()
                 .find(|e| e.match_pattern == provider.default)
-                .unwrap_or(&provider.models[0])
         })
+        .or_else(|| provider.models.first())
 }
 
 // --- Public API ---
 
 pub fn get_claude_pricing(model: &str) -> ClaudePricing {
-    let entry = find_pricing(&config().claude, model);
+    find_pricing(&config().claude, model)
+        .map(claude_pricing_from_entry)
+        .unwrap_or_else(|| {
+            eprintln!("[PRICING] Claude provider has no models; using emergency fallback pricing");
+            ClaudePricing {
+                input: 3.0,
+                output: 15.0,
+                cache_read: 0.30,
+                cache_write_5m: 3.75,
+                cache_write_1h: 6.0,
+            }
+        })
+}
+
+fn claude_pricing_from_entry(entry: &PricingEntry) -> ClaudePricing {
     ClaudePricing {
         input: entry.input,
         output: entry.output,
@@ -179,12 +225,20 @@ pub fn is_claude_fast_mode(model: &str, speed: Option<&str>, service_tier: Optio
 }
 
 pub fn get_codex_pricing(model: &str) -> CodexPricing {
-    let entry = find_pricing(&config().codex, model);
-    CodexPricing {
-        input: entry.input,
-        output: entry.output,
-        cached_input: entry.cached_input,
-    }
+    find_pricing(&config().codex, model)
+        .map(|entry| CodexPricing {
+            input: entry.input,
+            output: entry.output,
+            cached_input: entry.cached_input,
+        })
+        .unwrap_or_else(|| {
+            eprintln!("[PRICING] Codex provider has no models; using emergency fallback pricing");
+            CodexPricing {
+                input: 2.5,
+                output: 15.0,
+                cached_input: 0.25,
+            }
+        })
 }
 
 // --- Frontend API (pricing table for tooltip display) ---
@@ -281,6 +335,35 @@ mod tests {
         let user = r#"{"version":"1.4.0"}"#;
         let embedded = r#"{"version":"1.3.1"}"#;
         assert!(is_user_pricing_current(user, embedded));
+    }
+
+    #[test]
+    fn newer_user_pricing_with_empty_models_is_rejected() {
+        let user = r#"{
+            "version": "9.9.9",
+            "last_updated": "2026-05-03",
+            "claude": {"default": "sonnet", "models": []},
+            "codex": {"default": "gpt", "models": [
+                {"match": "gpt", "input": 1.0, "output": 2.0, "cached_input": 0.1}
+            ]}
+        }"#;
+        let embedded = r#"{"version":"1.3.1"}"#;
+        let err = match load_user_pricing_config(user, embedded) {
+            Ok(_) => panic!("empty user pricing models should be rejected"),
+            Err(err) => err,
+        };
+
+        assert!(err.contains("claude provider has no models"));
+    }
+
+    #[test]
+    fn find_pricing_returns_none_for_empty_provider_models() {
+        let provider = ProviderConfig {
+            default: "missing".to_string(),
+            models: Vec::new(),
+        };
+
+        assert!(find_pricing(&provider, "future-model").is_none());
     }
 
     #[test]

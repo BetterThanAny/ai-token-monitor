@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
@@ -7,6 +7,7 @@ use serde_json::Value;
 
 pub const STATUSLINE_REFRESH_INTERVAL_SECS: u64 = 15 * 60;
 const STATUSLINE_RATE_LIMITS_STALE_AFTER_SECS: i64 = 30 * 60;
+const STATUSLINE_RATE_LIMITS_FILENAME: &str = "ai-token-monitor-rate-limits.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageWindow {
@@ -33,11 +34,74 @@ pub struct ClaudeQuotaUsage {
     pub is_stale: bool,
 }
 
-fn statusline_rate_limits_path() -> Option<PathBuf> {
-    Some(
-        dirs::home_dir()?
-            .join(".claude")
-            .join("ai-token-monitor-rate-limits.json"),
+fn expand_config_dir(path: &str) -> PathBuf {
+    if path == "~" || path.starts_with("~/") {
+        let home = dirs::home_dir().unwrap_or_default();
+        home.join(path.strip_prefix("~/").unwrap_or(""))
+    } else {
+        PathBuf::from(path)
+    }
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
+}
+
+fn statusline_rate_limits_paths(config_dirs: &[String]) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    for dir in config_dirs
+        .iter()
+        .map(|d| d.trim())
+        .filter(|d| !d.is_empty())
+    {
+        push_unique_path(
+            &mut paths,
+            expand_config_dir(dir).join(STATUSLINE_RATE_LIMITS_FILENAME),
+        );
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        push_unique_path(
+            &mut paths,
+            home.join(".claude").join(STATUSLINE_RATE_LIMITS_FILENAME),
+        );
+    }
+
+    paths
+}
+
+fn display_path(path: &Path) -> String {
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(stripped) = path.strip_prefix(home) {
+            let suffix = stripped.to_string_lossy();
+            if suffix.is_empty() {
+                return "~".to_string();
+            }
+            return format!("~/{}", suffix);
+        }
+    }
+
+    path.display().to_string()
+}
+
+pub fn statusline_rate_limits_missing_message(config_dirs: &[String]) -> String {
+    let paths = statusline_rate_limits_paths(config_dirs);
+    let locations = if paths.is_empty() {
+        format!("~/.claude/{}", STATUSLINE_RATE_LIMITS_FILENAME)
+    } else {
+        paths
+            .iter()
+            .map(|path| display_path(path))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    format!(
+        "Claude quota snapshots are only read from local statusLine data. Configure Claude Code statusLine to write {} to one of: {}; local transcript logs are still used for token and cost totals.",
+        STATUSLINE_RATE_LIMITS_FILENAME, locations
     )
 }
 
@@ -47,13 +111,15 @@ fn statusline_rate_limits_path() -> Option<PathBuf> {
 /// A statusLine wrapper can write either the raw Claude Code stdin payload or a
 /// compact object with `captured_at` and `rate_limits`. We do not read Claude
 /// OAuth credentials or call Anthropic usage APIs.
-pub fn get_statusline_rate_limits_usage() -> Result<Option<ClaudeQuotaUsage>, String> {
-    let Some(path) = statusline_rate_limits_path() else {
+pub fn get_statusline_rate_limits_usage(
+    config_dirs: &[String],
+) -> Result<Option<ClaudeQuotaUsage>, String> {
+    let Some(path) = statusline_rate_limits_paths(config_dirs)
+        .into_iter()
+        .find(|path| path.exists())
+    else {
         return Ok(None);
     };
-    if !path.exists() {
-        return Ok(None);
-    }
 
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("Claude statusLine quota snapshot could not be read: {}", e))?;
@@ -296,6 +362,18 @@ fn system_time_to_rfc3339(value: SystemTime) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_config_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "ai-token-monitor-statusline-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
 
     #[test]
     fn parses_statusline_rate_limits_snapshot() {
@@ -335,6 +413,27 @@ mod tests {
         assert_eq!(usage.fetched_at, "2026-05-02T12:30:00+00:00");
         assert_eq!(usage.five_hour.unwrap().resets_at, None);
         assert!(usage.seven_day.is_none());
+    }
+
+    #[test]
+    fn reads_statusline_snapshot_from_configured_claude_dir() {
+        let dir = temp_config_dir("configured-dir");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(STATUSLINE_RATE_LIMITS_FILENAME),
+            r#"{
+                "captured_at": "2026-05-02T12:00:00Z",
+                "rate_limits": {
+                    "five_hour": {"used_percentage": 12.5}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let usage = get_statusline_rate_limits_usage(&[dir.to_string_lossy().to_string()]).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+
+        assert_eq!(usage.unwrap().five_hour.unwrap().utilization, 12.5);
     }
 
     #[test]

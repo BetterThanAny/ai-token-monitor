@@ -23,8 +23,11 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
   const [period, setPeriod] = useState<Period>("today");
   const [appVersion, setAppVersion] = useState("0.0.0");
   const receiptRef = useRef<HTMLDivElement>(null);
-  const { capture, captured } = useShareImage(receiptRef);
+  const { capture, captured, error: shareError } = useShareImage(receiptRef);
   const t = useI18n();
+  const shareErrorText = shareError
+    ? t(shareError.action === "save" ? "shareImage.saveFailed" : "shareImage.copyFailed")
+    : null;
 
   useEffect(() => {
     getVersion().then(setAppVersion);
@@ -126,13 +129,16 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
         {/* Share button */}
         <button
           onClick={capture}
+          title={shareError?.message}
           style={{
             marginTop: 12,
             padding: "8px 24px",
             borderRadius: 20,
             border: "none",
             cursor: "pointer",
-            background: captured
+            background: shareErrorText
+              ? "#ef4444"
+              : captured
               ? "var(--accent-mint)"
               : "linear-gradient(135deg, var(--accent-purple), var(--accent-pink))",
             color: "#fff",
@@ -144,7 +150,16 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
             transition: "all 0.2s ease",
           }}
         >
-          {captured ? (
+          {shareErrorText ? (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="15" y1="9" x2="9" y2="15"/>
+                <line x1="9" y1="9" x2="15" y2="15"/>
+              </svg>
+              {shareErrorText}
+            </>
+          ) : captured ? (
             <>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12"/>

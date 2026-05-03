@@ -107,6 +107,7 @@ export function computeStreaks(daily: DailyUsage[], year?: number): StreakInfo {
   // Current streak (if not active today, start from yesterday)
   let currentStreak = 0;
   let currentStart = todayStr;
+  let currentEnd = todayStr;
   const checkDate = new Date(now);
   if (!activeDates.has(todayStr)) {
     checkDate.setDate(checkDate.getDate() - 1);
@@ -114,6 +115,7 @@ export function computeStreaks(daily: DailyUsage[], year?: number): StreakInfo {
   while (true) {
     const ds = toLocalDateStr(checkDate);
     if (activeDates.has(ds)) {
+      if (currentStreak === 0) currentEnd = ds;
       currentStreak++;
       currentStart = ds;
       checkDate.setDate(checkDate.getDate() - 1);
@@ -162,7 +164,7 @@ export function computeStreaks(daily: DailyUsage[], year?: number): StreakInfo {
   return {
     currentStreak,
     currentStart,
-    currentEnd: todayStr,
+    currentEnd,
     longestStreak,
     longestStart,
     longestEnd,

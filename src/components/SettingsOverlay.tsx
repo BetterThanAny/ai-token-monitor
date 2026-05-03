@@ -270,6 +270,13 @@ function GeneralTab({
         />
       </SettingRow>
 
+      <SettingRow label={useI18n()("settings.usageAlerts")}>
+        <ToggleSwitch
+          checked={prefs.usage_alerts_enabled}
+          onChange={(v) => updatePrefs({ usage_alerts_enabled: v })}
+        />
+      </SettingRow>
+
       <SettingRow label={useI18n()("settings.autostart")}>
         <ToggleSwitch
           checked={prefs.autostart_enabled}
@@ -614,10 +621,21 @@ function ConfigDirsSection({
   const cfg = DIR_CONFIG[provider];
   const [detecting, setDetecting] = useState(false);
   const [message, setMessage] = useState("");
+  const messageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (messageTimerRef.current) clearTimeout(messageTimerRef.current);
+    };
+  }, []);
 
   const showMessage = useCallback((msg: string) => {
+    if (messageTimerRef.current) clearTimeout(messageTimerRef.current);
     setMessage(msg);
-    setTimeout(() => setMessage(""), 3000);
+    messageTimerRef.current = setTimeout(() => {
+      setMessage("");
+      messageTimerRef.current = null;
+    }, 3000);
   }, []);
 
   const handleAutoDetect = useCallback(async () => {
@@ -853,6 +871,40 @@ function WebhooksTab({
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ platform: string; ok: boolean; msg: string } | null>(null);
   const saveSeq = useRef(0);
+  const testResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (testResultTimerRef.current) clearTimeout(testResultTimerRef.current);
+    };
+  }, []);
+
+  const clearTestResult = useCallback(() => {
+    if (testResultTimerRef.current) {
+      clearTimeout(testResultTimerRef.current);
+      testResultTimerRef.current = null;
+    }
+    setTestResult(null);
+  }, []);
+
+  const showTestResult = useCallback((result: { platform: string; ok: boolean; msg: string }) => {
+    if (testResultTimerRef.current) clearTimeout(testResultTimerRef.current);
+    setTestResult(result);
+    const timer = setTimeout(() => {
+      setTestResult((current) =>
+        current &&
+        current.platform === result.platform &&
+        current.ok === result.ok &&
+        current.msg === result.msg
+          ? null
+          : current
+      );
+      if (testResultTimerRef.current === timer) {
+        testResultTimerRef.current = null;
+      }
+    }, 4000);
+    testResultTimerRef.current = timer;
+  }, []);
 
   const updateConfig = (partial: Partial<typeof config>) => {
     updatePrefs({ webhook_config: { ...config, ...partial } });
@@ -868,21 +920,20 @@ function WebhooksTab({
       if (seq === saveSeq.current) {
         updatePrefs({ ai_keys: previousKeys });
       }
-      setTestResult({ platform: "storage", ok: false, msg: String(e) });
+      showTestResult({ platform: "storage", ok: false, msg: String(e) });
     });
   };
 
   const handleTest = async (platform: string) => {
     setTesting(platform);
-    setTestResult(null);
+    clearTestResult();
     try {
       const msg = await invoke<string>("test_webhook", { platform });
-      setTestResult({ platform, ok: true, msg });
+      showTestResult({ platform, ok: true, msg });
     } catch (e) {
-      setTestResult({ platform, ok: false, msg: String(e) });
+      showTestResult({ platform, ok: false, msg: String(e) });
     } finally {
       setTesting(null);
-      setTimeout(() => setTestResult(null), 4000);
     }
   };
 
