@@ -139,6 +139,8 @@ type CodexSnapshotDedupKey = (
     Vec<String>,
 );
 
+type CodexCumulativeDedupKey = (String, u64, u64, u64, u64);
+
 #[derive(Clone, Debug)]
 struct ServiceTierOverrideWindow {
     starts_at: DateTime<Utc>,
@@ -383,12 +385,21 @@ fn extract_service_tier(value: &Value) -> Option<ServiceTier> {
 }
 
 #[derive(Clone, Copy)]
+struct TokenTotals {
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_tokens: u64,
+    total_tokens: u64,
+}
+
+#[derive(Clone, Copy)]
 struct TokenUsage {
     input_tokens: u64,
     output_tokens: u64,
     cached_tokens: u64,
     total_tokens: u64,
     source: TokenUsageSource,
+    cumulative: Option<TokenTotals>,
 }
 
 #[derive(Clone, Debug)]
@@ -449,6 +460,7 @@ struct CodexEntry {
     tool_names: Vec<String>,
     shell_commands: Vec<String>,
     rate_limits: Option<CodexRateLimitSnapshot>,
+    counts_usage: bool,
 }
 
 // --- Provider ---
@@ -554,6 +566,7 @@ impl CodexProvider {
         let mut pending_shell_commands: Vec<String> = Vec::new();
         // Track previous snapshot for deduplication of identical consecutive token_count events
         let mut prev_snapshot: Option<CodexSnapshotDedupKey> = None;
+        let mut seen_cumulative_snapshots: HashSet<CodexCumulativeDedupKey> = HashSet::new();
 
         let reader = BufReader::with_capacity(64 * 1024, file);
         for line in reader.lines().map_while(Result::ok) {
@@ -635,37 +648,53 @@ impl CodexProvider {
 
                             let rate_limits = extract_codex_rate_limits(&value);
 
-                            // Skip only exact repeated token_count snapshots. Token totals alone
-                            // are not enough: two real adjacent requests can have identical usage.
-                            let timestamp = value
-                                .get("timestamp")
-                                .and_then(|v| v.as_str())
-                                .map(ToString::to_string);
-                            let rate_limits_fingerprint = value
-                                .pointer("/payload/rate_limits")
-                                .or_else(|| value.pointer("/payload/info/rate_limits"))
-                                .map(Value::to_string);
-                            let snap = (
-                                usage.input_tokens,
-                                usage.output_tokens,
-                                usage.cached_tokens,
-                                usage.total_tokens,
-                                usage.source,
-                                timestamp,
-                                rate_limits_fingerprint,
-                                pending_tool_names.clone(),
-                                pending_shell_commands.clone(),
-                            );
-                            if prev_snapshot.as_ref() == Some(&snap) {
-                                continue;
-                            }
-                            prev_snapshot = Some(snap);
+                            let has_usage = usage.input_tokens != 0
+                                || usage.output_tokens != 0
+                                || usage.cached_tokens != 0
+                                || usage.total_tokens != 0;
 
-                            if usage.input_tokens == 0
-                                && usage.output_tokens == 0
-                                && usage.cached_tokens == 0
-                                && usage.total_tokens == 0
-                            {
+                            let counts_usage = if !has_usage {
+                                false
+                            } else if let Some(cumulative) = usage.cumulative {
+                                let key = (
+                                    session_id.clone(),
+                                    cumulative.input_tokens,
+                                    cumulative.output_tokens,
+                                    cumulative.cached_tokens,
+                                    cumulative.total_tokens,
+                                );
+                                seen_cumulative_snapshots.insert(key)
+                            } else {
+                                // Older logs may not expose total_token_usage. Keep the old exact
+                                // snapshot guard so identical duplicate rows are skipped, while two
+                                // real adjacent requests with the same token totals are preserved.
+                                let timestamp = value
+                                    .get("timestamp")
+                                    .and_then(|v| v.as_str())
+                                    .map(ToString::to_string);
+                                let rate_limits_fingerprint = value
+                                    .pointer("/payload/rate_limits")
+                                    .or_else(|| value.pointer("/payload/info/rate_limits"))
+                                    .map(Value::to_string);
+                                let snap = (
+                                    usage.input_tokens,
+                                    usage.output_tokens,
+                                    usage.cached_tokens,
+                                    usage.total_tokens,
+                                    usage.source,
+                                    timestamp,
+                                    rate_limits_fingerprint,
+                                    pending_tool_names.clone(),
+                                    pending_shell_commands.clone(),
+                                );
+                                if prev_snapshot.as_ref() == Some(&snap) {
+                                    continue;
+                                }
+                                prev_snapshot = Some(snap);
+                                true
+                            };
+
+                            if !has_usage && rate_limits.is_none() {
                                 continue;
                             }
 
@@ -695,10 +724,13 @@ impl CodexProvider {
                                     tool_names: pending_tool_names.clone(),
                                     shell_commands: pending_shell_commands.clone(),
                                     rate_limits,
+                                    counts_usage,
                                 },
                             );
-                            pending_tool_names.clear();
-                            pending_shell_commands.clear();
+                            if counts_usage {
+                                pending_tool_names.clear();
+                                pending_shell_commands.clear();
+                            }
                         }
                         _ => {}
                     }
@@ -800,6 +832,10 @@ impl CodexProvider {
         let ordered_entries = sorted_entries(entries);
 
         for (_, entry) in ordered_entries {
+            if !entry.counts_usage {
+                continue;
+            }
+
             total_messages += 1;
 
             if first_date.as_ref().map_or(true, |d| entry.date < *d) {
@@ -934,6 +970,20 @@ impl CodexProvider {
         let mut total_requests = 0_u32;
 
         for (_, entry) in sorted_entries(entries) {
+            if let Some(snapshot) = &entry.rate_limits {
+                if latest_snapshot
+                    .as_ref()
+                    .map(|current| snapshot_is_newer(snapshot, current))
+                    .unwrap_or(true)
+                {
+                    latest_snapshot = Some(snapshot.clone());
+                }
+            }
+
+            if !entry.counts_usage {
+                continue;
+            }
+
             let cost = calculate_entry_cost(entry, &mut long_context_sessions);
             let client_name = if entry.client_name.trim().is_empty() {
                 "Codex".to_string()
@@ -949,16 +999,6 @@ impl CodexProvider {
             acc.tokens += entry.total_tokens;
             acc.cost_usd += cost;
             total_requests += 1;
-
-            if let Some(snapshot) = &entry.rate_limits {
-                if latest_snapshot
-                    .as_ref()
-                    .map(|current| snapshot_is_newer(snapshot, current))
-                    .unwrap_or(true)
-                {
-                    latest_snapshot = Some(snapshot.clone());
-                }
-            }
         }
 
         let mut client_distribution: Vec<ClientUsage> = client_map
@@ -1209,20 +1249,11 @@ fn extract_date_from_timestamp(value: &Value) -> Option<String> {
 
 /// Extract token usage from a token_count event's info field.
 ///
-/// `last_token_usage` is the per-response/request usage and is the only source
-/// that can prove a prompt crossed the long-context threshold. `total_token_usage`
-/// is a cumulative fallback for older logs, so it is kept for cost accounting but
-/// must not trigger long-context pricing.
-fn extract_token_usage(info: &Value) -> Option<TokenUsage> {
-    let (usage, source) = if let Some(last) = info.get("last_token_usage") {
-        (last, TokenUsageSource::Last)
-    } else {
-        (
-            info.get("total_token_usage")?,
-            TokenUsageSource::TotalFallback,
-        )
-    };
-
+/// `last_token_usage` is the per-response/request usage used for token and cost
+/// accounting. `total_token_usage` is cumulative: it is used to recognize repeated
+/// snapshots in modern logs, and only as a usage fallback for older logs that lack
+/// `last_token_usage`.
+fn parse_token_totals(usage: &Value) -> TokenTotals {
     let input = usage
         .get("input_tokens")
         .and_then(|v| v.as_u64())
@@ -1240,12 +1271,34 @@ fn extract_token_usage(info: &Value) -> Option<TokenUsage> {
         .and_then(|v| v.as_u64())
         .unwrap_or(input + output);
 
-    Some(TokenUsage {
+    TokenTotals {
         input_tokens: input,
         output_tokens: output,
         cached_tokens: cached,
         total_tokens: total,
+    }
+}
+
+fn extract_token_usage(info: &Value) -> Option<TokenUsage> {
+    let (usage, source) = if let Some(last) = info.get("last_token_usage") {
+        (last, TokenUsageSource::Last)
+    } else {
+        (
+            info.get("total_token_usage")?,
+            TokenUsageSource::TotalFallback,
+        )
+    };
+
+    let totals = parse_token_totals(usage);
+    let cumulative = info.get("total_token_usage").map(parse_token_totals);
+
+    Some(TokenUsage {
+        input_tokens: totals.input_tokens,
+        output_tokens: totals.output_tokens,
+        cached_tokens: totals.cached_tokens,
+        total_tokens: totals.total_tokens,
         source,
+        cumulative,
     })
 }
 
@@ -1436,19 +1489,14 @@ fn extract_codex_rate_limits(value: &Value) -> Option<CodexRateLimitSnapshot> {
         .get("limit_id")
         .and_then(|v| v.as_str())
         .unwrap_or("codex");
-    let display_prefix = if limit_id.eq_ignore_ascii_case("codex") {
-        None
-    } else {
-        Some(limit_id.to_string())
-    };
+    if !limit_id.eq_ignore_ascii_case("codex") {
+        return None;
+    }
 
     let mut windows = Vec::new();
     for (key, label) in [("primary", "Primary"), ("secondary", "Secondary")] {
         if let Some(window) = rate_limits.get(key) {
-            let name = display_prefix
-                .as_ref()
-                .map(|prefix| format!("{} {}", prefix, label))
-                .unwrap_or_else(|| format!("{} Usage", label));
+            let name = format!("{} Usage", label);
             if let Some(parsed) = parse_codex_rate_limit_window(name, window) {
                 windows.push(parsed);
             }
@@ -1458,13 +1506,9 @@ fn extract_codex_rate_limits(value: &Value) -> Option<CodexRateLimitSnapshot> {
     if windows.is_empty() {
         if let Some(array) = rate_limits.as_array() {
             for (idx, window) in array.iter().enumerate() {
-                if let Some(parsed) = parse_codex_rate_limit_window(
-                    display_prefix
-                        .as_ref()
-                        .map(|prefix| format!("{} Window {}", prefix, idx + 1))
-                        .unwrap_or_else(|| format!("Window {}", idx + 1)),
-                    window,
-                ) {
+                if let Some(parsed) =
+                    parse_codex_rate_limit_window(format!("Window {}", idx + 1), window)
+                {
                     windows.push(parsed);
                 }
             }
@@ -1960,6 +2004,7 @@ mod tests {
             tool_names: Vec::new(),
             shell_commands: Vec::new(),
             rate_limits: None,
+            counts_usage: true,
         }
     }
 
@@ -1983,6 +2028,66 @@ mod tests {
             lines.push(format!(
                 r#"{{"timestamp":"{timestamp}","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":{input},"output_tokens":{output},"cached_input_tokens":0,"total_tokens":{total}}}}}}}}}"#
             ));
+        }
+        lines.join("\n")
+    }
+
+    fn codex_jsonl_with_cumulative_token_events(
+        events: &[(&str, u64, u64, u64, u64, u64, u64, &str, f64)],
+    ) -> String {
+        let mut lines = vec![
+            r#"{"type":"session_meta","payload":{"id":"same-session","cwd":"/tmp/project","cli_version":"1.0.0"}}"#.to_string(),
+            r#"{"type":"turn_context","payload":{"model":"gpt-5.5"}}"#.to_string(),
+        ];
+        for (
+            timestamp,
+            input,
+            output,
+            total,
+            cumulative_input,
+            cumulative_output,
+            cumulative_total,
+            limit_id,
+            used_percent,
+        ) in events
+        {
+            lines.push(
+                serde_json::json!({
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": input,
+                                "output_tokens": output,
+                                "cached_input_tokens": 0,
+                                "total_tokens": total
+                            },
+                            "total_token_usage": {
+                                "input_tokens": cumulative_input,
+                                "output_tokens": cumulative_output,
+                                "cached_input_tokens": 0,
+                                "total_tokens": cumulative_total
+                            }
+                        },
+                        "rate_limits": {
+                            "limit_id": limit_id,
+                            "primary": {
+                                "used_percent": used_percent,
+                                "window_minutes": 300,
+                                "resets_at": 1777734000
+                            },
+                            "secondary": {
+                                "used_percent": 50.0,
+                                "window_minutes": 10080,
+                                "resets_at": 1778338800
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            );
         }
         lines.join("\n")
     }
@@ -2118,6 +2223,117 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_single_file_dedupes_repeated_cumulative_token_count_snapshots() {
+        let path = temp_jsonl_path("dedupe-cumulative");
+        std::fs::write(
+            &path,
+            codex_jsonl_with_cumulative_token_events(&[
+                (
+                    "2026-05-02T10:00:00Z",
+                    100,
+                    50,
+                    150,
+                    100,
+                    50,
+                    150,
+                    "codex",
+                    10.0,
+                ),
+                (
+                    "2026-05-02T10:00:01Z",
+                    100,
+                    50,
+                    150,
+                    100,
+                    50,
+                    150,
+                    "codex_bengalfox",
+                    0.0,
+                ),
+                (
+                    "2026-05-02T10:00:02Z",
+                    25,
+                    5,
+                    30,
+                    125,
+                    55,
+                    180,
+                    "codex_bengalfox",
+                    0.0,
+                ),
+                (
+                    "2026-05-02T10:00:03Z",
+                    25,
+                    5,
+                    30,
+                    125,
+                    55,
+                    180,
+                    "codex",
+                    11.0,
+                ),
+            ]),
+        )
+        .unwrap();
+
+        let entries = CodexProvider::parse_single_file(&path, None, &[]);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(
+            entries.values().filter(|entry| entry.counts_usage).count(),
+            2
+        );
+        let stats = CodexProvider::build_stats(&entries);
+        assert_eq!(stats.total_messages, 2);
+        assert_eq!(stats.daily[0].tokens["gpt-5.5"], 180);
+    }
+
+    #[test]
+    fn test_duplicate_token_count_can_still_update_rate_limit_snapshot() {
+        let path = temp_jsonl_path("dedupe-keeps-quota");
+        std::fs::write(
+            &path,
+            codex_jsonl_with_cumulative_token_events(&[
+                (
+                    "2026-05-02T10:00:00Z",
+                    100,
+                    50,
+                    150,
+                    100,
+                    50,
+                    150,
+                    "codex",
+                    10.0,
+                ),
+                (
+                    "2026-05-02T10:00:10Z",
+                    100,
+                    50,
+                    150,
+                    100,
+                    50,
+                    150,
+                    "codex",
+                    42.0,
+                ),
+            ]),
+        )
+        .unwrap();
+
+        let entries = CodexProvider::parse_single_file(&path, None, &[]);
+        let _ = std::fs::remove_file(&path);
+
+        let stats = CodexProvider::build_stats(&entries);
+        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.daily[0].tokens["gpt-5.5"], 150);
+
+        let state = CodexProvider::build_account_state(&entries).unwrap();
+        assert_eq!(state.limit_windows[0].used_percent, Some(42.0));
+        assert_eq!(state.client_distribution[0].requests, 1);
+        assert_eq!(state.client_distribution[0].tokens, 150);
     }
 
     #[test]
@@ -2260,6 +2476,33 @@ mod tests {
             snapshot.credits.as_ref().map(|c| c.unit.as_str()),
             Some("usd")
         );
+    }
+
+    #[test]
+    fn test_extract_codex_rate_limits_ignores_non_primary_codex_limit() {
+        let value: Value = serde_json::json!({
+            "timestamp": "2026-05-02T10:00:00Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "limit_id": "codex_bengalfox",
+                    "limit_name": "GPT-5.3-Codex-Spark",
+                    "primary": {
+                        "used_percent": 0.0,
+                        "window_minutes": 300,
+                        "resets_at": 1777734000
+                    },
+                    "secondary": {
+                        "used_percent": 0.0,
+                        "window_minutes": 10080,
+                        "resets_at": 1778338800
+                    }
+                }
+            }
+        });
+
+        assert!(extract_codex_rate_limits(&value).is_none());
     }
 
     #[test]
