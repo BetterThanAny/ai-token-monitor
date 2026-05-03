@@ -6,6 +6,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useI18n, LANGUAGE_OPTIONS } from "../i18n/I18nContext";
 import { InfoTooltip } from "./InfoTooltip";
 import type { Locale } from "../i18n/I18nContext";
+import type { UserPreferences } from "../lib/types";
 
 type SettingsTab = "general" | "account" | "webhooks";
 
@@ -799,6 +800,27 @@ function ConfigDirsSection({
 
 /* ========== Webhooks Tab ========== */
 
+const AI_KEY_FIELDS = [
+  "gemini",
+  "openai",
+  "anthropic",
+  "webhook_discord_url",
+  "webhook_slack_url",
+  "webhook_telegram_bot_token",
+  "webhook_telegram_chat_id",
+] as const;
+
+type AiKeys = NonNullable<UserPreferences["ai_keys"]>;
+
+function compactAiKeys(keys: Partial<AiKeys>): AiKeys | undefined {
+  const compact: Partial<AiKeys> = {};
+  for (const field of AI_KEY_FIELDS) {
+    const value = keys[field]?.trim();
+    if (value) compact[field] = value;
+  }
+  return Object.keys(compact).length > 0 ? compact as AiKeys : undefined;
+}
+
 function WebhooksTab({
   prefs,
   updatePrefs,
@@ -831,7 +853,11 @@ function WebhooksTab({
   };
 
   const updateKeys = (partial: Partial<typeof keys>) => {
-    updatePrefs({ ai_keys: { ...keys, ...partial } });
+    const nextKeys = compactAiKeys({ ...keys, ...partial });
+    updatePrefs({ ai_keys: nextKeys });
+    invoke("set_ai_keys", { keys: nextKeys ?? null }).catch((e) => {
+      setTestResult({ platform: "storage", ok: false, msg: String(e) });
+    });
   };
 
   const handleTest = async (platform: string) => {

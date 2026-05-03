@@ -34,8 +34,6 @@ A system tray app for macOS and Windows that tracks **Claude Code** and **Codex*
 - **Önbellek verimliliği** — önbellek isabet oranını gösteren halka grafik
 
 ### Sosyal ve Paylaşım
-- **Mini profil** — etkinlik ısı haritası, ardışık gün serisi, harici profil bağlantıları
-- **Rozetler** — Card / Compact / Flat Square stilleri, PNG / SVG / Markdown / canlı URL olarak dışa aktarın ve GitHub README'nize gömün
 - **Yapay Zeka Raporu (Wrapped)** — en çok kullanılan model, en yoğun gün ve ardışık seri bilgilerini içeren aylık/yıllık özet kartı
 - **Fiş görünümü** — bugün / haftalık / aylık / tüm zamanlar için fiş tarzı kullanım özeti
 - **Maaş karşılaştırıcı** — aylık yapay zeka harcamanızı maaşınıza oranla görün (latte / Netflix / tavuk)

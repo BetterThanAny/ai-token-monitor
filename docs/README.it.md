@@ -34,7 +34,6 @@ A system tray app for macOS and Windows that tracks **Claude Code** and **Codex*
 - **Efficienza della cache** — grafico a ciambella con il tasso di hit della cache
 
 ### Social e condivisione
-- **Mini profilo** — heatmap attivita, serie consecutive, link a profili esterni
 - **Report AI (Wrapped)** — scheda riepilogativa mensile/annuale con modello piu usato, giorno piu attivo e serie consecutive
 - **Vista ricevuta** — riepilogo in stile ricevuta per oggi / settimana / mese / totale
 - **Comparatore stipendio** — visualizza la spesa AI mensile come percentuale del tuo stipendio (caffe latte / Netflix / pollo)

@@ -35,13 +35,23 @@ const SettingsContext = createContext<SettingsContextType>({
   ready: false,
 });
 
+async function loadPreferencesWithKeys(): Promise<UserPreferences> {
+  const prefs = await invoke<UserPreferences>("get_preferences");
+  try {
+    const keys = await invoke<UserPreferences["ai_keys"] | null>("get_ai_keys");
+    return keys ? { ...prefs, ai_keys: keys } : prefs;
+  } catch {
+    return prefs;
+  }
+}
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefs] = useState<UserPreferences>(defaultPrefs);
   const [ready, setReady] = useState(false);
   const skipNextPersist = useRef(true);
 
   useEffect(() => {
-    invoke<UserPreferences>("get_preferences").then((p) => {
+    loadPreferencesWithKeys().then((p) => {
       setPrefs(p);
       // Skip the persist effect triggered by the initial load from disk.
       skipNextPersist.current = true;
@@ -135,7 +145,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const refreshPrefs = useCallback(async () => {
     try {
-      const p = await invoke<UserPreferences>("get_preferences");
+      const p = await loadPreferencesWithKeys();
       skipNextPersist.current = true;
       prevConfigDirsRef.current = JSON.stringify(p.config_dirs);
       prevCodexDirsRef.current = JSON.stringify(p.codex_dirs);
