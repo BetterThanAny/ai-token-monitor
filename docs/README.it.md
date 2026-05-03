@@ -100,7 +100,7 @@ Settings is organized into three tabs:
 | Provider | Percorso | Note |
 |----------|----------|------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | Conteggi sessioni/chiamate strumenti da `~/.claude/stats-cache.json`. Supporta root multiple. |
-| **Codex** | `~/.codex/sessions/**/*.jsonl` | Supporta root multiple. |
+| **Codex** | `~/.codex/sessions/**/*.jsonl` | Supporta root multiple. I JSONL esistenti non registrano in modo affidabile se le sessioni storiche usavano Fast o Standard, quindi ai-token-monitor non può ricostruire automaticamente questa distinzione dai soli dati sorgente. |
 
 ## Architettura
 

@@ -100,7 +100,7 @@ Settings is organized into three tabs:
 | Sağlayıcı | Yol | Notlar |
 |------------|-----|--------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | `~/.claude/stats-cache.json` üzerinden oturum/araç çağrı sayıları. Birden fazla kök dizin desteklenir. |
-| **Codex** | `~/.codex/sessions/**/*.jsonl` | Birden fazla kök dizin desteklenir. |
+| **Codex** | `~/.codex/sessions/**/*.jsonl` | Birden fazla kök dizin desteklenir. Mevcut JSONL, geçmiş oturumların Fast mı Standard mı kullandığını güvenilir biçimde kaydetmez; bu yüzden ai-token-monitor bu ayrımı yalnızca kaynak veriden otomatik olarak geri çıkaramaz. |
 
 ## Mimari
 
