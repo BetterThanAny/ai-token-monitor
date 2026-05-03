@@ -29,7 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  bump-version:
+  plan-release:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -66,7 +66,7 @@ jobs:
               ;;
           esac
 
-      - name: Bump version
+      - name: Bump version locally
         id: bump
         run: |
           CURRENT=$(node -p 'require("./package.json").version')
@@ -125,26 +125,15 @@ jobs:
             echo "CHANGELOG_EOF"
           } >> $GITHUB_OUTPUT
 
-      - name: Commit and tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
-          git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
-          git tag "${{ steps.bump.outputs.tag }}"
-          git push origin main
-          git push origin "${{ steps.bump.outputs.tag }}"
-
   build-macos:
-    needs: bump-version
-    if: needs.bump-version.outputs.build_macos == 'true'
+    needs: plan-release
+    if: needs.plan-release.outputs.build_macos == 'true'
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.bump-version.outputs.tag }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -161,6 +150,18 @@ jobs:
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri
+
+      - name: Apply release version
+        env:
+          RELEASE_VERSION: ${{ needs.plan-release.outputs.version }}
+        run: |
+          VERSION="${RELEASE_VERSION#v}"
+          VERSION="$VERSION" node -e "
+            const pkg = require('./package.json');
+            pkg.version = process.env.VERSION;
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          node scripts/sync-version.mjs
 
       - name: Install frontend dependencies
         run: npm ci
@@ -184,32 +185,35 @@ jobs:
           security list-keychain -d user -s $KEYCHAIN_PATH
 
       - name: Build Tauri app (Apple Silicon only)
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --target aarch64-apple-darwin
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          tagName: ${{ needs.bump-version.outputs.tag }}
-          releaseName: ${{ needs.bump-version.outputs.tag }}
-          releaseBody: ${{ needs.bump-version.outputs.changelog }}
-          releaseDraft: false
-          prerelease: false
-          args: --target aarch64-apple-darwin
+          name: release-macos
+          if-no-files-found: error
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/latest.json
 
   build-windows:
-    needs: bump-version
-    if: needs.bump-version.outputs.build_windows == 'true'
+    needs: plan-release
+    if: needs.plan-release.outputs.build_windows == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.bump-version.outputs.tag }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -225,18 +229,103 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Apply release version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.plan-release.outputs.version }}
+        run: |
+          VERSION="${RELEASE_VERSION#v}"
+          VERSION="$VERSION" node -e "
+            const pkg = require('./package.json');
+            pkg.version = process.env.VERSION;
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          node scripts/sync-version.mjs
+
       - name: Install frontend dependencies
         run: npm ci
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          tagName: ${{ needs.bump-version.outputs.tag }}
-          releaseName: ${{ needs.bump-version.outputs.tag }}
-          releaseBody: ${{ needs.bump-version.outputs.changelog }}
-          releaseDraft: false
-          prerelease: false
+          name: release-windows
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.zip
+            src-tauri/target/release/bundle/**/*.sig
+            src-tauri/target/release/bundle/**/latest.json
+
+  publish-release:
+    needs: [plan-release, build-macos, build-windows]
+    if: >
+      always() &&
+      !cancelled() &&
+      needs.plan-release.result == 'success' &&
+      (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') &&
+      (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Commit and tag release
+        env:
+          RELEASE_VERSION: ${{ needs.plan-release.outputs.version }}
+          RELEASE_TAG: ${{ needs.plan-release.outputs.tag }}
+        run: |
+          VERSION="${RELEASE_VERSION#v}"
+          VERSION="$VERSION" node -e "
+            const pkg = require('./package.json');
+            pkg.version = process.env.VERSION;
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          node scripts/sync-version.mjs
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          git commit -m "chore: release ${RELEASE_TAG}"
+          git tag "${RELEASE_TAG}"
+          git push origin main
+          git push origin "${RELEASE_TAG}"
+
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.plan-release.outputs.tag }}
+          RELEASE_NOTES: ${{ needs.plan-release.outputs.changelog }}
+        run: |
+          printf '%s\n' "$RELEASE_NOTES" > release-notes.md
+          mapfile -d '' FILES < <(find release-artifacts -type f -print0)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No release artifacts were downloaded."
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" "${FILES[@]}" \
+            --title "$RELEASE_TAG" \
+            --notes-file release-notes.md \
+            --draft=false \
+            --prerelease=false

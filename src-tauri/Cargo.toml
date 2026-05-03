@@ -35,7 +35,6 @@ sha2 = "0.10"
 rand = "0.8"
 base64 = "0.22"
 rusqlite = { version = "0.33", features = ["bundled"] }
-scraper = "0.22"
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }

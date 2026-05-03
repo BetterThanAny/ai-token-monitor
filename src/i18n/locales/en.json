@@ -69,7 +69,7 @@
   "header.menu": "More",
   "header.share": "Share this app",
   "header.github": "View GitHub repository",
-  "share.appMessage": "Track your Claude Code and Codex token usage at a glance with AI Token Monitor — a free macOS/Windows tray app!\nhttps://github.com/soulduse/ai-token-monitor",
+  "share.appMessage": "Track your Claude Code and Codex token usage at a glance with AI Token Monitor — a free macOS/Windows tray app!\nhttps://github.com/BetterThanAny/ai-token-monitor",
   "share.copied": "Share message copied!",
   "header.copySummary": "Copy summary to clipboard",
   "header.captureScreenshot": "Capture screenshot to clipboard",

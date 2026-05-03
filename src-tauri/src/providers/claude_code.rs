@@ -225,7 +225,7 @@ impl ClaudeCodeProvider {
         for entry in entries.values() {
             total_messages += 1;
 
-            if first_date.as_ref().map_or(true, |d| entry.date < *d) {
+            if first_date.as_ref().is_none_or(|d| entry.date < *d) {
                 first_date = Some(entry.date.clone());
             }
 
@@ -673,19 +673,19 @@ fn build_analytics(entries: &HashMap<String, SessionEntry>) -> AnalyticsData {
         .into_iter()
         .map(|(name, count)| ToolCount { name, count })
         .collect();
-    tool_usage.sort_by(|a, b| b.count.cmp(&a.count));
+    tool_usage.sort_by_key(|b| std::cmp::Reverse(b.count));
 
     let mut shell_commands: Vec<ToolCount> = shell_map
         .into_iter()
         .map(|(name, count)| ToolCount { name, count })
         .collect();
-    shell_commands.sort_by(|a, b| b.count.cmp(&a.count));
+    shell_commands.sort_by_key(|b| std::cmp::Reverse(b.count));
 
     let mut mcp_usage: Vec<McpServerUsage> = mcp_map
         .into_iter()
         .map(|(server, calls)| McpServerUsage { server, calls })
         .collect();
-    mcp_usage.sort_by(|a, b| b.calls.cmp(&a.calls));
+    mcp_usage.sort_by_key(|b| std::cmp::Reverse(b.calls));
 
     let mut activity_breakdown: Vec<ActivityCategory> = activity_map
         .into_iter()

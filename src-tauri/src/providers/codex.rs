@@ -310,12 +310,17 @@ fn default_service_tier_after_timestamp(
     config_service_tier: Option<(ServiceTier, SystemTime)>,
 ) -> ServiceTier {
     match config_service_tier {
-        Some((ServiceTier::Fast, config_modified)) => event_time
-            .or_else(|| fs::metadata(path).and_then(|m| m.modified()).ok())
-            .map(|entry_time| entry_time >= config_modified)
-            .unwrap_or(false)
-            .then_some(ServiceTier::Fast)
-            .unwrap_or(ServiceTier::Standard),
+        Some((ServiceTier::Fast, config_modified)) => {
+            let is_after_config_change = event_time
+                .or_else(|| fs::metadata(path).and_then(|m| m.modified()).ok())
+                .map(|entry_time| entry_time >= config_modified)
+                .unwrap_or(false);
+            if is_after_config_change {
+                ServiceTier::Fast
+            } else {
+                ServiceTier::Standard
+            }
+        }
         Some((ServiceTier::Standard, _)) | None => ServiceTier::Standard,
     }
 }
@@ -558,8 +563,7 @@ impl CodexProvider {
         let mut current_model = String::new();
         let mut current_cwd: Option<String> = None;
         let mut current_client = "Codex".to_string();
-        let mut current_service_tier =
-            default_service_tier_for_path(path, config_service_tier.clone());
+        let mut current_service_tier = default_service_tier_for_path(path, config_service_tier);
         let mut has_explicit_service_tier = false;
         let mut line_index: u32 = 0;
         let mut pending_tool_names: Vec<String> = Vec::new();
@@ -605,7 +609,7 @@ impl CodexProvider {
                         current_service_tier = default_service_tier_for_event(
                             &value,
                             path,
-                            config_service_tier.clone(),
+                            config_service_tier,
                             service_tier_overrides,
                         );
                     }
@@ -624,115 +628,112 @@ impl CodexProvider {
                         current_service_tier = default_service_tier_for_event(
                             &value,
                             path,
-                            config_service_tier.clone(),
+                            config_service_tier,
                             service_tier_overrides,
                         );
                     }
 
                     let payload_type = value.pointer("/payload/type").and_then(|v| v.as_str());
-                    match payload_type {
-                        Some("token_count") => {
-                            let Some(info) = value.pointer("/payload/info") else {
-                                continue;
-                            };
-                            if info.is_null() {
-                                continue;
-                            }
-
-                            let Some(usage) = extract_token_usage(info) else {
-                                continue;
-                            };
-                            if let Some(service_tier) = extract_service_tier(info) {
-                                current_service_tier = service_tier;
-                            }
-
-                            let rate_limits = extract_codex_rate_limits(&value);
-
-                            let has_usage = usage.input_tokens != 0
-                                || usage.output_tokens != 0
-                                || usage.cached_tokens != 0
-                                || usage.total_tokens != 0;
-
-                            let counts_usage = if !has_usage {
-                                false
-                            } else if let Some(cumulative) = usage.cumulative {
-                                let key = (
-                                    session_id.clone(),
-                                    cumulative.input_tokens,
-                                    cumulative.output_tokens,
-                                    cumulative.cached_tokens,
-                                    cumulative.total_tokens,
-                                );
-                                seen_cumulative_snapshots.insert(key)
-                            } else {
-                                // Older logs may not expose total_token_usage. Keep the old exact
-                                // snapshot guard so identical duplicate rows are skipped, while two
-                                // real adjacent requests with the same token totals are preserved.
-                                let timestamp = value
-                                    .get("timestamp")
-                                    .and_then(|v| v.as_str())
-                                    .map(ToString::to_string);
-                                let rate_limits_fingerprint = value
-                                    .pointer("/payload/rate_limits")
-                                    .or_else(|| value.pointer("/payload/info/rate_limits"))
-                                    .map(Value::to_string);
-                                let snap = (
-                                    usage.input_tokens,
-                                    usage.output_tokens,
-                                    usage.cached_tokens,
-                                    usage.total_tokens,
-                                    usage.source,
-                                    timestamp,
-                                    rate_limits_fingerprint,
-                                    pending_tool_names.clone(),
-                                    pending_shell_commands.clone(),
-                                );
-                                if prev_snapshot.as_ref() == Some(&snap) {
-                                    continue;
-                                }
-                                prev_snapshot = Some(snap);
-                                true
-                            };
-
-                            if !has_usage && rate_limits.is_none() {
-                                continue;
-                            }
-
-                            let date = resolve_entry_date(path_date.as_deref(), &value);
-
-                            let model = if current_model.is_empty() {
-                                "codex".to_string()
-                            } else {
-                                current_model.clone()
-                            };
-
-                            let key = format!("{}:{}", session_id, line_index);
-                            entries.insert(
-                                key,
-                                CodexEntry {
-                                    date,
-                                    model,
-                                    session_id: session_id.clone(),
-                                    cwd: current_cwd.clone(),
-                                    client_name: current_client.clone(),
-                                    input_tokens: usage.input_tokens,
-                                    output_tokens: usage.output_tokens,
-                                    cached_tokens: usage.cached_tokens,
-                                    total_tokens: usage.total_tokens,
-                                    usage_source: usage.source,
-                                    service_tier: current_service_tier,
-                                    tool_names: pending_tool_names.clone(),
-                                    shell_commands: pending_shell_commands.clone(),
-                                    rate_limits,
-                                    counts_usage,
-                                },
-                            );
-                            if counts_usage {
-                                pending_tool_names.clear();
-                                pending_shell_commands.clear();
-                            }
+                    if let Some("token_count") = payload_type {
+                        let Some(info) = value.pointer("/payload/info") else {
+                            continue;
+                        };
+                        if info.is_null() {
+                            continue;
                         }
-                        _ => {}
+
+                        let Some(usage) = extract_token_usage(info) else {
+                            continue;
+                        };
+                        if let Some(service_tier) = extract_service_tier(info) {
+                            current_service_tier = service_tier;
+                        }
+
+                        let rate_limits = extract_codex_rate_limits(&value);
+
+                        let has_usage = usage.input_tokens != 0
+                            || usage.output_tokens != 0
+                            || usage.cached_tokens != 0
+                            || usage.total_tokens != 0;
+
+                        let counts_usage = if !has_usage {
+                            false
+                        } else if let Some(cumulative) = usage.cumulative {
+                            let key = (
+                                session_id.clone(),
+                                cumulative.input_tokens,
+                                cumulative.output_tokens,
+                                cumulative.cached_tokens,
+                                cumulative.total_tokens,
+                            );
+                            seen_cumulative_snapshots.insert(key)
+                        } else {
+                            // Older logs may not expose total_token_usage. Keep the old exact
+                            // snapshot guard so identical duplicate rows are skipped, while two
+                            // real adjacent requests with the same token totals are preserved.
+                            let timestamp = value
+                                .get("timestamp")
+                                .and_then(|v| v.as_str())
+                                .map(ToString::to_string);
+                            let rate_limits_fingerprint = value
+                                .pointer("/payload/rate_limits")
+                                .or_else(|| value.pointer("/payload/info/rate_limits"))
+                                .map(Value::to_string);
+                            let snap = (
+                                usage.input_tokens,
+                                usage.output_tokens,
+                                usage.cached_tokens,
+                                usage.total_tokens,
+                                usage.source,
+                                timestamp,
+                                rate_limits_fingerprint,
+                                pending_tool_names.clone(),
+                                pending_shell_commands.clone(),
+                            );
+                            if prev_snapshot.as_ref() == Some(&snap) {
+                                continue;
+                            }
+                            prev_snapshot = Some(snap);
+                            true
+                        };
+
+                        if !has_usage && rate_limits.is_none() {
+                            continue;
+                        }
+
+                        let date = resolve_entry_date(path_date.as_deref(), &value);
+
+                        let model = if current_model.is_empty() {
+                            "codex".to_string()
+                        } else {
+                            current_model.clone()
+                        };
+
+                        let key = format!("{}:{}", session_id, line_index);
+                        entries.insert(
+                            key,
+                            CodexEntry {
+                                date,
+                                model,
+                                session_id: session_id.clone(),
+                                cwd: current_cwd.clone(),
+                                client_name: current_client.clone(),
+                                input_tokens: usage.input_tokens,
+                                output_tokens: usage.output_tokens,
+                                cached_tokens: usage.cached_tokens,
+                                total_tokens: usage.total_tokens,
+                                usage_source: usage.source,
+                                service_tier: current_service_tier,
+                                tool_names: pending_tool_names.clone(),
+                                shell_commands: pending_shell_commands.clone(),
+                                rate_limits,
+                                counts_usage,
+                            },
+                        );
+                        if counts_usage {
+                            pending_tool_names.clear();
+                            pending_shell_commands.clear();
+                        }
                     }
                 }
                 _ => {}
@@ -774,11 +775,8 @@ impl CodexProvider {
             let mut fresh = HashMap::new();
             let mut fresh_keys_by_file = HashMap::new();
             for path in current_meta.keys() {
-                let file_entries = Self::parse_single_file(
-                    path,
-                    config_service_tier.clone(),
-                    service_tier_overrides,
-                );
+                let file_entries =
+                    Self::parse_single_file(path, config_service_tier, service_tier_overrides);
                 fresh_keys_by_file.insert(path.clone(), file_entries.keys().cloned().collect());
                 fresh.extend(file_entries);
             }
@@ -795,11 +793,8 @@ impl CodexProvider {
                     }
                 }
 
-                let file_entries = Self::parse_single_file(
-                    path,
-                    config_service_tier.clone(),
-                    service_tier_overrides,
-                );
+                let file_entries =
+                    Self::parse_single_file(path, config_service_tier, service_tier_overrides);
                 entry_keys_by_file.insert((*path).clone(), file_entries.keys().cloned().collect());
                 entries.extend(file_entries);
             }
@@ -838,7 +833,7 @@ impl CodexProvider {
 
             total_messages += 1;
 
-            if first_date.as_ref().map_or(true, |d| entry.date < *d) {
+            if first_date.as_ref().is_none_or(|d| entry.date < *d) {
                 first_date = Some(entry.date.clone());
             }
 
@@ -906,11 +901,8 @@ impl CodexProvider {
             }
 
             for tool in &entry.tool_names {
-                if tool.starts_with("mcp__") {
-                    let parts: Vec<&str> = tool.splitn(3, "__").collect();
-                    if parts.len() >= 2 {
-                        *mcp_map.entry(parts[1].to_string()).or_insert(0) += 1;
-                    }
+                if let Some(server) = codex_mcp_server_from_tool_name(tool) {
+                    *mcp_map.entry(server).or_insert(0) += 1;
                 } else {
                     *tool_map.entry(tool.clone()).or_insert(0) += 1;
                 }
@@ -1015,7 +1007,7 @@ impl CodexProvider {
                 },
             })
             .collect();
-        client_distribution.sort_by(|a, b| b.requests.cmp(&a.requests));
+        client_distribution.sort_by_key(|b| std::cmp::Reverse(b.requests));
 
         let Some(snapshot) = latest_snapshot else {
             return Some(AccountState {
@@ -1106,7 +1098,7 @@ impl CodexProvider {
                     &cached.entries,
                     &cached.entry_keys_by_file,
                     &cached.file_meta,
-                    self.config_service_tier.clone(),
+                    self.config_service_tier,
                     &self.service_tier_overrides,
                 )
             } else {
@@ -1122,7 +1114,7 @@ impl CodexProvider {
                 for path in current_meta.keys() {
                     let file_entries = Self::parse_single_file(
                         path,
-                        self.config_service_tier.clone(),
+                        self.config_service_tier,
                         &self.service_tier_overrides,
                     );
                     entry_keys_by_file.insert(path.clone(), file_entries.keys().cloned().collect());
@@ -1405,7 +1397,11 @@ fn extract_function_call(value: &Value) -> Option<(String, Vec<String>)> {
         return None;
     }
     let raw_name = payload.get("name")?.as_str()?;
-    let tool_name = normalize_codex_tool_name(raw_name);
+    let namespace = payload
+        .get("namespace")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let tool_name = normalize_codex_tool_name(raw_name, namespace);
     let shell_commands = if raw_name == "exec_command" {
         payload
             .get("arguments")
@@ -1417,7 +1413,14 @@ fn extract_function_call(value: &Value) -> Option<(String, Vec<String>)> {
     Some((tool_name, shell_commands))
 }
 
-fn normalize_codex_tool_name(name: &str) -> String {
+fn normalize_codex_tool_name(name: &str, namespace: &str) -> String {
+    if name.starts_with("mcp__") {
+        return name.to_string();
+    }
+    if let Some(server) = codex_mcp_server_from_namespace(namespace) {
+        return format!("mcp__{}__{}", server, name);
+    }
+
     match name {
         "exec_command" => "Bash".to_string(),
         "apply_patch" => "Edit".to_string(),
@@ -1428,6 +1431,31 @@ fn normalize_codex_tool_name(name: &str) -> String {
         name if name.starts_with("browser_") => "Browser".to_string(),
         name if name.starts_with("mcp__") => name.to_string(),
         _ => name.to_string(),
+    }
+}
+
+fn codex_mcp_server_from_namespace(namespace: &str) -> Option<String> {
+    let rest = namespace.strip_prefix("mcp__")?;
+    let server = rest
+        .trim_end_matches("__")
+        .split("__")
+        .next()
+        .unwrap_or("")
+        .trim();
+    if server.is_empty() {
+        None
+    } else {
+        Some(server.to_string())
+    }
+}
+
+fn codex_mcp_server_from_tool_name(tool_name: &str) -> Option<String> {
+    let rest = tool_name.strip_prefix("mcp__")?;
+    let server = rest.split("__").next().unwrap_or("").trim();
+    if server.is_empty() {
+        None
+    } else {
+        Some(server.to_string())
     }
 }
 
@@ -1564,9 +1592,9 @@ fn parse_codex_rate_limit_window(name: String, value: &Value) -> Option<CodexRat
         .or_else(|| value.get("reset_time"))
         .and_then(reset_value_to_rfc3339)
         .or_else(|| {
-            number_at(value, &["reset_after_seconds"]).and_then(|seconds| {
+            number_at(value, &["reset_after_seconds"]).map(|seconds| {
                 let reset_at = chrono::Utc::now() + chrono::Duration::seconds(seconds as i64);
-                Some(reset_at.to_rfc3339())
+                reset_at.to_rfc3339()
             })
         });
 
@@ -1613,8 +1641,8 @@ fn format_window_minutes(minutes: u32) -> String {
         0 => String::new(),
         300 => "5h".to_string(),
         10080 => "7d".to_string(),
-        _ if minutes % 1440 == 0 => format!("{}d", minutes / 1440),
-        _ if minutes % 60 == 0 => format!("{}h", minutes / 60),
+        _ if minutes.is_multiple_of(1440) => format!("{}d", minutes / 1440),
+        _ if minutes.is_multiple_of(60) => format!("{}h", minutes / 60),
         _ => format!("{}m", minutes),
     }
 }
@@ -1688,12 +1716,11 @@ fn infer_credit_unit(value: &Value) -> String {
         .get("currency")
         .and_then(|v| v.as_str())
         .map(|s| s.to_ascii_uppercase());
-    if currency.as_deref() == Some("USD") {
-        "usd".to_string()
-    } else if value
-        .get("balance")
-        .and_then(|v| v.as_str())
-        .is_some_and(|s| s.trim().starts_with('$'))
+    if currency.as_deref() == Some("USD")
+        || value
+            .get("balance")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s.trim().starts_with('$'))
     {
         "usd".to_string()
     } else {
@@ -1896,19 +1923,19 @@ fn build_analytics_from_maps(
         .into_iter()
         .map(|(name, count)| ToolCount { name, count })
         .collect();
-    tool_usage.sort_by(|a, b| b.count.cmp(&a.count));
+    tool_usage.sort_by_key(|b| std::cmp::Reverse(b.count));
 
     let mut shell_commands: Vec<ToolCount> = shell_map
         .into_iter()
         .map(|(name, count)| ToolCount { name, count })
         .collect();
-    shell_commands.sort_by(|a, b| b.count.cmp(&a.count));
+    shell_commands.sort_by_key(|b| std::cmp::Reverse(b.count));
 
     let mut mcp_usage: Vec<McpServerUsage> = mcp_map
         .into_iter()
         .map(|(server, calls)| McpServerUsage { server, calls })
         .collect();
-    mcp_usage.sort_by(|a, b| b.calls.cmp(&a.calls));
+    mcp_usage.sort_by_key(|b| std::cmp::Reverse(b.calls));
 
     let mut activity_breakdown: Vec<ActivityCategory> = activity_map
         .into_iter()
@@ -2036,9 +2063,9 @@ mod tests {
         lines.join("\n")
     }
 
-    fn codex_jsonl_with_cumulative_token_events(
-        events: &[(&str, u64, u64, u64, u64, u64, u64, &str, f64)],
-    ) -> String {
+    type CumulativeTokenEvent<'a> = (&'a str, u64, u64, u64, u64, u64, u64, &'a str, f64);
+
+    fn codex_jsonl_with_cumulative_token_events(events: &[CumulativeTokenEvent<'_>]) -> String {
         let mut lines = vec![
             r#"{"type":"session_meta","payload":{"id":"same-session","cwd":"/tmp/project","cli_version":"1.0.0"}}"#.to_string(),
             r#"{"type":"turn_context","payload":{"model":"gpt-5.5"}}"#.to_string(),
@@ -2428,6 +2455,26 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_function_call_uses_mcp_namespace() {
+        let value: Value = serde_json::json!({
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "gigabrain_recall",
+                "namespace": "mcp__gigabrain__"
+            }
+        });
+
+        let (tool, commands) = extract_function_call(&value).unwrap();
+        assert_eq!(tool, "mcp__gigabrain__gigabrain_recall");
+        assert!(commands.is_empty());
+        assert_eq!(
+            codex_mcp_server_from_tool_name(&tool).as_deref(),
+            Some("gigabrain")
+        );
+    }
+
+    #[test]
     fn test_extract_codex_rate_limits_snapshot() {
         let value: Value = serde_json::json!({
             "timestamp": "2026-05-02T10:00:00Z",
@@ -2735,6 +2782,31 @@ memories = true
         assert_eq!(analytics.tool_usage[0].count, 1);
         assert_eq!(analytics.shell_commands[0].name, "cargo");
         assert_eq!(analytics.activity_breakdown[0].category, "Coding");
+    }
+
+    #[test]
+    fn test_build_stats_counts_mcp_tools_by_server() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                date: "2026-05-02".to_string(),
+                model: "gpt-5.5".to_string(),
+                session_id: "session-a".to_string(),
+                input_tokens: 1_000,
+                output_tokens: 500,
+                total_tokens: 1_500,
+                tool_names: vec!["mcp__gigabrain__gigabrain_recall".to_string()],
+                ..test_entry()
+            },
+        );
+
+        let stats = CodexProvider::build_stats(&entries);
+        let analytics = stats.analytics.unwrap();
+        assert_eq!(analytics.mcp_usage[0].server, "gigabrain");
+        assert_eq!(analytics.mcp_usage[0].calls, 1);
+        assert_eq!(analytics.tool_usage.len(), 0);
+        assert_eq!(analytics.activity_breakdown[0].category, "Delegation");
     }
 
     #[test]

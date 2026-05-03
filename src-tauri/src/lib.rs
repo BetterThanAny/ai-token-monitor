@@ -1,7 +1,6 @@
 mod claude_usage;
 mod commands;
 mod providers;
-mod url_metadata;
 mod webhooks;
 
 use std::path::PathBuf;
@@ -759,7 +758,9 @@ fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
         eprintln!("[CMD] scheduling relaunch of {:?}", app_bundle);
         std::process::Command::new("sh")
             .arg("-c")
-            .arg(format!("sleep 1 && open '{}'", app_bundle.display()))
+            .arg("sleep 1; open \"$1\"")
+            .arg("ai-token-monitor-relaunch")
+            .arg(app_bundle)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -767,14 +768,13 @@ fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         eprintln!("[CMD] scheduling relaunch of {:?}", exe);
-        std::process::Command::new("cmd")
+        std::process::Command::new("powershell.exe")
             .args([
-                "/C",
-                &format!(
-                    "ping -n 2 127.0.0.1 >nul && start \"\" \"{}\"",
-                    exe.display()
-                ),
+                "-NoProfile",
+                "-Command",
+                "Start-Sleep -Seconds 1; Start-Process -FilePath $args[0]",
             ])
+            .arg(&exe)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -784,7 +784,9 @@ fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
         eprintln!("[CMD] scheduling relaunch of {:?}", exe);
         std::process::Command::new("sh")
             .arg("-c")
-            .arg(format!("sleep 1 && '{}'", exe.display()))
+            .arg("sleep 1; exec \"$1\"")
+            .arg("ai-token-monitor-relaunch")
+            .arg(&exe)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -839,8 +841,7 @@ pub fn run() {
             commands::save_png_to_file,
             commands::get_pricing_table,
             commands::get_ai_keys,
-            commands::test_webhook,
-            url_metadata::fetch_url_metadata
+            commands::test_webhook
         ])
         .setup(|app| {
             // Build tray icon — direct click toggle
@@ -904,70 +905,65 @@ pub fn run() {
 
             let win_clone = main_window.clone();
             main_window.on_window_event(move |event| {
-                match event {
-                    tauri::WindowEvent::Focused(focused) => {
-                        if !focused {
-                            if DIALOG_OPEN.load(Ordering::Relaxed) {
+                if let tauri::WindowEvent::Focused(focused) = event {
+                    if !focused {
+                        if DIALOG_OPEN.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        let win = win_clone.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(200));
+                            if win.is_focused().unwrap_or(true) {
                                 return;
                             }
-                            let win = win_clone.clone();
-                            std::thread::spawn(move || {
-                                std::thread::sleep(std::time::Duration::from_millis(200));
-                                if win.is_focused().unwrap_or(true) {
-                                    return;
-                                }
-                                // Grace period: ignore focus-loss immediately after show
-                                let now_ms = SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .map(|d| d.as_millis() as u64)
-                                    .unwrap_or(0);
-                                if now_ms.saturating_sub(LAST_SHOWN_MS.load(Ordering::SeqCst)) < 400
-                                {
-                                    return;
-                                }
-                                // All AppKit calls must run on the main thread
-                                #[cfg(target_os = "macos")]
-                                {
-                                    let w = win.clone();
-                                    let _ = win.run_on_main_thread(move || {
-                                        // In fullscreen Space: don't hide — the window was
-                                        // shown without activation, so focus state is unreliable
-                                        if is_fullscreen_space() {
-                                            lower_window_level(&w);
-                                            return;
-                                        }
-                                        // Don't hide if our app is still active (e.g. emoji picker)
-                                        // Instead, lower window level so system panels appear above us
-                                        if is_app_active() {
-                                            lower_window_level(&w);
-                                        } else {
-                                            let _ = w.hide();
-                                        }
-                                    });
-                                    return;
-                                }
-                                #[cfg(not(target_os = "macos"))]
-                                let _ = win.hide();
-                            });
-                        } else {
-                            // Focus regained — restore space behavior and level only
-                            // (no orderFront needed, window already has focus)
+                            // Grace period: ignore focus-loss immediately after show
+                            let now_ms = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
+                            if now_ms.saturating_sub(LAST_SHOWN_MS.load(Ordering::SeqCst)) < 400 {
+                                return;
+                            }
+                            // All AppKit calls must run on the main thread
                             #[cfg(target_os = "macos")]
                             {
-                                let w = win_clone.clone();
-                                let _ = win_clone.run_on_main_thread(move || {
-                                    prepare_window_space_behavior(&w);
-                                    restore_window_level(&w);
+                                let w = win.clone();
+                                let _ = win.run_on_main_thread(move || {
+                                    // In fullscreen Space: don't hide — the window was
+                                    // shown without activation, so focus state is unreliable
+                                    if is_fullscreen_space() {
+                                        lower_window_level(&w);
+                                        return;
+                                    }
+                                    // Don't hide if our app is still active (e.g. emoji picker)
+                                    // Instead, lower window level so system panels appear above us
+                                    if is_app_active() {
+                                        lower_window_level(&w);
+                                    } else {
+                                        let _ = w.hide();
+                                    }
                                 });
                             }
+                            #[cfg(not(target_os = "macos"))]
+                            let _ = win.hide();
+                        });
+                    } else {
+                        // Focus regained — restore space behavior and level only
+                        // (no orderFront needed, window already has focus)
+                        #[cfg(target_os = "macos")]
+                        {
+                            let w = win_clone.clone();
+                            let _ = win_clone.run_on_main_thread(move || {
+                                prepare_window_space_behavior(&w);
+                                restore_window_level(&w);
+                            });
                         }
                     }
-                    _ => {}
                 }
             });
 
             // Initial tray cost update
-            update_tray_title(&app.handle());
+            update_tray_title(app.handle());
 
             // Start file watcher
             start_file_watcher(app.handle().clone());
