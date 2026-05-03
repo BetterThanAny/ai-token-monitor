@@ -16,7 +16,10 @@ export function SalaryComparator({ stats }: Props) {
   const { prefs } = useSettings();
   const t = useI18n();
   const cardRef = useRef<HTMLDivElement>(null);
-  const { capture, captured } = useShareImage(cardRef);
+  const { capture, captured, error: shareError } = useShareImage(cardRef);
+  const shareErrorText = shareError
+    ? t(shareError.action === "save" ? "shareImage.saveFailed" : "shareImage.copyFailed")
+    : null;
 
   const { monthCost, activeDays } = useMemo(() => {
     const monthData = filterByPeriod(stats.daily, "month");
@@ -101,30 +104,52 @@ export function SalaryComparator({ stats }: Props) {
         }}>
           {t("salary.title")}
         </div>
-        <button
-          onClick={capture}
-          title={t("salary.share")}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            padding: 2,
-            color: captured ? "var(--accent-mint)" : "var(--text-secondary)",
-            transition: "color 0.2s ease",
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {captured ? (
-              <polyline points="20 6 9 17 4 12"/>
-            ) : (
-              <>
-                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                <polyline points="16 6 12 2 8 6"/>
-                <line x1="12" y1="2" x2="12" y2="15"/>
-              </>
-            )}
-          </svg>
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          {shareErrorText && (
+            <span
+              title={shareError?.message}
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                color: "#ef4444",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {shareErrorText}
+            </span>
+          )}
+          <button
+            onClick={capture}
+            title={shareError?.message ?? t("salary.share")}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 2,
+              color: shareErrorText ? "#ef4444" : captured ? "var(--accent-mint)" : "var(--text-secondary)",
+              transition: "color 0.2s ease",
+              flexShrink: 0,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {shareErrorText ? (
+                <>
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="15" y1="9" x2="9" y2="15"/>
+                  <line x1="9" y1="9" x2="15" y2="15"/>
+                </>
+              ) : captured ? (
+                <polyline points="20 6 9 17 4 12"/>
+              ) : (
+                <>
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                  <polyline points="16 6 12 2 8 6"/>
+                  <line x1="12" y1="2" x2="12" y2="15"/>
+                </>
+              )}
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Percentage */}

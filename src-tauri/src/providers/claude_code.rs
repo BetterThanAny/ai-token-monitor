@@ -42,6 +42,25 @@ fn pricing_for_entry(entry: &SessionEntry) -> pricing::ClaudePricing {
     )
 }
 
+fn project_name_from_cwd(cwd: &str) -> Option<String> {
+    let cwd = cwd.trim().trim_end_matches(['/', '\\']);
+    if cwd.is_empty() {
+        return None;
+    }
+
+    if let Some(name) = Path::new(cwd)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|name| !name.is_empty() && !name.contains('\\'))
+    {
+        return Some(name.to_string());
+    }
+
+    cwd.rsplit(['/', '\\'])
+        .find(|part| !part.is_empty())
+        .map(ToString::to_string)
+}
+
 /// Invalidate the stats cache so the next fetch re-checks file metadata.
 /// Called by the file watcher when JSONL/JSON changes are detected.
 pub fn invalidate_stats_cache() {
@@ -595,13 +614,7 @@ fn build_analytics(entries: &HashMap<String, SessionEntry>) -> AnalyticsData {
 
     for entry in entries.values() {
         // Project usage — derive project name from cwd
-        if !entry.cwd.is_empty() {
-            let project_name = entry
-                .cwd
-                .rsplit('/')
-                .next()
-                .unwrap_or(&entry.cwd)
-                .to_string();
+        if let Some(project_name) = project_name_from_cwd(&entry.cwd) {
             let pricing = pricing_for_entry(entry);
             let cost = calculate_cost(
                 &pricing,
@@ -1158,6 +1171,27 @@ mod tests {
         let daily = stats.daily.iter().find(|d| d.date == "2026-03-24").unwrap();
         assert_eq!(daily.sessions, 2);
         assert_eq!(daily.tool_calls, 5);
+    }
+
+    #[test]
+    fn project_name_from_cwd_handles_native_and_windows_paths() {
+        assert_eq!(
+            project_name_from_cwd("/home/user/project").as_deref(),
+            Some("project")
+        );
+        assert_eq!(
+            project_name_from_cwd("/home/user/project/").as_deref(),
+            Some("project")
+        );
+        assert_eq!(
+            project_name_from_cwd(r"C:\Users\user\project").as_deref(),
+            Some("project")
+        );
+        assert_eq!(
+            project_name_from_cwd(r"C:\Users\user\project\").as_deref(),
+            Some("project")
+        );
+        assert_eq!(project_name_from_cwd("   "), None);
     }
 
     #[test]

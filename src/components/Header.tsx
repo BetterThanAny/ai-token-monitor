@@ -25,6 +25,7 @@ export function Header({ stats, updater }: Props) {
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const t = useI18n();
   const { prefs, updatePrefs } = useSettings();
 
@@ -60,9 +61,19 @@ export function Header({ stats, updater }: Props) {
     };
   }, [showMenu]);
 
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   const showToast = useCallback((msg: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast(msg);
-    setTimeout(() => setToast(null), 2000);
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 2000);
   }, []);
 
   const handleCapture = useCallback(async () => {

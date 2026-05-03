@@ -73,6 +73,8 @@
   "header.github": "GitHubリポジトリを表示",
   "share.appMessage": "Claude CodeとCodexのトークン使用量を一目で確認できる無料のmacOS/Windowsトレイアプリ「AI Token Monitor」がおすすめです！\nhttps://github.com/BetterThanAny/ai-token-monitor",
   "share.copied": "共有メッセージをコピーしました！",
+  "shareImage.copyFailed": "画像のコピーに失敗しました",
+  "shareImage.saveFailed": "画像の保存に失敗しました",
   "header.copySummary": "要約をクリップボードにコピー",
   "header.captureScreenshot": "スクリーンショットをクリップボードにキャプチャ",
   "header.settings": "設定",

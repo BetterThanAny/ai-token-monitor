@@ -73,6 +73,8 @@
   "header.github": "Ver repositorio de GitHub",
   "share.appMessage": "¡Sigue el uso de tokens de Claude Code y Codex de un vistazo con AI Token Monitor, una app gratuita de bandeja para macOS/Windows!\nhttps://github.com/BetterThanAny/ai-token-monitor",
   "share.copied": "¡Mensaje de compartir copiado!",
+  "shareImage.copyFailed": "No se pudo copiar la imagen",
+  "shareImage.saveFailed": "No se pudo guardar la imagen",
   "header.copySummary": "Copiar resumen al portapapeles",
   "header.captureScreenshot": "Capturar pantalla al portapapeles",
   "header.settings": "Configuración",

@@ -55,20 +55,6 @@ pub fn get_cached_stats() -> Option<AllStats> {
     STATS_CACHE.lock().ok()?.as_ref().map(|c| c.stats.clone())
 }
 
-fn hash_system_time<H: Hasher>(time: SystemTime, hasher: &mut H) {
-    match time.duration_since(SystemTime::UNIX_EPOCH) {
-        Ok(duration) => {
-            duration.as_secs().hash(hasher);
-            duration.subsec_nanos().hash(hasher);
-        }
-        Err(err) => {
-            0_u8.hash(hasher);
-            err.duration().as_secs().hash(hasher);
-            err.duration().subsec_nanos().hash(hasher);
-        }
-    }
-}
-
 use super::pricing;
 
 const LONG_CONTEXT_THRESHOLD: u64 = 272_000;
@@ -185,54 +171,6 @@ fn service_tier_from_str(value: &str) -> Option<ServiceTier> {
     }
 }
 
-fn bool_from_config_value(value: &str) -> Option<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "true" => Some(true),
-        "false" => Some(false),
-        _ => None,
-    }
-}
-
-fn quoted_config_value(value: &str) -> &str {
-    value.trim().trim_matches('"').trim_matches('\'').trim()
-}
-
-fn parse_codex_config_service_tier(contents: &str) -> Option<ServiceTier> {
-    let mut root_service_tier = None;
-    let mut fast_mode_feature = false;
-    let mut in_features = false;
-
-    for raw_line in contents.lines() {
-        let line = raw_line.split('#').next().unwrap_or("").trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        if line.starts_with('[') {
-            in_features = line == "[features]";
-            continue;
-        }
-
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let key = key.trim();
-        let value = value.trim();
-
-        if !in_features && key == "service_tier" {
-            root_service_tier = service_tier_from_str(quoted_config_value(value));
-        } else if in_features && key == "fast_mode" {
-            fast_mode_feature = bool_from_config_value(value).unwrap_or(false);
-        }
-    }
-
-    if root_service_tier == Some(ServiceTier::Fast) || fast_mode_feature {
-        Some(ServiceTier::Fast)
-    } else {
-        root_service_tier
-    }
-}
-
 fn parse_override_datetime(raw: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(raw)
         .ok()
@@ -287,62 +225,11 @@ fn configured_service_tier_overrides() -> Vec<ServiceTierOverrideWindow> {
     parse_service_tier_overrides(SERVICE_TIER_OVERRIDES_JSON)
 }
 
-fn codex_config_service_tier() -> Option<(ServiceTier, SystemTime)> {
-    let path = dirs::home_dir()?.join(".codex").join("config.toml");
-    let contents = fs::read_to_string(&path).ok()?;
-    let tier = parse_codex_config_service_tier(&contents)?;
-    let modified = fs::metadata(&path)
-        .and_then(|m| m.modified())
-        .unwrap_or(SystemTime::UNIX_EPOCH);
-    Some((tier, modified))
-}
-
-fn default_service_tier_for_path(
-    path: &Path,
-    config_service_tier: Option<(ServiceTier, SystemTime)>,
-) -> ServiceTier {
-    default_service_tier_after_timestamp(None, path, config_service_tier)
-}
-
 fn event_datetime_from_timestamp(value: &Value) -> Option<DateTime<Utc>> {
     let timestamp = value.get("timestamp")?.as_str()?;
     DateTime::parse_from_rfc3339(timestamp)
         .ok()
         .map(|dt| dt.with_timezone(&Utc))
-}
-
-fn system_time_from_event_timestamp(value: &Value) -> Option<SystemTime> {
-    let utc_dt = event_datetime_from_timestamp(value)?;
-    let millis = utc_dt.timestamp_millis();
-    if millis < 0 {
-        return None;
-    }
-
-    Some(SystemTime::UNIX_EPOCH + Duration::from_millis(millis as u64))
-}
-
-fn default_service_tier_after_timestamp(
-    event_time: Option<SystemTime>,
-    path: &Path,
-    config_service_tier: Option<(ServiceTier, SystemTime)>,
-) -> ServiceTier {
-    // Codex JSONL usually does not record whether an existing historical session
-    // used Fast or Standard. This config timestamp fallback is only a local
-    // estimate when no explicit event tier or user override exists.
-    match config_service_tier {
-        Some((ServiceTier::Fast, config_modified)) => {
-            let is_after_config_change = event_time
-                .or_else(|| fs::metadata(path).and_then(|m| m.modified()).ok())
-                .map(|entry_time| entry_time >= config_modified)
-                .unwrap_or(false);
-            if is_after_config_change {
-                ServiceTier::Fast
-            } else {
-                ServiceTier::Standard
-            }
-        }
-        Some((ServiceTier::Standard, _)) | None => ServiceTier::Standard,
-    }
 }
 
 fn service_tier_from_overrides(
@@ -364,8 +251,6 @@ fn service_tier_from_overrides(
 
 fn default_service_tier_for_event(
     value: &Value,
-    path: &Path,
-    config_service_tier: Option<(ServiceTier, SystemTime)>,
     overrides: &[ServiceTierOverrideWindow],
 ) -> ServiceTier {
     if let Some(event_time) = event_datetime_from_timestamp(value) {
@@ -374,11 +259,7 @@ fn default_service_tier_for_event(
         }
     }
 
-    default_service_tier_after_timestamp(
-        system_time_from_event_timestamp(value),
-        path,
-        config_service_tier,
-    )
+    ServiceTier::Standard
 }
 
 fn extract_service_tier(value: &Value) -> Option<ServiceTier> {
@@ -497,7 +378,6 @@ pub struct CodexProvider {
     #[allow(dead_code)]
     primary_dir: PathBuf,
     all_dirs: Vec<PathBuf>,
-    config_service_tier: Option<(ServiceTier, SystemTime)>,
     service_tier_overrides: Vec<ServiceTierOverrideWindow>,
 }
 
@@ -524,7 +404,6 @@ impl CodexProvider {
         Self {
             primary_dir: primary,
             all_dirs,
-            config_service_tier: codex_config_service_tier(),
             service_tier_overrides: configured_service_tier_overrides(),
         }
     }
@@ -541,10 +420,6 @@ impl CodexProvider {
     fn cache_context_hash(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.all_dirs.hash(&mut hasher);
-        if let Some((tier, modified)) = self.config_service_tier {
-            tier.hash(&mut hasher);
-            hash_system_time(modified, &mut hasher);
-        }
         self.service_tier_overrides.len().hash(&mut hasher);
         for window in &self.service_tier_overrides {
             window.starts_at.timestamp_millis().hash(&mut hasher);
@@ -585,7 +460,6 @@ impl CodexProvider {
     /// Parse a single JSONL file and return entries keyed by dedup key.
     fn parse_single_file(
         path: &Path,
-        config_service_tier: Option<(ServiceTier, SystemTime)>,
         service_tier_overrides: &[ServiceTierOverrideWindow],
     ) -> HashMap<String, CodexEntry> {
         let mut entries = HashMap::new();
@@ -605,7 +479,7 @@ impl CodexProvider {
         let mut current_model = String::new();
         let mut current_cwd: Option<String> = None;
         let mut current_client = "Codex".to_string();
-        let mut current_service_tier = default_service_tier_for_path(path, config_service_tier);
+        let mut current_service_tier = ServiceTier::Standard;
         let mut has_explicit_service_tier = false;
         let mut line_index: u32 = 0;
         let mut pending_tool_names: Vec<String> = Vec::new();
@@ -648,12 +522,8 @@ impl CodexProvider {
                         current_service_tier = service_tier;
                         has_explicit_service_tier = true;
                     } else if !has_explicit_service_tier {
-                        current_service_tier = default_service_tier_for_event(
-                            &value,
-                            path,
-                            config_service_tier,
-                            service_tier_overrides,
-                        );
+                        current_service_tier =
+                            default_service_tier_for_event(&value, service_tier_overrides);
                     }
                 }
                 Some("response_item") => {
@@ -667,12 +537,8 @@ impl CodexProvider {
                         current_service_tier = service_tier;
                         has_explicit_service_tier = true;
                     } else if !has_explicit_service_tier {
-                        current_service_tier = default_service_tier_for_event(
-                            &value,
-                            path,
-                            config_service_tier,
-                            service_tier_overrides,
-                        );
+                        current_service_tier =
+                            default_service_tier_for_event(&value, service_tier_overrides);
                     }
 
                     let payload_type = value.pointer("/payload/type").and_then(|v| v.as_str());
@@ -795,7 +661,6 @@ impl CodexProvider {
         cached_entries: &HashMap<String, CodexEntry>,
         cached_entry_keys_by_file: &HashMap<PathBuf, HashSet<String>>,
         cached_meta: &HashMap<PathBuf, (SystemTime, u64)>,
-        config_service_tier: Option<(ServiceTier, SystemTime)>,
         service_tier_overrides: &[ServiceTierOverrideWindow],
     ) -> (
         HashMap<String, CodexEntry>,
@@ -821,8 +686,7 @@ impl CodexProvider {
             let mut fresh = HashMap::new();
             let mut fresh_keys_by_file = HashMap::new();
             for path in current_meta.keys() {
-                let file_entries =
-                    Self::parse_single_file(path, config_service_tier, service_tier_overrides);
+                let file_entries = Self::parse_single_file(path, service_tier_overrides);
                 fresh_keys_by_file.insert(path.clone(), file_entries.keys().cloned().collect());
                 fresh.extend(file_entries);
             }
@@ -839,8 +703,7 @@ impl CodexProvider {
                     }
                 }
 
-                let file_entries =
-                    Self::parse_single_file(path, config_service_tier, service_tier_overrides);
+                let file_entries = Self::parse_single_file(path, service_tier_overrides);
                 entry_keys_by_file.insert((*path).clone(), file_entries.keys().cloned().collect());
                 entries.extend(file_entries);
             }
@@ -1152,11 +1015,8 @@ impl CodexProvider {
                     let mut entries = HashMap::new();
                     let mut entry_keys_by_file = HashMap::new();
                     for path in current_meta.keys() {
-                        let file_entries = Self::parse_single_file(
-                            path,
-                            self.config_service_tier,
-                            &self.service_tier_overrides,
-                        );
+                        let file_entries =
+                            Self::parse_single_file(path, &self.service_tier_overrides);
                         entry_keys_by_file
                             .insert(path.clone(), file_entries.keys().cloned().collect());
                         entries.extend(file_entries);
@@ -1173,7 +1033,6 @@ impl CodexProvider {
                         &cached.entries,
                         &cached.entry_keys_by_file,
                         &cached.file_meta,
-                        self.config_service_tier,
                         &self.service_tier_overrides,
                     )
                 }
@@ -1188,11 +1047,7 @@ impl CodexProvider {
                 let mut entries = HashMap::new();
                 let mut entry_keys_by_file = HashMap::new();
                 for path in current_meta.keys() {
-                    let file_entries = Self::parse_single_file(
-                        path,
-                        self.config_service_tier,
-                        &self.service_tier_overrides,
-                    );
+                    let file_entries = Self::parse_single_file(path, &self.service_tier_overrides);
                     entry_keys_by_file.insert(path.clone(), file_entries.keys().cloned().collect());
                     entries.extend(file_entries);
                 }
@@ -2075,9 +1930,20 @@ fn is_percent_unit(unit: &str) -> bool {
     normalized == "percent" || normalized == "%"
 }
 
+fn parse_snapshot_observed_at(snapshot: &CodexRateLimitSnapshot) -> Option<DateTime<Utc>> {
+    snapshot
+        .observed_at
+        .as_deref()
+        .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
+        .map(|dt| dt.with_timezone(&Utc))
+}
+
 fn snapshot_is_newer(candidate: &CodexRateLimitSnapshot, current: &CodexRateLimitSnapshot) -> bool {
-    match (&candidate.observed_at, &current.observed_at) {
-        (Some(a), Some(b)) => a > b,
+    match (
+        parse_snapshot_observed_at(candidate),
+        parse_snapshot_observed_at(current),
+    ) {
+        (Some(candidate_time), Some(current_time)) => candidate_time >= current_time,
         (Some(_), None) => true,
         (None, Some(_)) => false,
         (None, None) => false,
@@ -2119,6 +1985,22 @@ mod tests {
             shell_commands: Vec::new(),
             rate_limits: None,
             counts_usage: true,
+        }
+    }
+
+    fn rate_limit_snapshot(observed_at: &str, used_percent: f64) -> CodexRateLimitSnapshot {
+        CodexRateLimitSnapshot {
+            observed_at: Some(observed_at.to_string()),
+            windows: vec![CodexRateLimitWindow {
+                name: "Codex Primary".to_string(),
+                used_percent: Some(used_percent),
+                limit: None,
+                remaining: None,
+                unit: "percent".to_string(),
+                window_minutes: Some(300),
+                resets_at: Some("2026-05-02T15:00:00Z".to_string()),
+            }],
+            credits: None,
         }
     }
 
@@ -2333,7 +2215,7 @@ mod tests {
         )
         .unwrap();
 
-        let entries = CodexProvider::parse_single_file(&path, None, &[]);
+        let entries = CodexProvider::parse_single_file(&path, &[]);
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(entries.len(), 2);
@@ -2393,7 +2275,7 @@ mod tests {
         )
         .unwrap();
 
-        let entries = CodexProvider::parse_single_file(&path, None, &[]);
+        let entries = CodexProvider::parse_single_file(&path, &[]);
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(
@@ -2437,7 +2319,7 @@ mod tests {
         )
         .unwrap();
 
-        let entries = CodexProvider::parse_single_file(&path, None, &[]);
+        let entries = CodexProvider::parse_single_file(&path, &[]);
         let _ = std::fs::remove_file(&path);
 
         let stats = CodexProvider::build_stats(&entries);
@@ -2464,7 +2346,7 @@ mod tests {
         )
         .unwrap();
 
-        let entries = CodexProvider::parse_single_file(&path, None, &[]);
+        let entries = CodexProvider::parse_single_file(&path, &[]);
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(entries.len(), 1);
@@ -2515,7 +2397,6 @@ mod tests {
             &cached_entries,
             &cached_keys_by_file,
             &cached_meta,
-            None,
             &[],
         );
         let _ = std::fs::remove_file(&path);
@@ -2675,56 +2556,19 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_codex_config_service_tier() {
-        let config = r#"
-model = "gpt-5.5"
-service_tier = "fast"
-
-[features]
-fast_mode = true
-"#;
-        assert_eq!(
-            parse_codex_config_service_tier(config),
-            Some(ServiceTier::Fast)
-        );
-
-        let standard = r#"
-service_tier = "standard"
-
-[features]
-memories = true
-"#;
-        assert_eq!(
-            parse_codex_config_service_tier(standard),
-            Some(ServiceTier::Standard)
-        );
-    }
-
-    #[test]
-    fn test_config_fast_fallback_uses_event_timestamp() {
-        let path = PathBuf::from("/tmp/nonexistent-codex-session.jsonl");
-        let config_modified = SystemTime::UNIX_EPOCH + Duration::from_secs(60);
-        let config_tier = Some((ServiceTier::Fast, config_modified));
-        let before_config: Value = serde_json::json!({
-            "timestamp": "1970-01-01T00:00:30.000Z"
-        });
-        let after_config: Value = serde_json::json!({
-            "timestamp": "1970-01-01T00:01:30.000Z"
+    fn test_unmarked_service_tier_defaults_to_standard_without_override() {
+        let value: Value = serde_json::json!({
+            "timestamp": "2026-05-02T06:00:00.000Z"
         });
 
         assert_eq!(
-            default_service_tier_for_event(&before_config, &path, config_tier, &[]),
+            default_service_tier_for_event(&value, &[]),
             ServiceTier::Standard
-        );
-        assert_eq!(
-            default_service_tier_for_event(&after_config, &path, config_tier, &[]),
-            ServiceTier::Fast
         );
     }
 
     #[test]
     fn test_service_tier_override_applies_to_unmarked_event() {
-        let path = PathBuf::from("/tmp/nonexistent-codex-session.jsonl");
         let overrides = parse_service_tier_overrides(
             r#"[
               {
@@ -2743,21 +2587,20 @@ memories = true
         });
 
         assert_eq!(
-            default_service_tier_for_event(&inside, &path, None, &overrides),
+            default_service_tier_for_event(&inside, &overrides),
             ServiceTier::Fast
         );
         assert_eq!(
-            default_service_tier_for_event(&outside, &path, None, &overrides),
+            default_service_tier_for_event(&outside, &overrides),
             ServiceTier::Standard
         );
     }
 
     #[test]
-    fn test_cache_context_hash_tracks_dirs_config_and_overrides() {
+    fn test_cache_context_hash_tracks_dirs_and_overrides() {
         let base = CodexProvider {
             primary_dir: PathBuf::from("/tmp/codex-a"),
             all_dirs: vec![PathBuf::from("/tmp/codex-a")],
-            config_service_tier: None,
             service_tier_overrides: Vec::new(),
         };
         let base_hash = base.cache_context_hash();
@@ -2765,26 +2608,13 @@ memories = true
         let with_dir = CodexProvider {
             primary_dir: PathBuf::from("/tmp/codex-a"),
             all_dirs: vec![PathBuf::from("/tmp/codex-a"), PathBuf::from("/tmp/codex-b")],
-            config_service_tier: None,
             service_tier_overrides: Vec::new(),
         };
         assert_ne!(base_hash, with_dir.cache_context_hash());
 
-        let with_config = CodexProvider {
-            primary_dir: PathBuf::from("/tmp/codex-a"),
-            all_dirs: vec![PathBuf::from("/tmp/codex-a")],
-            config_service_tier: Some((
-                ServiceTier::Fast,
-                SystemTime::UNIX_EPOCH + Duration::from_secs(60),
-            )),
-            service_tier_overrides: Vec::new(),
-        };
-        assert_ne!(base_hash, with_config.cache_context_hash());
-
         let with_override = CodexProvider {
             primary_dir: PathBuf::from("/tmp/codex-a"),
             all_dirs: vec![PathBuf::from("/tmp/codex-a")],
-            config_service_tier: None,
             service_tier_overrides: vec![ServiceTierOverrideWindow {
                 starts_at: DateTime::parse_from_rfc3339("2026-05-02T13:00:00+08:00")
                     .unwrap()
@@ -2984,19 +2814,7 @@ memories = true
                 input_tokens: 1_000,
                 output_tokens: 500,
                 total_tokens: 1_500,
-                rate_limits: Some(CodexRateLimitSnapshot {
-                    observed_at: Some(chrono::Utc::now().to_rfc3339()),
-                    windows: vec![CodexRateLimitWindow {
-                        name: "Codex Primary".to_string(),
-                        used_percent: Some(72.0),
-                        limit: None,
-                        remaining: None,
-                        unit: "percent".to_string(),
-                        window_minutes: Some(300),
-                        resets_at: Some("2026-05-02T15:00:00Z".to_string()),
-                    }],
-                    credits: None,
-                }),
+                rate_limits: Some(rate_limit_snapshot(&chrono::Utc::now().to_rfc3339(), 72.0)),
                 ..test_entry()
             },
         );
@@ -3008,6 +2826,41 @@ memories = true
         assert_eq!(state.limit_windows[0].status, "warning");
         assert_eq!(state.client_distribution[0].name, "Codex CLI");
         assert_eq!(state.client_distribution[0].requests, 1);
+    }
+
+    #[test]
+    fn test_snapshot_is_newer_parses_rfc3339_offsets() {
+        let current = rate_limit_snapshot("2026-05-02T09:00:00+09:00", 10.0);
+        let candidate = rate_limit_snapshot("2026-05-02T00:30:00Z", 20.0);
+
+        assert!(snapshot_is_newer(&candidate, &current));
+        assert!(!snapshot_is_newer(&current, &candidate));
+    }
+
+    #[test]
+    fn test_build_account_state_same_observed_at_keeps_later_snapshot() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "session-a:1".to_string(),
+            CodexEntry {
+                session_id: "session-a".to_string(),
+                rate_limits: Some(rate_limit_snapshot("2026-05-02T00:00:00Z", 40.0)),
+                counts_usage: false,
+                ..test_entry()
+            },
+        );
+        entries.insert(
+            "session-a:2".to_string(),
+            CodexEntry {
+                session_id: "session-a".to_string(),
+                rate_limits: Some(rate_limit_snapshot("2026-05-02T08:00:00+08:00", 80.0)),
+                counts_usage: false,
+                ..test_entry()
+            },
+        );
+
+        let state = CodexProvider::build_account_state(&entries).unwrap();
+        assert_eq!(state.limit_windows[0].used_percent, Some(80.0));
     }
 
     #[test]

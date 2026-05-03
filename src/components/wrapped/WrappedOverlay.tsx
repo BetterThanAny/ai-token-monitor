@@ -27,10 +27,13 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [period, setPeriod] = useState<WrappedPeriod>("month");
   const cardRef = useRef<HTMLDivElement>(null);
-  const { capture, captured } = useShareImage(cardRef);
+  const { capture, captured, error: shareError } = useShareImage(cardRef);
   const touchStartX = useRef(0);
   const { prefs } = useSettings();
   const t = useI18n();
+  const shareErrorText = shareError
+    ? t(shareError.action === "save" ? "shareImage.saveFailed" : "shareImage.copyFailed")
+    : null;
 
   // Reset index when opening
   useEffect(() => {
@@ -220,8 +223,13 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
           {/* Share */}
           <button
             onClick={capture}
+            title={shareError?.message}
             style={{
-              background: captured ? "var(--accent-mint)" : "rgba(255,255,255,0.2)",
+              background: shareErrorText
+                ? "#ef4444"
+                : captured
+                  ? "var(--accent-mint)"
+                  : "rgba(255,255,255,0.2)",
               border: "none",
               borderRadius: 16,
               padding: "6px 14px",
@@ -235,7 +243,16 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
               transition: "all 0.2s ease",
             }}
           >
-            {captured ? (
+            {shareErrorText ? (
+              <>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="15" y1="9" x2="9" y2="15"/>
+                  <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+                {shareErrorText}
+              </>
+            ) : captured ? (
               <>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12"/>
