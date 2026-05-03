@@ -69,7 +69,7 @@
   "header.menu": "もっと見る",
   "header.share": "アプリを共有",
   "header.github": "GitHubリポジトリを表示",
-  "share.appMessage": "Claude CodeとCodexのトークン使用量を一目で確認できる無料のmacOS/Windowsトレイアプリ「AI Token Monitor」がおすすめです！\nhttps://github.com/soulduse/ai-token-monitor",
+  "share.appMessage": "Claude CodeとCodexのトークン使用量を一目で確認できる無料のmacOS/Windowsトレイアプリ「AI Token Monitor」がおすすめです！\nhttps://github.com/BetterThanAny/ai-token-monitor",
   "share.copied": "共有メッセージをコピーしました！",
   "header.copySummary": "要約をクリップボードにコピー",
   "header.captureScreenshot": "スクリーンショットをクリップボードにキャプチャ",

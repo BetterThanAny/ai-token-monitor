@@ -1,6 +1,6 @@
 # AI Token Monitor
 
-[![Release](https://img.shields.io/github/v/release/soulduse/ai-token-monitor)](https://github.com/soulduse/ai-token-monitor/releases/latest)
+[![Release](https://img.shields.io/github/v/release/BetterThanAny/ai-token-monitor)](https://github.com/BetterThanAny/ai-token-monitor/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
 > **[English](../README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Türkçe](README.tr.md)**
@@ -14,7 +14,7 @@ A system tray app for macOS and Windows that tracks **Claude Code** and **Codex*
 
 ## Download
 
-**[Scarica l'ultima versione](https://github.com/soulduse/ai-token-monitor/releases/latest)**
+**[Scarica l'ultima versione](https://github.com/BetterThanAny/ai-token-monitor/releases/latest)**
 
 | Piattaforma | File | Note |
 |-------------|------|------|
@@ -63,7 +63,7 @@ A system tray app for macOS and Windows that tracks **Claude Code** and **Codex*
 ### Build
 
 ```bash
-git clone https://github.com/soulduse/ai-token-monitor.git
+git clone https://github.com/BetterThanAny/ai-token-monitor.git
 cd ai-token-monitor
 npm install
 npm run tauri dev     # modalita sviluppo

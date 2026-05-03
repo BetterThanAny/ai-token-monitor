@@ -388,7 +388,8 @@ fn get_machine_id() -> String {
         }
     }
     // Fallback: hostname + username
-    format!("{}-{}", whoami::hostname(), whoami::username())
+    let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown-host".to_string());
+    format!("{}-{}", hostname, whoami::username())
 }
 
 fn derive_encryption_key() -> [u8; 32] {
@@ -459,28 +460,34 @@ fn load_ai_keys_from_file() -> Option<AiKeys> {
     }
 }
 
-fn save_ai_keys(keys: &Option<AiKeys>) {
+fn save_ai_keys(keys: &Option<AiKeys>) -> Result<(), String> {
     let path = encrypted_keys_path();
     match keys {
         Some(k) if k.has_any_key() => {
-            if let Ok(json) = serde_json::to_string(k) {
-                if let Some(encrypted) = encrypt_data(json.as_bytes()) {
-                    if let Some(parent) = path.parent() {
-                        let _ = fs::create_dir_all(parent);
-                    }
-                    let _ = fs::write(&path, &encrypted);
-                }
+            let json = serde_json::to_string(k)
+                .map_err(|e| format!("Failed to serialize AI keys: {}", e))?;
+            let encrypted = encrypt_data(json.as_bytes())
+                .ok_or_else(|| "Failed to encrypt AI keys".to_string())?;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create AI keys directory: {}", e))?;
             }
+            fs::write(&path, &encrypted).map_err(|e| format!("Failed to write AI keys: {}", e))?;
         }
         _ => {
             // No keys — remove file
-            let _ = fs::remove_file(&path);
+            match fs::remove_file(&path) {
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("Failed to remove AI keys: {}", e)),
+            }
         }
     }
     // Invalidate cache so next load picks up new values
     if let Ok(mut cache) = AI_KEYS_CACHE.lock() {
         *cache = None;
     }
+    Ok(())
 }
 
 #[tauri::command]
@@ -504,9 +511,15 @@ pub fn get_preferences() -> UserPreferences {
 
     // Migrate: if ai_keys exist in JSON file, move them to encrypted file
     if prefs.ai_keys.is_some() {
-        save_ai_keys(&prefs.ai_keys);
-        prefs.ai_keys = None;
-        prefs_changed = true;
+        match save_ai_keys(&prefs.ai_keys) {
+            Ok(()) => {
+                prefs.ai_keys = None;
+                prefs_changed = true;
+            }
+            Err(e) => {
+                eprintln!("[PREFS] Failed to migrate AI keys to encrypted storage: {e}");
+            }
+        }
     }
 
     if prefs_changed {
@@ -527,14 +540,12 @@ pub fn get_ai_keys() -> Option<AiKeys> {
 
 #[tauri::command]
 pub fn set_ai_keys(keys: Option<AiKeys>) -> Result<(), String> {
-    save_ai_keys(&keys);
-    Ok(())
+    save_ai_keys(&keys)
 }
 
 #[tauri::command]
 pub fn clear_ai_keys() -> Result<(), String> {
-    save_ai_keys(&None);
-    Ok(())
+    save_ai_keys(&None)
 }
 
 fn persist_preferences(prefs: &UserPreferences) -> Result<(), String> {
@@ -560,6 +571,7 @@ pub fn set_preferences(app: tauri::AppHandle, prefs: UserPreferences) -> Result<
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
+#[allow(deprecated)]
 pub fn copy_png_to_clipboard(png_data: Vec<u8>) -> Result<(), String> {
     #[allow(deprecated)]
     use cocoa::base::{id, nil};
@@ -575,7 +587,7 @@ pub fn copy_png_to_clipboard(png_data: Vec<u8>) -> Result<(), String> {
         let pasteboard: id = msg_send![class!(NSPasteboard), generalPasteboard];
         let _: () = msg_send![pasteboard, clearContents];
         let png_type: id =
-            msg_send![class!(NSString), stringWithUTF8String: b"public.png\0".as_ptr()];
+            msg_send![class!(NSString), stringWithUTF8String: c"public.png".as_ptr()];
         let success: bool = msg_send![pasteboard, setData: ns_data forType: png_type];
 
         if success {
@@ -702,7 +714,7 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         let pasteboard: id = msg_send![class!(NSPasteboard), generalPasteboard];
         let _: () = msg_send![pasteboard, clearContents];
         let png_type: id =
-            msg_send![class!(NSString), stringWithUTF8String: b"public.png\0".as_ptr()];
+            msg_send![class!(NSString), stringWithUTF8String: c"public.png".as_ptr()];
         let success: bool = msg_send![pasteboard, setData: png_data forType: png_type];
 
         // Cleanup
@@ -853,7 +865,7 @@ mod tests {
             ..AiKeys::default()
         });
 
-        save_ai_keys(&keys);
+        save_ai_keys(&keys).unwrap();
         assert!(encrypted_keys_path().exists());
 
         let prefs = UserPreferences {

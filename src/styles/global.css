@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
-
 /* ===== Theme: GitHub (default) ===== */
 :root,
 [data-theme="github"] {
@@ -23,7 +21,7 @@
   --heat-3: #30a14e;
   --heat-4: #216e39;
 
-  font-family: 'Nunito', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--text-primary);
   background: var(--bg-primary);
 }

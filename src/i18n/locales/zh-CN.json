@@ -69,7 +69,7 @@
   "header.menu": "更多",
   "header.share": "分享此应用",
   "header.github": "查看 GitHub 仓库",
-  "share.appMessage": "推荐一款让你一目了然查看 Claude Code 和 Codex 令牌使用量的免费 macOS/Windows 托盘应用——AI Token Monitor！\nhttps://github.com/soulduse/ai-token-monitor",
+  "share.appMessage": "推荐一款让你一目了然查看 Claude Code 和 Codex 令牌使用量的免费 macOS/Windows 托盘应用——AI Token Monitor！\nhttps://github.com/BetterThanAny/ai-token-monitor",
   "share.copied": "分享内容已复制！",
   "header.copySummary": "复制摘要到剪贴板",
   "header.captureScreenshot": "截图到剪贴板",

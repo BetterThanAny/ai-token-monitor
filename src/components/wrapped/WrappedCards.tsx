@@ -162,7 +162,7 @@ const CacheHeroCard = forwardRef<HTMLDivElement, CardProps>(({ data }, ref) => {
           style={{ transition: "stroke-dasharray 0.5s ease" }}
         />
         <text x="75" y="75" textAnchor="middle" dominantBaseline="central"
-          fill="#fff" fontSize="28" fontWeight="800" fontFamily="Nunito, sans-serif"
+          fill="#fff" fontSize="28" fontWeight="800" fontFamily="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
         >
           {rate.toFixed(0)}%
         </text>

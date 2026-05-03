@@ -1,6 +1,6 @@
 # AI Token Monitor
 
-[![Release](https://img.shields.io/github/v/release/soulduse/ai-token-monitor)](https://github.com/soulduse/ai-token-monitor/releases/latest)
+[![Release](https://img.shields.io/github/v/release/BetterThanAny/ai-token-monitor)](https://github.com/BetterThanAny/ai-token-monitor/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
 > **[English](../README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [繁體中文](README.zh-TW.md) | [Türkçe](README.tr.md) | [Italiano](README.it.md)**
@@ -14,7 +14,7 @@
 
 ## 下载
 
-**[下载最新版本](https://github.com/soulduse/ai-token-monitor/releases/latest)**
+**[下载最新版本](https://github.com/BetterThanAny/ai-token-monitor/releases/latest)**
 
 | 平台 | 文件 | 备注 |
 |------|------|------|
@@ -63,7 +63,7 @@
 ### 构建
 
 ```bash
-git clone https://github.com/soulduse/ai-token-monitor.git
+git clone https://github.com/BetterThanAny/ai-token-monitor.git
 cd ai-token-monitor
 npm install
 npm run tauri dev     # 开发模式

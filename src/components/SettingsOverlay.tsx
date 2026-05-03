@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -847,15 +847,22 @@ function WebhooksTab({
 
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ platform: string; ok: boolean; msg: string } | null>(null);
+  const saveSeq = useRef(0);
 
   const updateConfig = (partial: Partial<typeof config>) => {
     updatePrefs({ webhook_config: { ...config, ...partial } });
   };
 
   const updateKeys = (partial: Partial<typeof keys>) => {
+    const previousKeys = prefs.ai_keys;
     const nextKeys = compactAiKeys({ ...keys, ...partial });
+    const seq = saveSeq.current + 1;
+    saveSeq.current = seq;
     updatePrefs({ ai_keys: nextKeys });
     invoke("set_ai_keys", { keys: nextKeys ?? null }).catch((e) => {
+      if (seq === saveSeq.current) {
+        updatePrefs({ ai_keys: previousKeys });
+      }
       setTestResult({ platform: "storage", ok: false, msg: String(e) });
     });
   };
@@ -920,6 +927,17 @@ function WebhooksTab({
         <div style={{ fontSize: 12, opacity: 0.85, whiteSpace: "pre-line", lineHeight: 1.6 }}>
           {t("settings.webhookDescription")}
         </div>
+        {testResult?.platform === "storage" && (
+          <div style={{
+            color: "#ef4444",
+            fontSize: 10,
+            fontWeight: 600,
+            lineHeight: 1.4,
+            marginTop: 8,
+          }}>
+            {testResult.msg}
+          </div>
+        )}
         <div style={{
           display: "flex",
           alignItems: "center",
