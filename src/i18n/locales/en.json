@@ -4,6 +4,8 @@
   "app.loading": "Loading...",
   "app.error.title": "No usage stats found",
   "app.error.description": "Make sure Claude Code or Codex has been used at least once.",
+  "app.partialStats.title": "Some sources failed to load",
+  "app.partialStats.description": "Totals may be incomplete: {{error}}",
   "tab.overview": "Overview",
   "tab.analytics": "Analytics",
   "sources.title": "Sources",

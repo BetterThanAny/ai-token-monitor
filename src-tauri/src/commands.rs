@@ -654,6 +654,10 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
                 imageOption: u32,
             ) -> id;
         }
+        #[link(name = "CoreFoundation", kind = "framework")]
+        extern "C" {
+            fn CFRelease(cf: id);
+        }
 
         #[repr(C)]
         #[derive(Copy, Clone)]
@@ -693,8 +697,7 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         let ns_bitmap_rep: id = msg_send![class!(NSBitmapImageRep), alloc];
         let ns_bitmap_rep: id = msg_send![ns_bitmap_rep, initWithCGImage: cg_image];
         if ns_bitmap_rep == nil {
-            // Release CGImage
-            let _: () = msg_send![cg_image, release];
+            CFRelease(cg_image);
             return Err("Failed to create bitmap rep".to_string());
         }
 
@@ -707,6 +710,7 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         ];
         if png_data == nil {
             let _: () = msg_send![ns_bitmap_rep, release];
+            CFRelease(cg_image);
             return Err("Failed to create PNG data".to_string());
         }
 
@@ -719,11 +723,6 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
 
         // Cleanup
         let _: () = msg_send![ns_bitmap_rep, release];
-        // CGImage is a CF type, use CFRelease
-        #[link(name = "CoreFoundation", kind = "framework")]
-        extern "C" {
-            fn CFRelease(cf: id);
-        }
         CFRelease(cg_image);
 
         if success {
@@ -795,11 +794,13 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         // CF_BITMAP = 2
         let result = SetClipboardData(2, Some(windows::Win32::Foundation::HANDLE(hbm.0)));
         let _ = CloseClipboard();
-        // Do NOT delete hbm — clipboard owns it after SetClipboardData
-
-        result
-            .map(|_| ())
-            .map_err(|_| "Failed to copy to clipboard".to_string())
+        match result {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                DeleteObject(hbm.into());
+                Err("Failed to copy to clipboard".to_string())
+            }
+        }
     }
 }
 

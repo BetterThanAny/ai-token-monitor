@@ -46,6 +46,33 @@ function AnalyticsEmptyState({ message }: { message: string }) {
   );
 }
 
+function StatsWarning({ message }: { message: string }) {
+  const t = useI18n();
+
+  return (
+    <div
+      role="status"
+      title={message}
+      style={{
+        margin: "8px 12px 0",
+        padding: "10px 12px",
+        borderRadius: "var(--radius-sm)",
+        background: "rgba(245, 158, 11, 0.12)",
+        border: "1px solid rgba(245, 158, 11, 0.28)",
+        color: "var(--text-primary)",
+        fontSize: 11,
+        lineHeight: 1.4,
+        wordBreak: "break-word",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 2 }}>{t("app.partialStats.title")}</div>
+      <div style={{ color: "var(--text-secondary)" }}>
+        {t("app.partialStats.description", { error: message })}
+      </div>
+    </div>
+  );
+}
+
 function AppContent() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -113,7 +140,7 @@ function AppContent() {
     );
   }
 
-  if (error || !stats) {
+  if (!stats) {
     return (
       <PopoverShell>
         <Header updater={updater} />
@@ -150,6 +177,7 @@ function AppContent() {
     <PopoverShell>
       <Header stats={stats} updater={updater} />
       <SourceSelector />
+      {error && <StatsWarning message={error} />}
       <TabBar activeTab={activeTab} onChange={setActiveTab} />
 
       {/* Keep mounted tabs alive to avoid remount/recalculation on switch */}

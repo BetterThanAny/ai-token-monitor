@@ -27,10 +27,7 @@ export function useTokenStats(provider: StatsProvider = "claude", enabled = true
       hasDataRef.current = true;
     } catch (e) {
       if (requestId !== requestIdRef.current) return;
-      // Only show error if we never had valid data — keeps last known data on transient failures
-      if (!hasDataRef.current) {
-        setError(String(e));
-      }
+      setError(String(e));
     } finally {
       if (requestId !== requestIdRef.current) return;
       setLoading(false);

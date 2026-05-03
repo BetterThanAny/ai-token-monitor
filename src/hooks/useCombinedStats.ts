@@ -38,13 +38,12 @@ export function useCombinedStats({ includeClaude, includeCodex }: UseCombinedSta
 
   const loading = (includeClaude && claude.loading) || (includeCodex && codex.loading);
   const error = useMemo(() => {
-    if (stats) return null;
+    const errors: string[] = [];
+    if (includeClaude && claude.error) errors.push(`Claude: ${claude.error}`);
+    if (includeCodex && codex.error) errors.push(`Codex: ${codex.error}`);
 
-    if (includeClaude && claude.error) return claude.error;
-    if (includeCodex && codex.error) return codex.error;
-
-    return null;
-  }, [stats, includeClaude, includeCodex, claude.error, codex.error]);
+    return errors.length > 0 ? errors.join("; ") : null;
+  }, [includeClaude, includeCodex, claude.error, codex.error]);
 
   return { stats, loading, error };
 }

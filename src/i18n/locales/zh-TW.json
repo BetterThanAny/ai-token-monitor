@@ -4,6 +4,8 @@
   "app.loading": "載入中...",
   "app.error.title": "未找到使用統計",
   "app.error.description": "請確保已安裝 Claude Code 或 Codex，並已使用至少一次。",
+  "app.partialStats.title": "部分來源載入失敗",
+  "app.partialStats.description": "目前統計可能不完整：{{error}}",
   "tab.overview": "總覽",
   "tab.analytics": "分析",
   "sources.title": "來源",

@@ -4,6 +4,8 @@
   "app.loading": "Cargando...",
   "app.error.title": "No se encontraron estadísticas",
   "app.error.description": "Asegúrate de que Claude Code o Codex esté instalado y se haya utilizado al menos una vez.",
+  "app.partialStats.title": "Algunas fuentes no se pudieron cargar",
+  "app.partialStats.description": "Los totales pueden estar incompletos: {{error}}",
   "tab.overview": "Resumen",
   "tab.analytics": "Análisis",
   "sources.title": "Fuentes",
