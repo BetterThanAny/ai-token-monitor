@@ -101,7 +101,7 @@ Settings is organized into three tabs:
 | 프로바이더 | 경로 | 비고 |
 |-----------|------|------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | `~/.claude/stats-cache.json`에서 세션/툴 호출 수 보조. 여러 루트 지원. |
-| **Codex** | `~/.codex/sessions/**/*.jsonl` | 여러 루트 지원. |
+| **Codex** | `~/.codex/sessions/**/*.jsonl` | 여러 루트 지원. 기존 JSONL에는 과거 세션이 Fast인지 Standard인지가 안정적으로 기록되지 않으므로 ai-token-monitor는 소스 데이터만으로 이 구분을 자동 복원할 수 없습니다. |
 
 ## 아키텍처
 

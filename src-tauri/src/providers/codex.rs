@@ -326,6 +326,9 @@ fn default_service_tier_after_timestamp(
     path: &Path,
     config_service_tier: Option<(ServiceTier, SystemTime)>,
 ) -> ServiceTier {
+    // Codex JSONL usually does not record whether an existing historical session
+    // used Fast or Standard. This config timestamp fallback is only a local
+    // estimate when no explicit event tier or user override exists.
     match config_service_tier {
         Some((ServiceTier::Fast, config_modified)) => {
             let is_after_config_change = event_time
@@ -379,6 +382,9 @@ fn default_service_tier_for_event(
 }
 
 fn extract_service_tier(value: &Value) -> Option<ServiceTier> {
+    // Only explicit service_tier/serviceTier/fast_mode fields are source evidence.
+    // Existing Codex JSONL cannot be used to automatically recover historical
+    // Fast-vs-Standard state when those fields are absent.
     [
         "/payload/service_tier",
         "/payload/serviceTier",

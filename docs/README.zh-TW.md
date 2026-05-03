@@ -100,7 +100,7 @@ npm run tauri build   # 生產建置
 | 供應商 | 路徑 | 備註 |
 |--------|------|------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | 從 `~/.claude/stats-cache.json` 補充工作階段/工具呼叫數。支援多個根目錄。 |
-| **Codex** | `~/.codex/sessions/**/*.jsonl` | 支援多個根目錄。 |
+| **Codex** | `~/.codex/sessions/**/*.jsonl` | 支援多個根目錄。既有 JSONL 不可靠記錄歷史 session 使用的是 Fast 還是 Standard，因此 ai-token-monitor 不能僅憑來源資料自動還原這個區別。 |
 
 ## 架構
 

@@ -100,7 +100,7 @@ Settings is organized into three tabs:
 | プロバイダー | パス | 備考 |
 |------------|------|------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | `~/.claude/stats-cache.json` からセッション/ツール呼び出し数を補足。複数ルート対応。 |
-| **Codex** | `~/.codex/sessions/**/*.jsonl` | 複数ルート対応。 |
+| **Codex** | `~/.codex/sessions/**/*.jsonl` | 複数ルート対応。既存の JSONL には履歴セッションが Fast か Standard かを示す情報が確実には記録されないため、ai-token-monitor はソースデータだけからこの区別を自動復元できません。 |
 
 ## アーキテクチャ
 
