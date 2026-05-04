@@ -249,5 +249,10 @@
   "limits.empty.rateLimits": "Nessun dato sui limiti di frequenza disponibile.",
   "limits.empty.balance": "Nessun dato saldo disponibile.",
   "limits.empty.clients": "Nessun dato client disponibile.",
-  "limits.empty.all": "Nessun dato sullo stato account disponibile."
+  "limits.empty.all": "Nessun dato sullo stato account disponibile.",
+  "common.tokens": "token",
+  "common.cached": "in cache",
+  "shareImage.savePng": "Salva PNG",
+  "shareImage.savedPng": "PNG salvato",
+  "receipt.dayStreak": "SERIE DI {{count}} GIORNI"
 }

@@ -5,6 +5,7 @@ import { HeatmapCell } from "./HeatmapCell";
 import { Tooltip } from "./Tooltip";
 import { useI18n } from "../i18n/I18nContext";
 import { useToday } from "../hooks/useToday";
+import { useSettings } from "../contexts/SettingsContext";
 
 interface Props {
   daily: DailyUsage[];
@@ -32,6 +33,7 @@ function getHeatLevel(value: number, thresholds: number[]): number {
 
 export function Heatmap({ daily, weeks: WEEKS = DEFAULT_WEEKS }: Props) {
   const t = useI18n();
+  const { prefs } = useSettings();
   const todayStr = useToday();
   const [tooltip, setTooltip] = useState<{
     date: string;
@@ -77,7 +79,7 @@ export function Heatmap({ daily, weeks: WEEKS = DEFAULT_WEEKS }: Props) {
       const weekIdx = Math.floor(i / DAYS);
       const dayIdx = i % DAYS;
       if (dayIdx === 0) {
-        const month = d.toLocaleDateString("en", { month: "short" });
+        const month = d.toLocaleDateString(prefs.language, { month: "short" });
         if (!months.has(weekIdx) || d.getDate() <= 7) {
           if (d.getDate() <= 7) {
             months.set(weekIdx, month);
@@ -109,7 +111,7 @@ export function Heatmap({ daily, weeks: WEEKS = DEFAULT_WEEKS }: Props) {
     }
 
     return { grid, monthLabels, thresholds };
-  }, [daily, WEEKS, todayStr]);
+  }, [daily, WEEKS, todayStr, prefs.language]);
 
   return (
     <div style={{

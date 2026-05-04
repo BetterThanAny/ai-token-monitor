@@ -249,5 +249,10 @@
   "limits.empty.rateLimits": "No rate limit data available.",
   "limits.empty.balance": "No balance data available.",
   "limits.empty.clients": "No client data available.",
-  "limits.empty.all": "No account state data available."
+  "limits.empty.all": "No account state data available.",
+  "common.tokens": "tokens",
+  "common.cached": "cached",
+  "shareImage.savePng": "Save PNG",
+  "shareImage.savedPng": "PNG saved",
+  "receipt.dayStreak": "{{count}} DAY STREAK"
 }

@@ -1,4 +1,6 @@
 import { formatTokens, formatCost, formatDate } from "../lib/format";
+import { useSettings } from "../contexts/SettingsContext";
+import { useI18n } from "../i18n/I18nContext";
 
 interface Props {
   date: string;
@@ -10,6 +12,9 @@ interface Props {
 }
 
 export function Tooltip({ date, tokens, cost, x, y, visible }: Props) {
+  const { prefs } = useSettings();
+  const t = useI18n();
+
   if (!visible) return null;
 
   return (
@@ -29,8 +34,8 @@ export function Tooltip({ date, tokens, cost, x, y, visible }: Props) {
       zIndex: 1100,
       boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
     }}>
-      <div>{formatDate(date)}</div>
-      <div>{formatTokens(tokens)} tokens &middot; {formatCost(cost)}</div>
+      <div>{formatDate(date, prefs.language)}</div>
+      <div>{formatTokens(tokens, prefs.number_format)} {t("common.tokens")} &middot; {formatCost(cost)}</div>
     </div>
   );
 }

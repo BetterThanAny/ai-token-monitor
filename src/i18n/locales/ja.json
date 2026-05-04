@@ -249,5 +249,10 @@
   "limits.empty.rateLimits": "レート制限データがありません。",
   "limits.empty.balance": "残高データがありません。",
   "limits.empty.clients": "クライアントデータがありません。",
-  "limits.empty.all": "アカウント状態データがありません。"
+  "limits.empty.all": "アカウント状態データがありません。",
+  "common.tokens": "トークン",
+  "common.cached": "キャッシュ済み",
+  "shareImage.savePng": "PNGを保存",
+  "shareImage.savedPng": "PNGを保存しました",
+  "receipt.dayStreak": "{{count}}日連続"
 }

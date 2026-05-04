@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect, type RefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import html2canvas from "html2canvas";
 
 export type ShareImageError = {
   action: "copy" | "save";
@@ -68,6 +67,7 @@ export function useShareImage(ref: RefObject<HTMLElement | null>) {
       throw new Error("No element to capture");
     }
 
+    const { default: html2canvas } = await import("html2canvas");
     const canvas = await html2canvas(ref.current, {
       backgroundColor: null,
       scale: 2,

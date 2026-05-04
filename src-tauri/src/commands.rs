@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
@@ -31,6 +31,30 @@ fn app_home_dir() -> PathBuf {
     }
 
     dirs::home_dir().unwrap_or_default()
+}
+
+fn expand_user_config_path(path: &str, home: &Path) -> PathBuf {
+    let path = path.trim();
+    if path == "~" {
+        home.to_path_buf()
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        home.join(rest)
+    } else {
+        PathBuf::from(path)
+    }
+}
+
+fn display_config_path(path: &Path, home: &Path) -> String {
+    if let Ok(stripped) = path.strip_prefix(home) {
+        let suffix = stripped.to_string_lossy();
+        if suffix.is_empty() {
+            "~".to_string()
+        } else {
+            format!("~/{}", suffix)
+        }
+    } else {
+        path.display().to_string()
+    }
 }
 
 pub(crate) fn prefs_path() -> PathBuf {
@@ -247,11 +271,7 @@ pub fn detect_claude_dirs() -> Vec<String> {
     if let Ok(env_dir) = std::env::var("CLAUDE_CONFIG_DIR") {
         let path = PathBuf::from(&env_dir);
         if path.join("projects").is_dir() {
-            let display = if let Ok(stripped) = path.strip_prefix(&home) {
-                format!("~/{}", stripped.display())
-            } else {
-                env_dir
-            };
+            let display = display_config_path(&path, &home);
             if !found.contains(&display) && display != "~/.claude" {
                 found.push(display);
             }
@@ -284,11 +304,7 @@ pub fn detect_codex_dirs() -> Vec<String> {
     if let Ok(env_dir) = std::env::var("CODEX_CONFIG_DIR") {
         let path = PathBuf::from(&env_dir);
         if path.join("sessions").is_dir() || path.join("archived_sessions").is_dir() {
-            let display = if let Ok(stripped) = path.strip_prefix(&home) {
-                format!("~/{}", stripped.display())
-            } else {
-                env_dir
-            };
+            let display = display_config_path(&path, &home);
             if !found.contains(&display) && display != "~/.codex" {
                 found.push(display);
             }
@@ -302,11 +318,7 @@ pub fn detect_codex_dirs() -> Vec<String> {
 #[tauri::command]
 pub fn validate_codex_dir(path: String) -> bool {
     let home = dirs::home_dir().unwrap_or_default();
-    let expanded = if path.starts_with("~/") {
-        home.join(path.strip_prefix("~/").unwrap_or(&path))
-    } else {
-        PathBuf::from(&path)
-    };
+    let expanded = expand_user_config_path(&path, &home);
     // Guard against path traversal outside home directory
     let canonical = match expanded.canonicalize() {
         Ok(p) => p,
@@ -321,11 +333,7 @@ pub fn validate_codex_dir(path: String) -> bool {
 #[tauri::command]
 pub fn validate_claude_dir(path: String) -> bool {
     let home = dirs::home_dir().unwrap_or_default();
-    let expanded = if path.starts_with("~/") {
-        home.join(path.strip_prefix("~/").unwrap_or(&path))
-    } else {
-        PathBuf::from(&path)
-    };
+    let expanded = expand_user_config_path(&path, &home);
     // Guard against path traversal outside home directory
     let canonical = match expanded.canonicalize() {
         Ok(p) => p,
@@ -861,6 +869,31 @@ mod tests {
             *TEST_HOME_DIR.lock().unwrap() = None;
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    #[test]
+    fn expands_home_config_paths() {
+        let home = PathBuf::from("/tmp/ai-token-monitor-home");
+
+        assert_eq!(expand_user_config_path("~", &home), home);
+        assert_eq!(
+            expand_user_config_path("~/.codex", &home),
+            PathBuf::from("/tmp/ai-token-monitor-home/.codex")
+        );
+    }
+
+    #[test]
+    fn displays_home_relative_config_paths() {
+        let home = PathBuf::from("/tmp/ai-token-monitor-home");
+
+        assert_eq!(
+            display_config_path(&PathBuf::from("/tmp/ai-token-monitor-home/.codex"), &home),
+            "~/.codex"
+        );
+        assert_eq!(
+            display_config_path(&PathBuf::from("/var/tmp/.codex"), &home),
+            "/var/tmp/.codex"
+        );
     }
 
     #[test]

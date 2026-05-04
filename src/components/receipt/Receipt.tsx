@@ -7,11 +7,11 @@ import {
   computeTotalTokens,
   computeStreaks,
   computeCacheSavings,
-  getModelTotalTokens,
   shortenModelName,
 } from "../../lib/statsHelpers";
 import type { Period } from "../../lib/statsHelpers";
 import { useI18n } from "../../i18n/I18nContext";
+import { useSettings } from "../../contexts/SettingsContext";
 
 interface Props {
   stats: AllStats;
@@ -32,9 +32,18 @@ const C = {
   barcode: "#1a1a1a",
 };
 
+function formatEstimatedCost(usd: number): string {
+  return `~${formatCost(usd)}`;
+}
+
+function formatEstimatedDiscount(usd: number): string {
+  return `~-${formatCost(usd)}`;
+}
+
 export const Receipt = forwardRef<HTMLDivElement, Props>(
   ({ stats, period, appVersion }, ref) => {
     const t = useI18n();
+    const { prefs } = useSettings();
 
     const data = useMemo(() => {
       const filtered = filterByPeriod(stats.daily, period);
@@ -47,36 +56,30 @@ export const Receipt = forwardRef<HTMLDivElement, Props>(
       const streaks = computeStreaks(stats.daily);
 
       // Aggregate model usage from filtered daily data
-      const modelMap = new Map<string, { tokens: number; cost: number }>();
+      const modelMap = new Map<string, { tokens: number }>();
       for (const day of filtered) {
         for (const [model, tokens] of Object.entries(day.tokens)) {
-          const existing = modelMap.get(model) ?? { tokens: 0, cost: 0 };
+          const existing = modelMap.get(model) ?? { tokens: 0 };
           existing.tokens += tokens;
           modelMap.set(model, existing);
         }
       }
-      // Calculate cost per model from overall model_usage ratios
-      for (const [model, info] of modelMap) {
-        const overallUsage = stats.model_usage[model];
-        if (overallUsage) {
-          const overallTotal = getModelTotalTokens(overallUsage);
-          if (overallTotal > 0) {
-            info.cost = (info.tokens / overallTotal) * overallUsage.cost_usd;
-          }
-        }
-      }
 
       const models = Array.from(modelMap.entries())
-        .map(([name, info]) => ({ name: shortenModelName(name), tokens: info.tokens, cost: info.cost }))
+        .map(([name, info]) => ({ name: shortenModelName(name), tokens: info.tokens }))
         .filter((m) => m.tokens > 0)
-        .sort((a, b) => b.cost - a.cost);
+        .sort((a, b) => b.tokens - a.tokens);
 
       return { totalCost, totalTokens, cacheSavings, messages, sessions, toolCalls, models, streaks };
     }, [stats, period]);
 
     const now = new Date();
-    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} (${dayNames[now.getDay()]})`;
+    const dateStr = now.toLocaleDateString(prefs.language, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      weekday: "short",
+    });
 
     return (
       <div
@@ -110,8 +113,7 @@ export const Receipt = forwardRef<HTMLDivElement, Props>(
           <div key={m.name} style={{ display: "flex", justifyContent: "space-between", color: C.text }}>
             <span>{m.name}</span>
             <span>
-              {formatTokens(m.tokens, "compact").padStart(7)}{" "}
-              {formatCost(m.cost).padStart(7)}
+              {formatTokens(m.tokens, "compact").padStart(7)}
             </span>
           </div>
         ))}
@@ -126,12 +128,12 @@ export const Receipt = forwardRef<HTMLDivElement, Props>(
         {/* Subtotal */}
         <div style={{ display: "flex", justifyContent: "space-between", color: C.text }}>
           <span>{t("receipt.subtotal")}</span>
-          <span style={{ fontWeight: 700 }}>{formatCost(data.totalCost + data.cacheSavings)}</span>
+          <span style={{ fontWeight: 700 }}>{formatEstimatedCost(data.totalCost + data.cacheSavings)}</span>
         </div>
         {data.cacheSavings > 0 && (
           <div style={{ display: "flex", justifyContent: "space-between", color: C.mint }}>
-            <span>{t("receipt.cacheDiscount")} ~</span>
-            <span>-{formatCost(data.cacheSavings)}</span>
+            <span>{t("receipt.cacheDiscount")}</span>
+            <span>{formatEstimatedDiscount(data.cacheSavings)}</span>
           </div>
         )}
 
@@ -177,7 +179,7 @@ export const Receipt = forwardRef<HTMLDivElement, Props>(
               fontSize: 12,
               color: C.accent,
             }}>
-              ★ {data.streaks.currentStreak} DAY STREAK ★
+              ★ {t("receipt.dayStreak", { count: data.streaks.currentStreak })} ★
             </div>
           </>
         )}

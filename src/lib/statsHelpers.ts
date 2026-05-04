@@ -52,6 +52,24 @@ export function getModelTotalTokens(usage: ModelUsage): number {
   return usage.input_tokens + usage.output_tokens + usage.cache_read + usage.cache_write;
 }
 
+export function aggregateModelUsageFromDaily(daily: DailyUsage[]): Record<string, ModelUsage> {
+  const modelUsage: Record<string, ModelUsage> = {};
+  for (const day of daily) {
+    for (const [model, tokens] of Object.entries(day.tokens)) {
+      const usage = modelUsage[model] ?? {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read: 0,
+        cache_write: 0,
+        cost_usd: 0,
+      };
+      usage.input_tokens += tokens;
+      modelUsage[model] = usage;
+    }
+  }
+  return modelUsage;
+}
+
 export function getMostUsedModel(modelUsage: Record<string, ModelUsage>): { name: string; totalTokens: number; cost: number } | null {
   let best: { name: string; totalTokens: number; cost: number } | null = null;
   for (const [name, u] of Object.entries(modelUsage)) {
@@ -70,6 +88,13 @@ export function computeCacheHitRate(modelUsage: Record<string, ModelUsage>): num
     totalInput += u.input_tokens;
     totalCacheRead += u.cache_read;
   }
+  const denom = totalInput + totalCacheRead;
+  return denom > 0 ? (totalCacheRead / denom) * 100 : 0;
+}
+
+export function computeCacheHitRateFromDaily(daily: DailyUsage[]): number {
+  const totalInput = daily.reduce((sum, d) => sum + d.input_tokens, 0);
+  const totalCacheRead = daily.reduce((sum, d) => sum + d.cache_read_tokens, 0);
   const denom = totalInput + totalCacheRead;
   return denom > 0 ? (totalCacheRead / denom) * 100 : 0;
 }

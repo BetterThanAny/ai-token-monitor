@@ -9,8 +9,9 @@ import {
   computeTotalTokens,
   findBusiestDay,
   getMostUsedModel,
-  computeCacheHitRate,
+  computeCacheHitRateFromDaily,
   computeStreaks,
+  aggregateModelUsageFromDaily,
 } from "../../lib/statsHelpers";
 import { CARDS, CARD_COUNT } from "./WrappedCards";
 import type { WrappedData } from "./WrappedCards";
@@ -43,9 +44,10 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
   const data = useMemo((): WrappedData => {
     const filterPeriod = period === "month" ? "month" : "year";
     const filtered = filterByPeriod(stats.daily, filterPeriod);
+    const modelUsage = aggregateModelUsageFromDaily(filtered);
     const now = new Date();
     const periodLabel = period === "month"
-      ? now.toLocaleDateString("en", { month: "long", year: "numeric" })
+      ? now.toLocaleDateString(prefs.language, { month: "long", year: "numeric" })
       : `${now.getFullYear()}`;
 
     return {
@@ -53,13 +55,13 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
       locale: prefs.language,
       totalCost: computeTotalCost(filtered),
       totalTokens: computeTotalTokens(filtered),
-      topModel: getMostUsedModel(stats.model_usage),
+      topModel: getMostUsedModel(modelUsage),
       busiestDay: findBusiestDay(filtered),
-      cacheHitRate: computeCacheHitRate(stats.model_usage),
-      streaks: computeStreaks(stats.daily),
+      cacheHitRate: computeCacheHitRateFromDaily(filtered),
+      streaks: computeStreaks(filtered),
       totalMessages: filtered.reduce((s, d) => s + d.messages, 0),
       totalSessions: filtered.reduce((s, d) => s + d.sessions, 0),
-      modelUsage: stats.model_usage,
+      modelUsage,
     };
   }, [stats, period, prefs.language]);
 
@@ -229,7 +231,7 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
           {/* Share */}
           <button
             onClick={capture}
-            title={shareError?.message ?? (canCopyImage ? t("wrapped.share") : "Save PNG")}
+            title={shareError?.message ?? (canCopyImage ? t("wrapped.share") : t("shareImage.savePng"))}
             style={{
               background: shareErrorText
                 ? "#ef4444"
@@ -263,7 +265,7 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12"/>
                 </svg>
-                {canCopyImage ? t("wrapped.copied") : "PNG"}
+                {canCopyImage ? t("wrapped.copied") : t("shareImage.savedPng")}
               </>
             ) : (
               <>
@@ -282,7 +284,7 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
                     </>
                   )}
                 </svg>
-                {canCopyImage ? t("wrapped.share") : "PNG"}
+                {canCopyImage ? t("wrapped.share") : t("shareImage.savePng")}
               </>
             )}
           </button>

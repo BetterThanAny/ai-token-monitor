@@ -249,5 +249,10 @@
   "limits.empty.rateLimits": "No hay datos de límites de frecuencia disponibles.",
   "limits.empty.balance": "No hay datos de saldo disponibles.",
   "limits.empty.clients": "No hay datos de cliente disponibles.",
-  "limits.empty.all": "No hay datos de estado de la cuenta disponibles."
+  "limits.empty.all": "No hay datos de estado de la cuenta disponibles.",
+  "common.tokens": "tokens",
+  "common.cached": "en cache",
+  "shareImage.savePng": "Guardar PNG",
+  "shareImage.savedPng": "PNG guardado",
+  "receipt.dayStreak": "RACHA DE {{count}} DÍAS"
 }

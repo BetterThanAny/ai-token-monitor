@@ -249,5 +249,10 @@
   "limits.empty.rateLimits": "暫無頻率限制資料。",
   "limits.empty.balance": "暫無餘額資料。",
   "limits.empty.clients": "暫無客戶端資料。",
-  "limits.empty.all": "暫無帳戶狀態資料。"
+  "limits.empty.all": "暫無帳戶狀態資料。",
+  "common.tokens": "權杖",
+  "common.cached": "已快取",
+  "shareImage.savePng": "儲存 PNG",
+  "shareImage.savedPng": "PNG 已儲存",
+  "receipt.dayStreak": "{{count}} 天連續記錄"
 }

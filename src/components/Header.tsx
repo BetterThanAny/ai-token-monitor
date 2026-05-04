@@ -114,7 +114,7 @@ export function Header({ stats, updater }: Props) {
       ``,
       `## ${t("export.models")}`,
       ...Object.entries(stats.model_usage).map(
-        ([model, u]) => `- **${model}**: ${formatTokens(getModelTotalTokens(u), "full")} tokens, ${formatCost(u.cost_usd)}`
+        ([model, u]) => `- **${model}**: ${formatTokens(getModelTotalTokens(u), "full")} ${t("common.tokens")}, ${formatCost(u.cost_usd)}`
       ),
     ];
 

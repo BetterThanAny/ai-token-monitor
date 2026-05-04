@@ -95,7 +95,7 @@ export function ActivityGraph({ daily }: Props) {
       const dayIdx = i % 7;
       const weekIdx = Math.floor(i / 7);
       if (dayIdx === 0 && d.getDate() <= 7) {
-        months.set(weekIdx, d.toLocaleDateString("en", { month: "short" }));
+        months.set(weekIdx, d.toLocaleDateString(prefs.language, { month: "short" }));
       }
     }
 
@@ -118,7 +118,7 @@ export function ActivityGraph({ daily }: Props) {
     }
 
     return { grid, totalWeeks, monthLabels, thresholds };
-  }, [daily, selectedYear]);
+  }, [daily, selectedYear, prefs.language]);
 
   const todayStr = toLocalDateStr(new Date());
   const canGoPrev = selectedYear > availableYears[0];
@@ -369,9 +369,9 @@ export function ActivityGraph({ daily }: Props) {
           zIndex: 20,
           boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
         }}>
-          <div>{new Date(tooltip.date + "T00:00:00").toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" })}</div>
+          <div>{new Date(tooltip.date + "T00:00:00").toLocaleDateString(prefs.language, { month: "short", day: "numeric", year: "numeric" })}</div>
           <div>
-            {formatTokens(tooltip.tokens, prefs.number_format)} tokens · {formatCost(tooltip.cost)}
+            {formatTokens(tooltip.tokens, prefs.number_format)} {t("common.tokens")} · {formatCost(tooltip.cost)}
           </div>
         </div>
       )}
