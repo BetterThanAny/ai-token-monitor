@@ -582,6 +582,38 @@ function LanguageSelector({
 
 type ConfigDirProvider = "claude" | "codex";
 
+function normalizeDisplayPath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed === "/" || /^[A-Za-z]:[\\/]?$/.test(trimmed)) return trimmed.replace(/\\/g, "/");
+  return trimmed.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+function toHomeDisplayPath(selectedPath: string, home: string | null | undefined): string {
+  const normalizedPath = normalizeDisplayPath(selectedPath);
+  if (!home) return normalizedPath;
+
+  const normalizedHome = normalizeDisplayPath(home);
+  const isWindowsPath = /^[A-Za-z]:\//.test(normalizedHome);
+  const comparePath = isWindowsPath ? normalizedPath.toLowerCase() : normalizedPath;
+  const compareHome = isWindowsPath ? normalizedHome.toLowerCase() : normalizedHome;
+
+  if (comparePath === compareHome) return "~";
+
+  const prefix = `${compareHome}/`;
+  if (comparePath.startsWith(prefix)) {
+    return `~/${normalizedPath.slice(normalizedHome.length + 1)}`;
+  }
+
+  return normalizedPath;
+}
+
+function sameConfigDir(a: string, b: string, home: string | null | undefined): boolean {
+  const left = toHomeDisplayPath(a, home);
+  const right = toHomeDisplayPath(b, home);
+  const isWindowsPath = /^[A-Za-z]:\//.test(left) || /^[A-Za-z]:\//.test(right);
+  return isWindowsPath ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
 const DIR_CONFIG: Record<ConfigDirProvider, {
   titleKey: string;
   tooltipKey: string;
@@ -659,15 +691,16 @@ function ConfigDirsSection({
   const handleAddFolder = useCallback(async () => {
     try {
       await invoke("set_dialog_open", { open: true });
-      const home = await invoke<string>("get_home_dir");
+      const home = await invoke<string | null>("get_home_dir");
       const selected = await open({
         directory: true,
         multiple: false,
         defaultPath: home ? `${home}/${cfg.defaultSubdir}` : undefined,
       });
       if (!selected) return;
-      const homePath = selected.replace(/^\/Users\/[^/]+/, "~");
-      if (dirs.includes(homePath) || dirs.includes(selected)) return;
+      if (Array.isArray(selected)) return;
+      const homePath = toHomeDisplayPath(selected, home);
+      if (dirs.some((dir) => sameConfigDir(dir, homePath, home) || sameConfigDir(dir, selected, home))) return;
       const valid = await invoke<boolean>(cfg.validateCmd, { path: homePath });
       if (valid) {
         onChange([...dirs, homePath]);

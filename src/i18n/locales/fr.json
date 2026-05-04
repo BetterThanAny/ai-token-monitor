@@ -249,5 +249,10 @@
   "limits.empty.rateLimits": "Aucune donnée de limite de débit disponible.",
   "limits.empty.balance": "Aucune donnée de solde disponible.",
   "limits.empty.clients": "Aucune donnée client disponible.",
-  "limits.empty.all": "Aucune donnée d'état du compte disponible."
+  "limits.empty.all": "Aucune donnée d'état du compte disponible.",
+  "common.tokens": "jetons",
+  "common.cached": "en cache",
+  "shareImage.savePng": "Enregistrer PNG",
+  "shareImage.savedPng": "PNG enregistré",
+  "receipt.dayStreak": "{{count}} JOURS DE SÉRIE"
 }

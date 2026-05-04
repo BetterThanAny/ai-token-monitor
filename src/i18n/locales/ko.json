@@ -249,5 +249,10 @@
   "limits.empty.rateLimits": "속도 제한 데이터가 없습니다.",
   "limits.empty.balance": "잔액 데이터가 없습니다.",
   "limits.empty.clients": "클라이언트 데이터가 없습니다.",
-  "limits.empty.all": "계정 상태 데이터가 없습니다."
+  "limits.empty.all": "계정 상태 데이터가 없습니다.",
+  "common.tokens": "토큰",
+  "common.cached": "캐시됨",
+  "shareImage.savePng": "PNG 저장",
+  "shareImage.savedPng": "PNG 저장됨",
+  "receipt.dayStreak": "{{count}}일 연속"
 }

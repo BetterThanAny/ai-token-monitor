@@ -10,8 +10,8 @@ interface Props {
   year: number;
 }
 
-function shortDate(dateStr: string): string {
-  return new Date(dateStr + "T00:00:00").toLocaleDateString("en", {
+function shortDate(dateStr: string, locale: string): string {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString(locale, {
     month: "short",
     day: "numeric",
   });
@@ -82,7 +82,7 @@ export function ActivityStats({ daily, year }: Props) {
         <StatBox
           value={formatTokens(stats.total, fmt)}
           label={t("activity.total")}
-          sub={`${shortDate(`${year}-01-01`)} → ${isCurrentYear ? shortDate(toLocalDateStr(new Date())) : shortDate(`${year}-12-31`)}`}
+          sub={`${shortDate(`${year}-01-01`, prefs.language)} → ${isCurrentYear ? shortDate(toLocalDateStr(new Date()), prefs.language) : shortDate(`${year}-12-31`, prefs.language)}`}
         />
         {isCurrentYear && (
           <StatBox
@@ -93,7 +93,7 @@ export function ActivityStats({ daily, year }: Props) {
         <StatBox
           value={stats.bestDay.tokens > 0 ? formatTokens(stats.bestDay.tokens, fmt) : "—"}
           label={t("activity.bestDay")}
-          sub={stats.bestDay.date ? shortDate(stats.bestDay.date) : ""}
+          sub={stats.bestDay.date ? shortDate(stats.bestDay.date, prefs.language) : ""}
         />
       </div>
 
@@ -125,6 +125,7 @@ export function ActivityStats({ daily, year }: Props) {
           label={t("activity.longest")}
           start={stats.longestStart}
           end={stats.longestEnd}
+          locale={prefs.language}
         />
         {isCurrentYear && (
           <StreakBox
@@ -132,6 +133,7 @@ export function ActivityStats({ daily, year }: Props) {
             label={t("activity.current")}
             start={stats.currentStart}
             end={stats.currentEnd}
+            locale={prefs.language}
           />
         )}
       </div>
@@ -208,7 +210,7 @@ function StatBox({ value, label, sub }: { value: string; label: string; sub?: st
   );
 }
 
-function StreakBox({ days, label, start, end }: { days: number; label: string; start: string; end: string }) {
+function StreakBox({ days, label, start, end, locale }: { days: number; label: string; start: string; end: string; locale: string }) {
   const t = useI18n();
   return (
     <div style={{
@@ -247,7 +249,7 @@ function StreakBox({ days, label, start, end }: { days: number; label: string; s
           color: "var(--text-secondary)",
           marginTop: 2,
         }}>
-          {shortDate(start)} → {shortDate(end)}
+          {shortDate(start, locale)} → {shortDate(end, locale)}
         </div>
       )}
     </div>

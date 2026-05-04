@@ -249,5 +249,10 @@
   "limits.empty.rateLimits": "Keine Ratenlimit-Daten verfügbar.",
   "limits.empty.balance": "Keine Guthabendaten verfügbar.",
   "limits.empty.clients": "Keine Client-Daten verfügbar.",
-  "limits.empty.all": "Keine Kontostatusdaten verfügbar."
+  "limits.empty.all": "Keine Kontostatusdaten verfügbar.",
+  "common.tokens": "Tokens",
+  "common.cached": "gecached",
+  "shareImage.savePng": "PNG speichern",
+  "shareImage.savedPng": "PNG gespeichert",
+  "receipt.dayStreak": "{{count}} TAGE SERIE"
 }

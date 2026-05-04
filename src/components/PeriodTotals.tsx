@@ -9,7 +9,7 @@ interface Props {
   daily: DailyUsage[];
 }
 
-function getWeekRange(offset: number): { start: string; end: string; labelKey: string | null; labelFallback: string } {
+function getWeekRange(offset: number, locale: string): { start: string; end: string; labelKey: string | null; labelFallback: string } {
   const now = new Date();
   const dow = now.getDay();
   const mondayOffset = dow === 0 ? 6 : dow - 1;
@@ -24,12 +24,12 @@ function getWeekRange(offset: number): { start: string; end: string; labelKey: s
   if (offset === 0) return { start, end, labelKey: "period.thisWeek", labelFallback: "" };
   if (offset === 1) return { start, end, labelKey: "period.lastWeek", labelFallback: "" };
 
-  const m1 = monday.toLocaleDateString("en", { month: "short", day: "numeric" });
-  const m2 = sunday.toLocaleDateString("en", { day: "numeric" });
+  const m1 = monday.toLocaleDateString(locale, { month: "short", day: "numeric" });
+  const m2 = sunday.toLocaleDateString(locale, { day: "numeric" });
   return { start, end, labelKey: null, labelFallback: `${m1}-${m2}` };
 }
 
-function getMonthRange(offset: number): { start: string; end: string; labelKey: string | null; labelFallback: string } {
+function getMonthRange(offset: number, locale: string): { start: string; end: string; labelKey: string | null; labelFallback: string } {
   const now = new Date();
   const targetMonth = new Date(now.getFullYear(), now.getMonth() - offset, 1);
   const lastDay = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0);
@@ -40,7 +40,7 @@ function getMonthRange(offset: number): { start: string; end: string; labelKey: 
   if (offset === 0) return { start, end, labelKey: "period.thisMonth", labelFallback: "" };
   if (offset === 1) return { start, end, labelKey: "period.lastMonth", labelFallback: "" };
 
-  const monthLabel = targetMonth.toLocaleDateString("en", { month: "short", year: "numeric" });
+  const monthLabel = targetMonth.toLocaleDateString(locale, { month: "short", year: "numeric" });
   return { start, end, labelKey: null, labelFallback: monthLabel };
 }
 
@@ -70,8 +70,8 @@ export function PeriodTotals({ daily }: Props) {
   const [weekOffset, setWeekOffset] = useState(0);
   const [monthOffset, setMonthOffset] = useState(0);
 
-  const weekRange = useMemo(() => getWeekRange(weekOffset), [weekOffset]);
-  const monthRange = useMemo(() => getMonthRange(monthOffset), [monthOffset]);
+  const weekRange = useMemo(() => getWeekRange(weekOffset, prefs.language), [weekOffset, prefs.language]);
+  const monthRange = useMemo(() => getMonthRange(monthOffset, prefs.language), [monthOffset, prefs.language]);
 
   const weekData = useMemo(
     () => aggregate(daily, weekRange.start, weekRange.end),
@@ -167,7 +167,7 @@ function PeriodCard({
       </div>
       {cacheTokens > 0 && (
         <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 500, opacity: 0.7, marginTop: 1 }}>
-          {formatTokens(cacheTokens, numberFormat)} cached
+          {formatTokens(cacheTokens, numberFormat)} {t("common.cached")}
         </div>
       )}
       <div style={{

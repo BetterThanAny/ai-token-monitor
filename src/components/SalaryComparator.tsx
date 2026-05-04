@@ -120,7 +120,7 @@ export function SalaryComparator({ stats }: Props) {
           )}
           <button
             onClick={capture}
-            title={shareError?.message ?? (canCopyImage ? t("salary.share") : "Save PNG")}
+            title={shareError?.message ?? (canCopyImage ? t("salary.share") : t("shareImage.savePng"))}
             style={{
               background: "none",
               border: "none",

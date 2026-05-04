@@ -249,5 +249,10 @@
   "limits.empty.rateLimits": "Hız limiti verisi yok.",
   "limits.empty.balance": "Bakiye verisi yok.",
   "limits.empty.clients": "İstemci verisi yok.",
-  "limits.empty.all": "Hesap durumu verisi yok."
+  "limits.empty.all": "Hesap durumu verisi yok.",
+  "common.tokens": "token",
+  "common.cached": "önbellekte",
+  "shareImage.savePng": "PNG kaydet",
+  "shareImage.savedPng": "PNG kaydedildi",
+  "receipt.dayStreak": "{{count}} GÜNLÜK SERİ"
 }

@@ -63,7 +63,7 @@ const TotalCostCard = forwardRef<HTMLDivElement, CardProps>(({ data }, ref) => {
         {formatCost(data.totalCost)}
       </div>
       <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.7, marginTop: 16 }}>
-        {formatTokens(data.totalTokens, "compact")} tokens
+        {formatTokens(data.totalTokens, "compact")} {t("common.tokens")}
       </div>
       <Watermark />
     </div>
@@ -132,7 +132,7 @@ const BusiestDayCard = forwardRef<HTMLDivElement, CardProps>(({ data }, ref) => 
         {formatTokens(data.busiestDay.tokens, "compact")}
       </div>
       <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.7, marginTop: 4 }}>
-        tokens
+        {t("common.tokens")}
       </div>
       <Watermark />
     </div>

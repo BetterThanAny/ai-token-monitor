@@ -142,7 +142,7 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
         {/* Share button */}
         <button
           onClick={capture}
-          title={shareError?.message ?? (canCopyImage ? t("receipt.share") : "Save PNG")}
+            title={shareError?.message ?? (canCopyImage ? t("receipt.share") : t("shareImage.savePng"))}
           style={{
             marginTop: 12,
             padding: "8px 24px",
@@ -177,7 +177,7 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12"/>
               </svg>
-              {canCopyImage ? t("receipt.copied") : "PNG"}
+              {canCopyImage ? t("receipt.copied") : t("shareImage.savedPng")}
             </>
           ) : (
             <>
@@ -196,7 +196,7 @@ export function ReceiptOverlay({ visible, onClose, stats }: Props) {
                   </>
                 )}
               </svg>
-              {canCopyImage ? t("receipt.share") : "PNG"}
+              {canCopyImage ? t("receipt.share") : t("shareImage.savePng")}
             </>
           )}
         </button>

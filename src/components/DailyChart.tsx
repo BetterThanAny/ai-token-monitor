@@ -251,7 +251,7 @@ export function DailyChart({ daily, days = 7 }: Props) {
             zIndex: 10,
             boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
           }}>
-            <div>{formatDate(chartData[hoveredIdx].date)}</div>
+            <div>{formatDate(chartData[hoveredIdx].date, prefs.language)}</div>
             <div>
               {mode === "tokens"
                 ? formatTokens(chartData[hoveredIdx].tokens, prefs.number_format)
@@ -271,7 +271,7 @@ export function DailyChart({ daily, days = 7 }: Props) {
       }}>
         {chartData.map((d, i) => {
           if (days > 14 && i % Math.ceil(days / 7) !== 0) return <span key={i} />;
-          const dayLabel = new Date(d.date + "T00:00:00").toLocaleDateString("en", { weekday: "short" });
+          const dayLabel = new Date(d.date + "T00:00:00").toLocaleDateString(prefs.language, { weekday: "short" });
           return (
             <span key={i} style={{
               fontSize: 9,
@@ -280,7 +280,7 @@ export function DailyChart({ daily, days = 7 }: Props) {
               textAlign: "center",
               flex: days <= 14 ? 1 : undefined,
             }}>
-              {days <= 7 ? dayLabel : formatDate(d.date)}
+              {days <= 7 ? dayLabel : formatDate(d.date, prefs.language)}
             </span>
           );
         })}

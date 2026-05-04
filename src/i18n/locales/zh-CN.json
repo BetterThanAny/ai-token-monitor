@@ -249,5 +249,10 @@
   "limits.empty.rateLimits": "暂无频率限制数据。",
   "limits.empty.balance": "暂无余额数据。",
   "limits.empty.clients": "暂无客户端数据。",
-  "limits.empty.all": "暂无账户状态数据。"
+  "limits.empty.all": "暂无账户状态数据。",
+  "common.tokens": "令牌",
+  "common.cached": "已缓存",
+  "shareImage.savePng": "保存 PNG",
+  "shareImage.savedPng": "PNG 已保存",
+  "receipt.dayStreak": "{{count}} 天连续记录"
 }
