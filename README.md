@@ -110,7 +110,7 @@ Settings is organized into three tabs:
 | Provider | Path | Notes |
 |----------|------|-------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | Session/tool-call counts from `~/.claude/stats-cache.json`. Supports multiple roots. |
-| **Codex** | `~/.codex/sessions/**/*.jsonl` | Supports multiple roots. Existing JSONL does not reliably record whether historical sessions used Fast or Standard, so ai-token-monitor cannot automatically recover that distinction from source data alone. |
+| **Codex** | `~/.codex/sessions/**/*.jsonl` | Supports multiple roots. On Windows, the app also auto-detects accessible WSL Codex homes via `\\wsl.localhost\...` / `\\wsl$\...`, because Windows-native Codex uses `%USERPROFILE%\.codex` while WSL Codex uses the Linux home directory by default. Existing JSONL does not reliably record whether historical sessions used Fast or Standard, so ai-token-monitor cannot automatically recover that distinction from source data alone. |
 
 **Network requests**: core usage tracking runs locally. Network requests occur when webhook alerts are sent, the updater checks releases, or you open external links from the app.
 

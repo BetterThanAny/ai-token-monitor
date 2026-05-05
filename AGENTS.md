@@ -13,3 +13,14 @@
 - Prefer Gigabrain primary memory first, then any labeled remote bridge results.
 
 <!-- GIGABRAIN_CODEX_MEMORY_END -->
+
+## Project Review Rules
+
+- Codex Fast-mode multipliers in `src-tauri/src/providers/codex.rs` are intentional
+  project policy. The app records this as a credit-equivalent estimate in the
+  existing `cost_usd` field; do not report it as an API/USD semantic bug unless
+  the project owner explicitly changes the policy.
+- `gpt-5.3-codex-spark` being priced at zero in `src-tauri/pricing.json` is
+  intentional project policy while that Codex rate is treated as
+  research-preview/not-final. Do not report the zero price as a bug unless the
+  project owner explicitly changes the policy.
