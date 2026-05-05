@@ -441,11 +441,6 @@ fn extract_bash_commands(command: &str) -> Vec<String> {
 }
 
 fn parse_session_line(line: &str) -> Option<SessionEntry> {
-    // Quick pre-filter to avoid parsing non-assistant lines
-    if !line.contains("\"type\":\"assistant\"") {
-        return None;
-    }
-
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
 
     if value.get("type")?.as_str()? != "assistant" {
@@ -1043,6 +1038,32 @@ mod tests {
         assert_eq!(entry.web_search_requests, 0);
         assert_eq!(entry.speed, None);
         assert_eq!(entry.service_tier, None);
+    }
+
+    #[test]
+    fn parse_session_line_accepts_spaced_assistant_json() {
+        let line = r#"{
+            "sessionId": "spaced-123",
+            "type": "assistant",
+            "timestamp": "2026-03-23T10:00:00Z",
+            "requestId": "req-spaced",
+            "message": {
+                "id": "msg-spaced",
+                "model": "claude-sonnet-4-6-20260320",
+                "usage": {
+                    "input_tokens": 42,
+                    "output_tokens": 7
+                }
+            }
+        }"#;
+
+        let entry = parse_session_line(line).expect("spaced assistant JSON should parse");
+
+        assert_eq!(entry.session_id, "spaced-123");
+        assert_eq!(entry.message_id, "msg-spaced");
+        assert_eq!(entry.request_id, "req-spaced");
+        assert_eq!(entry.input_tokens, 42);
+        assert_eq!(entry.output_tokens, 7);
     }
 
     #[test]

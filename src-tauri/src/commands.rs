@@ -14,11 +14,16 @@ use crate::providers::types::{
     AccountState, AiKeys, AllStats, BalanceInfo, LimitWindowStatus, UserPreferences,
 };
 
+const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+const MAX_PNG_EXPORT_BYTES: usize = 50 * 1024 * 1024;
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use tauri::Manager;
 
 #[cfg(test)]
 static TEST_HOME_DIR: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+#[cfg(test)]
+static TEST_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn app_home_dir() -> PathBuf {
     #[cfg(test)]
@@ -631,15 +636,48 @@ pub fn save_png_to_file(png_data: Vec<u8>, path: String) -> Result<(), String> {
     let path = PathBuf::from(&path);
     let parent = path.parent().ok_or("Invalid path")?;
     let file_name = path.file_name().ok_or("Invalid path")?;
+
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .ok_or("Destination file must use .png extension")?;
+    if !extension.eq_ignore_ascii_case("png") {
+        return Err("Destination file must use .png extension".to_string());
+    }
+
+    if png_data.len() > MAX_PNG_EXPORT_BYTES {
+        return Err(format!(
+            "PNG exceeds maximum size of {} bytes",
+            MAX_PNG_EXPORT_BYTES
+        ));
+    }
+    if !png_data.starts_with(PNG_SIGNATURE) {
+        return Err("Invalid PNG data".to_string());
+    }
+
     let canonical_parent = parent
         .canonicalize()
         .map_err(|_| "Invalid destination directory".to_string())?;
-    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    let home = app_home_dir()
+        .canonicalize()
+        .map_err(|_| "Cannot determine home directory".to_string())?;
     if !canonical_parent.starts_with(&home) {
         return Err("Destination must be within home directory".to_string());
     }
     let safe_path = canonical_parent.join(file_name);
-    fs::write(&safe_path, &png_data).map_err(|e| format!("Failed to save PNG: {}", e))
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&safe_path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                "Destination file already exists".to_string()
+            } else {
+                format!("Failed to save PNG: {}", e)
+            }
+        })?;
+    std::io::Write::write_all(&mut file, &png_data)
+        .map_err(|e| format!("Failed to save PNG: {}", e))
 }
 
 #[cfg(target_os = "macos")]
@@ -843,10 +881,12 @@ mod tests {
 
     struct TestHomeGuard {
         path: PathBuf,
+        _lock: std::sync::MutexGuard<'static, ()>,
     }
 
     impl TestHomeGuard {
         fn new() -> Self {
+            let lock = TEST_HOME_LOCK.lock().unwrap();
             let nanos = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -859,7 +899,7 @@ mod tests {
             fs::create_dir_all(path.join(".claude")).unwrap();
             *TEST_HOME_DIR.lock().unwrap() = Some(path.clone());
             *AI_KEYS_CACHE.lock().unwrap() = None;
-            Self { path }
+            Self { path, _lock: lock }
         }
     }
 
@@ -924,5 +964,46 @@ mod tests {
         );
         let stored_prefs = fs::read_to_string(prefs_path()).unwrap();
         assert!(!stored_prefs.contains("webhook_discord_url"));
+    }
+
+    fn minimal_png_bytes() -> Vec<u8> {
+        PNG_SIGNATURE.to_vec()
+    }
+
+    #[test]
+    fn save_png_to_file_rejects_non_png_data() {
+        let guard = TestHomeGuard::new();
+        let path = guard.path.join("not-png.png");
+
+        let err = save_png_to_file(b"not a png".to_vec(), path.display().to_string())
+            .expect_err("non-PNG data should be rejected");
+
+        assert_eq!(err, "Invalid PNG data");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn save_png_to_file_rejects_non_png_extension() {
+        let guard = TestHomeGuard::new();
+        let path = guard.path.join("image.txt");
+
+        let err = save_png_to_file(minimal_png_bytes(), path.display().to_string())
+            .expect_err("non-.png extension should be rejected");
+
+        assert_eq!(err, "Destination file must use .png extension");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn save_png_to_file_rejects_existing_file() {
+        let guard = TestHomeGuard::new();
+        let path = guard.path.join("existing.png");
+        fs::write(&path, b"existing").unwrap();
+
+        let err = save_png_to_file(minimal_png_bytes(), path.display().to_string())
+            .expect_err("existing file should not be overwritten");
+
+        assert_eq!(err, "Destination file already exists");
+        assert_eq!(fs::read(&path).unwrap(), b"existing");
     }
 }
