@@ -147,6 +147,16 @@ export interface UserPreferences {
   quick_action_items: string[];
 }
 
+export interface AiKeyStatus {
+  gemini: boolean;
+  openai: boolean;
+  anthropic: boolean;
+  webhook_discord_url: boolean;
+  webhook_slack_url: boolean;
+  webhook_telegram_bot_token: boolean;
+  webhook_telegram_chat_id: boolean;
+}
+
 export interface WebhookConfig {
   discord_enabled: boolean;
   slack_enabled: boolean;

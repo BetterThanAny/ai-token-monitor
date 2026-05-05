@@ -869,8 +869,7 @@ pub fn run() {
             commands::is_codex_available,
             commands::get_preferences,
             commands::set_preferences,
-            commands::set_ai_keys,
-            commands::clear_ai_keys,
+            commands::set_ai_key_field,
             commands::detect_claude_dirs,
             commands::validate_claude_dir,
             commands::detect_codex_dirs,
@@ -885,7 +884,7 @@ pub fn run() {
             commands::copy_png_to_clipboard,
             commands::save_png_to_file,
             commands::get_pricing_table,
-            commands::get_ai_keys,
+            commands::get_ai_key_status,
             commands::test_webhook
         ])
         .setup(|app| {

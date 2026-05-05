@@ -213,7 +213,30 @@ pub struct AiKeys {
     pub webhook_telegram_chat_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct AiKeyStatus {
+    pub gemini: bool,
+    pub openai: bool,
+    pub anthropic: bool,
+    pub webhook_discord_url: bool,
+    pub webhook_slack_url: bool,
+    pub webhook_telegram_bot_token: bool,
+    pub webhook_telegram_chat_id: bool,
+}
+
 impl AiKeys {
+    pub fn status(&self) -> AiKeyStatus {
+        AiKeyStatus {
+            gemini: self.gemini.is_some(),
+            openai: self.openai.is_some(),
+            anthropic: self.anthropic.is_some(),
+            webhook_discord_url: self.webhook_discord_url.is_some(),
+            webhook_slack_url: self.webhook_slack_url.is_some(),
+            webhook_telegram_bot_token: self.webhook_telegram_bot_token.is_some(),
+            webhook_telegram_chat_id: self.webhook_telegram_chat_id.is_some(),
+        }
+    }
+
     pub fn has_any_key(&self) -> bool {
         self.gemini.is_some()
             || self.openai.is_some()

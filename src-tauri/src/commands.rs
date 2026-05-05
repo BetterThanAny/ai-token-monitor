@@ -11,7 +11,7 @@ use crate::providers::codex::CodexProvider;
 use crate::providers::pricing;
 use crate::providers::traits::TokenProvider;
 use crate::providers::types::{
-    AccountState, AiKeys, AllStats, BalanceInfo, LimitWindowStatus, UserPreferences,
+    AccountState, AiKeyStatus, AiKeys, AllStats, BalanceInfo, LimitWindowStatus, UserPreferences,
 };
 
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
@@ -361,6 +361,23 @@ fn encrypted_keys_path() -> PathBuf {
         .join(".ai-token-monitor-keys.enc")
 }
 
+#[cfg(unix)]
+fn restrict_secret_file_permissions(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = fs::metadata(path)
+        .map_err(|e| format!("Failed to inspect AI keys permissions: {}", e))?
+        .permissions();
+    permissions.set_mode(0o600);
+    fs::set_permissions(path, permissions)
+        .map_err(|e| format!("Failed to secure AI keys permissions: {}", e))
+}
+
+#[cfg(not(unix))]
+fn restrict_secret_file_permissions(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
 fn get_machine_id() -> String {
     #[cfg(target_os = "macos")]
     {
@@ -478,6 +495,11 @@ fn load_ai_keys_from_file() -> Option<AiKeys> {
     }
 }
 
+fn write_encrypted_keys(path: &Path, encrypted: &str) -> Result<(), String> {
+    fs::write(path, encrypted).map_err(|e| format!("Failed to write AI keys: {}", e))?;
+    restrict_secret_file_permissions(path)
+}
+
 fn save_ai_keys(keys: &Option<AiKeys>) -> Result<(), String> {
     let path = encrypted_keys_path();
     match keys {
@@ -490,7 +512,7 @@ fn save_ai_keys(keys: &Option<AiKeys>) -> Result<(), String> {
                 fs::create_dir_all(parent)
                     .map_err(|e| format!("Failed to create AI keys directory: {}", e))?;
             }
-            fs::write(&path, &encrypted).map_err(|e| format!("Failed to write AI keys: {}", e))?;
+            write_encrypted_keys(&path, &encrypted)?;
         }
         _ => {
             // No keys — remove file
@@ -504,6 +526,42 @@ fn save_ai_keys(keys: &Option<AiKeys>) -> Result<(), String> {
     // Invalidate cache so next load picks up new values
     if let Ok(mut cache) = AI_KEYS_CACHE.lock() {
         *cache = None;
+    }
+    Ok(())
+}
+
+fn ai_key_status() -> AiKeyStatus {
+    load_ai_keys()
+        .as_ref()
+        .map(AiKeys::status)
+        .unwrap_or_default()
+}
+
+fn normalized_secret(value: Option<String>) -> Option<String> {
+    value.and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn set_ai_key_field_value(
+    keys: &mut AiKeys,
+    field: &str,
+    value: Option<String>,
+) -> Result<(), String> {
+    match field {
+        "gemini" => keys.gemini = value,
+        "openai" => keys.openai = value,
+        "anthropic" => keys.anthropic = value,
+        "webhook_discord_url" => keys.webhook_discord_url = value,
+        "webhook_slack_url" => keys.webhook_slack_url = value,
+        "webhook_telegram_bot_token" => keys.webhook_telegram_bot_token = value,
+        "webhook_telegram_chat_id" => keys.webhook_telegram_chat_id = value,
+        _ => return Err(format!("Unknown AI key field: {}", field)),
     }
     Ok(())
 }
@@ -528,10 +586,9 @@ pub fn get_preferences() -> UserPreferences {
     let mut prefs_changed = false;
 
     // Migrate: if ai_keys exist in JSON file, move them to encrypted file
-    if prefs.ai_keys.is_some() {
-        match save_ai_keys(&prefs.ai_keys) {
+    if let Some(legacy_keys) = prefs.ai_keys.take() {
+        match save_ai_keys(&Some(legacy_keys)) {
             Ok(()) => {
-                prefs.ai_keys = None;
                 prefs_changed = true;
             }
             Err(e) => {
@@ -546,24 +603,27 @@ pub fn get_preferences() -> UserPreferences {
         }
     }
 
-    // ai_keys are loaded separately via get_ai_keys command
+    // ai_keys are intentionally not returned to the renderer.
     prefs
 }
 
-/// Load AI keys from encrypted local file on-demand.
-#[tauri::command]
-pub fn get_ai_keys() -> Option<AiKeys> {
+/// Load AI keys from encrypted local storage for backend-only webhook work.
+pub(crate) fn get_ai_keys() -> Option<AiKeys> {
     load_ai_keys()
 }
 
 #[tauri::command]
-pub fn set_ai_keys(keys: Option<AiKeys>) -> Result<(), String> {
-    save_ai_keys(&keys)
+pub fn get_ai_key_status() -> AiKeyStatus {
+    ai_key_status()
 }
 
 #[tauri::command]
-pub fn clear_ai_keys() -> Result<(), String> {
-    save_ai_keys(&None)
+pub fn set_ai_key_field(field: String, value: Option<String>) -> Result<AiKeyStatus, String> {
+    let mut keys = load_ai_keys().unwrap_or_default();
+    set_ai_key_field_value(&mut keys, &field, normalized_secret(value))?;
+    let next_keys = if keys.has_any_key() { Some(keys) } else { None };
+    save_ai_keys(&next_keys)?;
+    Ok(next_keys.as_ref().map(AiKeys::status).unwrap_or_default())
 }
 
 fn persist_preferences(prefs: &UserPreferences) -> Result<(), String> {
@@ -964,6 +1024,112 @@ mod tests {
         );
         let stored_prefs = fs::read_to_string(prefs_path()).unwrap();
         assert!(!stored_prefs.contains("webhook_discord_url"));
+    }
+
+    #[test]
+    fn ai_key_status_reports_presence_without_values() {
+        let _guard = TestHomeGuard::new();
+        let keys = Some(AiKeys {
+            webhook_discord_url: Some(
+                "https://discord.com/api/webhooks/123456789/token".to_string(),
+            ),
+            webhook_telegram_bot_token: Some("telegram-token".to_string()),
+            ..AiKeys::default()
+        });
+
+        save_ai_keys(&keys).unwrap();
+
+        let status = get_ai_key_status();
+        assert!(status.webhook_discord_url);
+        assert!(status.webhook_telegram_bot_token);
+        assert!(!status.webhook_slack_url);
+        assert!(!status.webhook_telegram_chat_id);
+    }
+
+    #[test]
+    fn set_ai_key_field_preserves_unmodified_existing_keys() {
+        let _guard = TestHomeGuard::new();
+        let keys = Some(AiKeys {
+            webhook_discord_url: Some(
+                "https://discord.com/api/webhooks/123456789/token".to_string(),
+            ),
+            webhook_slack_url: Some("https://hooks.slack.com/services/T000/B000/old".to_string()),
+            ..AiKeys::default()
+        });
+
+        save_ai_keys(&keys).unwrap();
+        let status = set_ai_key_field(
+            "webhook_slack_url".to_string(),
+            Some(" https://hooks.slack.com/services/T000/B000/new ".to_string()),
+        )
+        .unwrap();
+
+        assert!(status.webhook_discord_url);
+        assert!(status.webhook_slack_url);
+        let stored = load_ai_keys().unwrap();
+        assert_eq!(
+            stored.webhook_discord_url.as_deref(),
+            Some("https://discord.com/api/webhooks/123456789/token")
+        );
+        assert_eq!(
+            stored.webhook_slack_url.as_deref(),
+            Some("https://hooks.slack.com/services/T000/B000/new")
+        );
+    }
+
+    #[test]
+    fn set_ai_key_field_clears_only_selected_key() {
+        let _guard = TestHomeGuard::new();
+        let keys = Some(AiKeys {
+            webhook_discord_url: Some(
+                "https://discord.com/api/webhooks/123456789/token".to_string(),
+            ),
+            webhook_slack_url: Some("https://hooks.slack.com/services/T000/B000/old".to_string()),
+            ..AiKeys::default()
+        });
+
+        save_ai_keys(&keys).unwrap();
+        let status = set_ai_key_field("webhook_slack_url".to_string(), None).unwrap();
+
+        assert!(status.webhook_discord_url);
+        assert!(!status.webhook_slack_url);
+        let stored = load_ai_keys().unwrap();
+        assert!(stored.webhook_discord_url.is_some());
+        assert!(stored.webhook_slack_url.is_none());
+    }
+
+    #[test]
+    fn set_ai_key_field_rejects_unknown_fields() {
+        let _guard = TestHomeGuard::new();
+
+        let err = set_ai_key_field("not_a_real_field".to_string(), Some("value".to_string()))
+            .expect_err("unknown fields should be rejected");
+
+        assert_eq!(err, "Unknown AI key field: not_a_real_field");
+        assert!(load_ai_keys().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn encrypted_ai_keys_file_is_user_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = TestHomeGuard::new();
+        let keys = Some(AiKeys {
+            webhook_discord_url: Some(
+                "https://discord.com/api/webhooks/123456789/token".to_string(),
+            ),
+            ..AiKeys::default()
+        });
+
+        save_ai_keys(&keys).unwrap();
+
+        let mode = fs::metadata(encrypted_keys_path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     fn minimal_png_bytes() -> Vec<u8> {
