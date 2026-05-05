@@ -1,4 +1,6 @@
+mod child_process;
 mod claude_usage;
+mod codex_paths;
 mod commands;
 mod providers;
 mod webhooks;
@@ -374,6 +376,8 @@ pub fn update_tray_title(app_handle: &tauri::AppHandle) {
         let tooltip_str = format!("AI Token Monitor - Today: {}", cost_str);
         (cost_str, tooltip_str)
     };
+    #[cfg(not(target_os = "macos"))]
+    let _ = &title;
 
     // Dispatch AppKit tray operations to main thread to avoid crash
     let handle = app_handle.clone();
@@ -403,23 +407,11 @@ fn get_all_watch_dirs() -> Vec<PathBuf> {
     }
 
     if prefs.include_codex {
-        // Add Codex session directories from preferences. Include ~/.codex because
-        // CodexProvider::new() unconditionally prepends it when reading stats.
-        let default_codex = home.join(".codex");
-        let mut codex_seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-        for codex_dir in &prefs.codex_dirs {
-            let expanded = expand(codex_dir);
-            let canonical = expanded.canonicalize().unwrap_or_else(|_| expanded.clone());
-            codex_seen.insert(canonical);
+        // Match CodexProvider::new(): configured dirs, ~/.codex, and Windows WSL
+        // Codex dirs discovered on the local machine.
+        for expanded in codex_paths::runtime_codex_dirs(&prefs.codex_dirs, &home) {
             dirs.push(expanded.join("sessions"));
             dirs.push(expanded.join("archived_sessions"));
-        }
-        let default_canonical = default_codex
-            .canonicalize()
-            .unwrap_or_else(|_| default_codex.clone());
-        if !codex_seen.contains(&default_canonical) {
-            dirs.push(default_codex.join("sessions"));
-            dirs.push(default_codex.join("archived_sessions"));
         }
     }
 
@@ -801,39 +793,42 @@ fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
             .and_then(|p| p.parent()) // .app
             .ok_or("Could not determine .app bundle path")?;
         eprintln!("[CMD] scheduling relaunch of {:?}", app_bundle);
-        std::process::Command::new("sh")
+        let mut command = std::process::Command::new("sh");
+        command
             .arg("-c")
             .arg("sleep 1; open \"$1\"")
             .arg("ai-token-monitor-relaunch")
-            .arg(app_bundle)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+            .arg(app_bundle);
+        child_process::spawn_no_window(&mut command).map_err(|e| e.to_string())?;
     }
 
     #[cfg(target_os = "windows")]
     {
         eprintln!("[CMD] scheduling relaunch of {:?}", exe);
-        std::process::Command::new("powershell.exe")
+        let mut command = std::process::Command::new("powershell.exe");
+        command
             .args([
                 "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
                 "-Command",
                 "Start-Sleep -Seconds 1; Start-Process -FilePath $args[0]",
             ])
-            .arg(&exe)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+            .arg(&exe);
+        child_process::spawn_no_window(&mut command).map_err(|e| e.to_string())?;
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         eprintln!("[CMD] scheduling relaunch of {:?}", exe);
-        std::process::Command::new("sh")
+        let mut command = std::process::Command::new("sh");
+        command
             .arg("-c")
             .arg("sleep 1; exec \"$1\"")
             .arg("ai-token-monitor-relaunch")
-            .arg(&exe)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+            .arg(&exe);
+        child_process::spawn_no_window(&mut command).map_err(|e| e.to_string())?;
     }
 
     // Exit immediately — the detached shell outlives us and restarts the app
@@ -1094,51 +1089,51 @@ fn position_window_near_tray(
             // Windows-style: taskbar at bottom, show popup above tray
             let available_height = (tray_pos.y - monitor_pos.y - padding).max(400.0);
             let desired_height = available_height.min(900.0);
-
-            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                width: 440.0,
-                height: desired_height,
-            }));
-
-            let window_size = window.outer_size()?.to_logical::<f64>(scale);
+            let desired_width = 440.0;
             let x = clamp_window_x_to_monitor(
                 tray_center_x,
-                window_size.width,
+                desired_width,
                 &monitor_pos,
                 &monitor_size,
             );
-            let y = tray_pos.y - window_size.height - padding;
+            let y = tray_pos.y - desired_height - padding;
 
             window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))?;
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: desired_width,
+                height: desired_height,
+            }));
         } else {
             // macOS-style: menu bar at top, show popup below tray
             let y = tray_pos.y + tray_size.height;
             let screen_bottom = monitor_pos.y + monitor_size.height;
             let max_height = (screen_bottom - y - padding).max(400.0);
             let desired_height = max_height.min(900.0);
-
-            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                width: 440.0,
-                height: desired_height,
-            }));
-
-            let window_size = window.outer_size()?.to_logical::<f64>(scale);
+            let desired_width = 440.0;
             let x = clamp_window_x_to_monitor(
                 tray_center_x,
-                window_size.width,
+                desired_width,
                 &monitor_pos,
                 &monitor_size,
             );
 
             window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))?;
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: desired_width,
+                height: desired_height,
+            }));
         }
     } else {
         // Fallback: no monitor found, just position below tray
         let y = tray_pos.y + tray_size.height;
-        let window_size = window.outer_size()?.to_logical::<f64>(scale);
-        let x = tray_center_x - (window_size.width / 2.0);
+        let desired_width = 440.0;
+        let x = tray_center_x - (desired_width / 2.0);
 
         window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))?;
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: desired_width,
+            height: 800.0,
+        }));
     }
 
     Ok(())

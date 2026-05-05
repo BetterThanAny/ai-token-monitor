@@ -1,9 +1,11 @@
 {
-  "version": "1.3.3",
+  "version": "1.3.4",
   "last_updated": "2026-05-05",
   "sources": {
     "claude": "https://docs.anthropic.com/en/docs/about-claude/pricing",
-    "codex": "https://developers.openai.com/api/docs/pricing"
+    "codex": "https://developers.openai.com/api/docs/pricing",
+    "codex_rate_card": "https://help.openai.com/en/articles/20001106-codex-rate-card",
+    "codex_plan_pricing": "https://developers.openai.com/codex/pricing"
   },
   "claude": {
     "default": "sonnet",
@@ -32,10 +34,12 @@
       { "match": "gpt-5.4-nano",      "label": "gpt-5.4-nano",      "input": 0.20, "output": 1.25,  "cached_input": 0.02  },
       { "match": "gpt-5.4-mini",      "label": "gpt-5.4-mini",      "input": 0.75, "output": 4.50,  "cached_input": 0.075 },
       { "match": "gpt-5.4",           "label": "gpt-5.4",           "input": 2.50, "output": 15.00, "cached_input": 0.25  },
+      { "match": "gpt-5.3-codex-spark","label": "gpt-5.3-codex-spark","input": 0.0, "output": 0.0, "cached_input": 0.0, "note": "Intentional project policy: research-preview Spark is treated as zero-cost until rates are final; do not report as a pricing bug." },
       { "match": "codex-auto-review", "label": "codex-auto-review", "input": 1.75, "output": 14.00, "cached_input": 0.175 },
-      { "match": "gpt-5.3-codex-spark", "label": "gpt-5.3-codex-spark", "input": 0.0, "output": 0.0, "cached_input": 0.0 },
       { "match": "gpt-5.3-codex",     "label": "gpt-5.3-codex",     "input": 1.75, "output": 14.00, "cached_input": 0.175 },
       { "match": "gpt-5.2-codex",     "label": "gpt-5.2-codex",     "input": 1.75, "output": 14.00, "cached_input": 0.175 },
+      { "match": "gpt-5.1-codex",     "label": "gpt-5.1-codex",     "input": 1.25, "output": 10.00, "cached_input": 0.125 },
+      { "match": "gpt-5-codex",       "label": "gpt-5-codex",       "input": 1.25, "output": 10.00, "cached_input": 0.125 },
       { "match": "gpt-5.2",           "label": "gpt-5.2",           "input": 1.75, "output": 14.00, "cached_input": 0.175 },
       { "match": "gpt-4.1-mini",      "label": "gpt-4.1-mini",      "input": 0.40, "output": 1.60,  "cached_input": 0.10  },
       { "match": "gpt-4.1",           "label": "gpt-4.1",           "input": 2.00, "output": 8.00,  "cached_input": 0.50  },
