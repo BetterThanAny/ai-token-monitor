@@ -542,6 +542,23 @@ mod tests {
             "GPT-5.5 Pro output must be $180/MTok, got ${}",
             p.output
         );
+        assert!(
+            (p.cached_input - 30.00).abs() < 0.001,
+            "GPT-5.5 Pro cached input must be billed at full input price, got ${}",
+            p.cached_input
+        );
+    }
+
+    #[test]
+    fn codex_gpt54_pro_cached_input_uses_full_input_price() {
+        let p = get_codex_pricing("gpt-5.4-pro");
+        assert!((p.input - 30.00).abs() < 0.001);
+        assert!((p.output - 180.00).abs() < 0.001);
+        assert!(
+            (p.cached_input - 30.00).abs() < 0.001,
+            "GPT-5.4 Pro cached input must be billed at full input price, got ${}",
+            p.cached_input
+        );
     }
 
     // Regression guard: dated snapshot IDs (e.g. gpt-5.5-2026-04-23) must
@@ -574,11 +591,11 @@ mod tests {
     }
 
     #[test]
-    fn codex_spark_uses_gpt53_codex_api_equivalent_estimate() {
+    fn codex_spark_is_free() {
         let p = get_codex_pricing("gpt-5.3-codex-spark");
-        assert!((p.input - 1.75).abs() < 0.001);
-        assert!((p.cached_input - 0.175).abs() < 0.001);
-        assert!((p.output - 14.00).abs() < 0.001);
+        assert!((p.input - 0.0).abs() < 0.001);
+        assert!((p.cached_input - 0.0).abs() < 0.001);
+        assert!((p.output - 0.0).abs() < 0.001);
     }
 
     #[test]

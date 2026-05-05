@@ -3,12 +3,14 @@ import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
-import type { UserPreferences } from "../lib/types";
+import type { AiKeyStatus, UserPreferences } from "../lib/types";
 
 interface SettingsContextType {
   prefs: UserPreferences;
   updatePrefs: (partial: Partial<UserPreferences>) => void;
   refreshPrefs: () => Promise<void>;
+  refreshAiKeyStatus: () => Promise<void>;
+  aiKeyStatus: AiKeyStatus;
   ready: boolean;
 }
 
@@ -28,25 +30,42 @@ const defaultPrefs: UserPreferences = {
   quick_action_items: [],
 };
 
+const defaultAiKeyStatus: AiKeyStatus = {
+  gemini: false,
+  openai: false,
+  anthropic: false,
+  webhook_discord_url: false,
+  webhook_slack_url: false,
+  webhook_telegram_bot_token: false,
+  webhook_telegram_chat_id: false,
+};
+
 const SettingsContext = createContext<SettingsContextType>({
   prefs: defaultPrefs,
   updatePrefs: () => {},
   refreshPrefs: async () => {},
+  refreshAiKeyStatus: async () => {},
+  aiKeyStatus: defaultAiKeyStatus,
   ready: false,
 });
 
-async function loadPreferencesWithKeys(): Promise<UserPreferences> {
-  const prefs = await invoke<UserPreferences>("get_preferences");
+async function loadAiKeyStatus(): Promise<AiKeyStatus> {
   try {
-    const keys = await invoke<UserPreferences["ai_keys"] | null>("get_ai_keys");
-    return keys ? { ...prefs, ai_keys: keys } : prefs;
+    return await invoke<AiKeyStatus>("get_ai_key_status");
   } catch {
-    return prefs;
+    return defaultAiKeyStatus;
   }
+}
+
+async function loadSettingsSnapshot(): Promise<{ prefs: UserPreferences; aiKeyStatus: AiKeyStatus }> {
+  const prefs = await invoke<UserPreferences>("get_preferences");
+  const aiKeyStatus = await loadAiKeyStatus();
+  return { prefs, aiKeyStatus };
 }
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefs] = useState<UserPreferences>(defaultPrefs);
+  const [aiKeyStatus, setAiKeyStatus] = useState<AiKeyStatus>(defaultAiKeyStatus);
   const [ready, setReady] = useState(false);
   const skipNextPersist = useRef(true);
   const pendingPrefsRef = useRef<Partial<UserPreferences> | null>(null);
@@ -56,11 +75,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const prevIncludeCodexRef = useRef(defaultPrefs.include_codex);
 
   useEffect(() => {
-    loadPreferencesWithKeys().then((p) => {
+    loadSettingsSnapshot().then(({ prefs: p, aiKeyStatus: keyStatus }) => {
       const pending = pendingPrefsRef.current;
       pendingPrefsRef.current = null;
       const nextPrefs = pending ? { ...p, ...pending } : p;
       setPrefs(nextPrefs);
+      setAiKeyStatus(keyStatus);
       // Skip only the plain initial load. Pending early updates must persist.
       skipNextPersist.current = !pending;
       prevConfigDirsRef.current = JSON.stringify(p.config_dirs);
@@ -175,20 +195,25 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const refreshPrefs = useCallback(async () => {
     try {
-      const p = await loadPreferencesWithKeys();
+      const { prefs: p, aiKeyStatus: keyStatus } = await loadSettingsSnapshot();
       skipNextPersist.current = true;
       prevConfigDirsRef.current = JSON.stringify(p.config_dirs);
       prevCodexDirsRef.current = JSON.stringify(p.codex_dirs);
       prevIncludeClaudeRef.current = p.include_claude;
       prevIncludeCodexRef.current = p.include_codex;
       setPrefs(p);
+      setAiKeyStatus(keyStatus);
     } catch {
       // ignore
     }
   }, []);
 
+  const refreshAiKeyStatus = useCallback(async () => {
+    setAiKeyStatus(await loadAiKeyStatus());
+  }, []);
+
   return (
-    <SettingsContext.Provider value={{ prefs, updatePrefs, refreshPrefs, ready }}>
+    <SettingsContext.Provider value={{ prefs, updatePrefs, refreshPrefs, refreshAiKeyStatus, aiKeyStatus, ready }}>
       {children}
     </SettingsContext.Provider>
   );

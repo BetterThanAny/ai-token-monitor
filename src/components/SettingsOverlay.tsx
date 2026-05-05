@@ -6,7 +6,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useI18n, LANGUAGE_OPTIONS } from "../i18n/I18nContext";
 import { InfoTooltip } from "./InfoTooltip";
 import type { Locale } from "../i18n/I18nContext";
-import type { UserPreferences } from "../lib/types";
+import type { AiKeyStatus } from "../lib/types";
 
 type SettingsTab = "general" | "account" | "webhooks";
 
@@ -18,7 +18,7 @@ interface Props {
 }
 
 export function SettingsOverlay({ visible, onClose, initialTab, centered }: Props) {
-  const { prefs, updatePrefs } = useSettings();
+  const { prefs, updatePrefs, aiKeyStatus, refreshAiKeyStatus } = useSettings();
   const [appVersion, setAppVersion] = useState("");
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "general");
   const t = useI18n();
@@ -149,6 +149,8 @@ export function SettingsOverlay({ visible, onClose, initialTab, centered }: Prop
             <WebhooksTab
               prefs={prefs}
               updatePrefs={updatePrefs}
+              aiKeyStatus={aiKeyStatus}
+              refreshAiKeyStatus={refreshAiKeyStatus}
             />
           )}
         </div>
@@ -866,26 +868,29 @@ const AI_KEY_FIELDS = [
   "webhook_telegram_chat_id",
 ] as const;
 
-type AiKeys = NonNullable<UserPreferences["ai_keys"]>;
+type AiKeyField = typeof AI_KEY_FIELDS[number];
 
-function compactAiKeys(keys: Partial<AiKeys>): AiKeys | undefined {
-  const compact: Partial<AiKeys> = {};
-  for (const field of AI_KEY_FIELDS) {
-    const value = keys[field]?.trim();
-    if (value) compact[field] = value;
-  }
-  return Object.keys(compact).length > 0 ? compact as AiKeys : undefined;
-}
+const WEBHOOK_SECRET_FIELDS = [
+  "webhook_discord_url",
+  "webhook_slack_url",
+  "webhook_telegram_bot_token",
+  "webhook_telegram_chat_id",
+] as const;
+
+type WebhookSecretField = typeof WEBHOOK_SECRET_FIELDS[number];
 
 function WebhooksTab({
   prefs,
   updatePrefs,
+  aiKeyStatus,
+  refreshAiKeyStatus,
 }: {
   prefs: ReturnType<typeof useSettings>["prefs"];
   updatePrefs: ReturnType<typeof useSettings>["updatePrefs"];
+  aiKeyStatus: AiKeyStatus;
+  refreshAiKeyStatus: () => Promise<void>;
 }) {
   const t = useI18n();
-  const keys = prefs.ai_keys ?? {};
   const config = prefs.webhook_config ?? {
     discord_enabled: false,
     slack_enabled: false,
@@ -903,6 +908,7 @@ function WebhooksTab({
 
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ platform: string; ok: boolean; msg: string } | null>(null);
+  const [keyDrafts, setKeyDrafts] = useState<Partial<Record<WebhookSecretField, string>>>({});
   const saveSeq = useRef(0);
   const testResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -943,24 +949,49 @@ function WebhooksTab({
     updatePrefs({ webhook_config: { ...config, ...partial } });
   };
 
-  const updateKeys = (partial: Partial<typeof keys>) => {
-    const previousKeys = prefs.ai_keys;
-    const nextKeys = compactAiKeys({ ...keys, ...partial });
+  const saveKeyField = useCallback(async (field: AiKeyField, value: string | null) => {
     const seq = saveSeq.current + 1;
     saveSeq.current = seq;
-    updatePrefs({ ai_keys: nextKeys });
-    invoke("set_ai_keys", { keys: nextKeys ?? null }).catch((e) => {
+
+    try {
+      await invoke("set_ai_key_field", { field, value });
       if (seq === saveSeq.current) {
-        updatePrefs({ ai_keys: previousKeys });
+        await refreshAiKeyStatus();
       }
+    } catch (e) {
       showTestResult({ platform: "storage", ok: false, msg: String(e) });
-    });
-  };
+      throw e;
+    }
+  }, [refreshAiKeyStatus, showTestResult]);
+
+  const commitDraft = useCallback(async (field: WebhookSecretField) => {
+    const value = keyDrafts[field]?.trim();
+    if (!value) return;
+    await saveKeyField(field, value);
+    setKeyDrafts((current) => ({ ...current, [field]: "" }));
+  }, [keyDrafts, saveKeyField]);
+
+  const clearKeyField = useCallback(async (field: WebhookSecretField) => {
+    setKeyDrafts((current) => ({ ...current, [field]: "" }));
+    await saveKeyField(field, null);
+  }, [saveKeyField]);
+
+  const commitPlatformDrafts = useCallback(async (platform: string) => {
+    if (platform === "discord") {
+      await commitDraft("webhook_discord_url");
+    } else if (platform === "slack") {
+      await commitDraft("webhook_slack_url");
+    } else if (platform === "telegram") {
+      await commitDraft("webhook_telegram_bot_token");
+      await commitDraft("webhook_telegram_chat_id");
+    }
+  }, [commitDraft]);
 
   const handleTest = async (platform: string) => {
     setTesting(platform);
     clearTestResult();
     try {
+      await commitPlatformDrafts(platform);
       const msg = await invoke<string>("test_webhook", { platform });
       showTestResult({ platform, ok: true, msg });
     } catch (e) {
@@ -1049,9 +1080,12 @@ function WebhooksTab({
         guide={t("settings.webhookGuideDiscord")}
         enabled={config.discord_enabled}
         onToggle={(v) => updateConfig({ discord_enabled: v })}
-        urlValue={keys.webhook_discord_url ?? ""}
+        urlValue={keyDrafts.webhook_discord_url ?? ""}
         urlPlaceholder="https://discord.com/api/webhooks/..."
-        onUrlChange={(v) => updateKeys({ webhook_discord_url: v || undefined })}
+        configured={aiKeyStatus.webhook_discord_url}
+        onUrlChange={(v) => setKeyDrafts((current) => ({ ...current, webhook_discord_url: v }))}
+        onUrlCommit={() => void commitDraft("webhook_discord_url").catch(() => {})}
+        onClear={() => void clearKeyField("webhook_discord_url").catch(() => {})}
         onTest={() => handleTest("discord")}
         testing={testing === "discord"}
         testResult={testResult?.platform === "discord" ? testResult : null}
@@ -1065,9 +1099,12 @@ function WebhooksTab({
         guide={t("settings.webhookGuideSlack")}
         enabled={config.slack_enabled}
         onToggle={(v) => updateConfig({ slack_enabled: v })}
-        urlValue={keys.webhook_slack_url ?? ""}
+        urlValue={keyDrafts.webhook_slack_url ?? ""}
         urlPlaceholder="https://hooks.slack.com/services/..."
-        onUrlChange={(v) => updateKeys({ webhook_slack_url: v || undefined })}
+        configured={aiKeyStatus.webhook_slack_url}
+        onUrlChange={(v) => setKeyDrafts((current) => ({ ...current, webhook_slack_url: v }))}
+        onUrlCommit={() => void commitDraft("webhook_slack_url").catch(() => {})}
+        onClear={() => void clearKeyField("webhook_slack_url").catch(() => {})}
         onTest={() => handleTest("slack")}
         testing={testing === "slack"}
         testResult={testResult?.platform === "slack" ? testResult : null}
@@ -1094,23 +1131,28 @@ function WebhooksTab({
         </div>
         <div style={{ marginBottom: 3 }}>
           <div style={{ fontSize: 9, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 1 }}>Bot Token</div>
-          <input
-            type="password"
-            value={keys.webhook_telegram_bot_token ?? ""}
-            onChange={(e) => updateKeys({ webhook_telegram_bot_token: e.target.value.trim() || undefined })}
+          <SecretInput
+            value={keyDrafts.webhook_telegram_bot_token ?? ""}
+            configured={aiKeyStatus.webhook_telegram_bot_token}
             placeholder="123456:ABC-DEF..."
-            style={keyInputStyle}
+            onChange={(v) => setKeyDrafts((current) => ({ ...current, webhook_telegram_bot_token: v }))}
+            onCommit={() => void commitDraft("webhook_telegram_bot_token").catch(() => {})}
+            onClear={() => void clearKeyField("webhook_telegram_bot_token").catch(() => {})}
+            inputStyle={keyInputStyle}
           />
         </div>
         <div style={{ marginBottom: 3 }}>
           <div style={{ fontSize: 9, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 1 }}>Chat ID</div>
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            <input
+            <SecretInput
               type="text"
-              value={keys.webhook_telegram_chat_id ?? ""}
-              onChange={(e) => updateKeys({ webhook_telegram_chat_id: e.target.value.trim() || undefined })}
+              value={keyDrafts.webhook_telegram_chat_id ?? ""}
+              configured={aiKeyStatus.webhook_telegram_chat_id}
               placeholder="-1001234567890"
-              style={keyInputStyle}
+              onChange={(v) => setKeyDrafts((current) => ({ ...current, webhook_telegram_chat_id: v }))}
+              onCommit={() => void commitDraft("webhook_telegram_chat_id").catch(() => {})}
+              onClear={() => void clearKeyField("webhook_telegram_chat_id").catch(() => {})}
+              inputStyle={keyInputStyle}
             />
             <button
               onClick={() => handleTest("telegram")}
@@ -1243,6 +1285,63 @@ function WebhooksTab({
   );
 }
 
+function SecretInput({
+  type = "password",
+  value,
+  configured,
+  placeholder,
+  onChange,
+  onCommit,
+  onClear,
+  inputStyle,
+}: {
+  type?: "password" | "text";
+  value: string;
+  configured: boolean;
+  placeholder: string;
+  onChange: (v: string) => void;
+  onCommit: () => void;
+  onClear: () => void;
+  inputStyle: React.CSSProperties;
+}) {
+  const showClear = configured || value.length > 0;
+
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center", flex: 1, minWidth: 0 }}>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onCommit}
+        placeholder={configured ? "••••••••" : placeholder}
+        style={inputStyle}
+      />
+      {showClear && (
+        <button
+          type="button"
+          aria-label="Clear stored webhook credential"
+          onClick={onClear}
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 4,
+            border: "1px solid var(--heat-1)",
+            background: "var(--heat-0)",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            fontSize: 12,
+            fontWeight: 700,
+            lineHeight: 1,
+            flexShrink: 0,
+          }}
+        >
+          x
+        </button>
+      )}
+    </div>
+  );
+}
+
 function WebhookPlatformSection({
   label,
   guide,
@@ -1250,7 +1349,10 @@ function WebhookPlatformSection({
   onToggle,
   urlValue,
   urlPlaceholder,
+  configured,
   onUrlChange,
+  onUrlCommit,
+  onClear,
   onTest,
   testing,
   testResult,
@@ -1263,7 +1365,10 @@ function WebhookPlatformSection({
   onToggle: (v: boolean) => void;
   urlValue: string;
   urlPlaceholder: string;
+  configured: boolean;
   onUrlChange: (v: string) => void;
+  onUrlCommit: () => void;
+  onClear: () => void;
   onTest: () => void;
   testing: boolean;
   testResult: { ok: boolean; msg: string } | null;
@@ -1288,12 +1393,14 @@ function WebhookPlatformSection({
         </div>
       )}
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-        <input
-          type="password"
+        <SecretInput
           value={urlValue}
-          onChange={(e) => onUrlChange(e.target.value.trim())}
+          configured={configured}
           placeholder={urlPlaceholder}
-          style={keyInputStyle}
+          onChange={onUrlChange}
+          onCommit={onUrlCommit}
+          onClear={onClear}
+          inputStyle={keyInputStyle}
         />
         <button
           onClick={onTest}

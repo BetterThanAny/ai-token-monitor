@@ -2702,8 +2702,9 @@ mod tests {
         assert!((gpt52.output - 14.00).abs() < 0.001);
 
         let gpt53spark = pricing::get_codex_pricing("gpt-5.3-codex-spark");
-        assert!((gpt53spark.input - 1.75).abs() < 0.001);
-        assert!((gpt53spark.output - 14.00).abs() < 0.001);
+        assert!((gpt53spark.input - 0.0).abs() < 0.001);
+        assert!((gpt53spark.cached_input - 0.0).abs() < 0.001);
+        assert!((gpt53spark.output - 0.0).abs() < 0.001);
 
         let unknown = pricing::get_codex_pricing("some-future-model");
         assert!((unknown.input - 2.50).abs() < 0.001);
