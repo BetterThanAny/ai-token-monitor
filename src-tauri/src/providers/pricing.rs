@@ -506,6 +506,37 @@ mod tests {
     }
 
     #[test]
+    fn codex_gpt51_and_gpt5_codex_pricing() {
+        let gpt51 = get_codex_pricing("gpt-5.1-codex");
+        assert!((gpt51.input - 1.25).abs() < 0.001);
+        assert!((gpt51.cached_input - 0.125).abs() < 0.001);
+        assert!((gpt51.output - 10.00).abs() < 0.001);
+
+        let gpt5 = get_codex_pricing("gpt-5-codex");
+        assert!((gpt5.input - 1.25).abs() < 0.001);
+        assert!((gpt5.cached_input - 0.125).abs() < 0.001);
+        assert!((gpt5.output - 10.00).abs() < 0.001);
+    }
+
+    #[test]
+    fn codex_spark_research_preview_is_zero_cost() {
+        // Policy guard: Spark's research-preview rate is intentionally treated
+        // as zero-cost in this project until final rates are adopted.
+        let spark = get_codex_pricing("gpt-5.3-codex-spark");
+        assert_eq!(spark.input, 0.0);
+        assert_eq!(spark.cached_input, 0.0);
+        assert_eq!(spark.output, 0.0);
+    }
+
+    #[test]
+    fn codex_auto_review_uses_gpt53_codex_related_price() {
+        let auto_review = get_codex_pricing("codex-auto-review");
+        assert!((auto_review.input - 1.75).abs() < 0.001);
+        assert!((auto_review.cached_input - 0.175).abs() < 0.001);
+        assert!((auto_review.output - 14.00).abs() < 0.001);
+    }
+
+    #[test]
     fn codex_unknown_defaults_to_gpt54() {
         let p = get_codex_pricing("some-future-model");
         assert!((p.input - 2.50).abs() < 0.001);
@@ -588,21 +619,5 @@ mod tests {
         assert!((p.input - 1.50).abs() < 0.001);
         assert!((p.cached_input - 0.375).abs() < 0.001);
         assert!((p.output - 6.00).abs() < 0.001);
-    }
-
-    #[test]
-    fn codex_spark_is_free() {
-        let p = get_codex_pricing("gpt-5.3-codex-spark");
-        assert!((p.input - 0.0).abs() < 0.001);
-        assert!((p.cached_input - 0.0).abs() < 0.001);
-        assert!((p.output - 0.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn codex_auto_review_uses_gpt53_codex_price() {
-        let p = get_codex_pricing("codex-auto-review");
-        assert!((p.input - 1.75).abs() < 0.001);
-        assert!((p.cached_input - 0.175).abs() < 0.001);
-        assert!((p.output - 14.00).abs() < 0.001);
     }
 }

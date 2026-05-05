@@ -289,32 +289,11 @@ pub fn detect_claude_dirs() -> Vec<String> {
 
 #[tauri::command]
 pub fn detect_codex_dirs() -> Vec<String> {
-    let home = dirs::home_dir().unwrap_or_default();
-    let mut found: Vec<String> = Vec::new();
-
-    // Scan ~/.codex-* directories
-    if let Ok(entries) = std::fs::read_dir(&home) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with(".codex-")
-                && (entry.path().join("sessions").is_dir()
-                    || entry.path().join("archived_sessions").is_dir())
-            {
-                found.push(format!("~/{}", name));
-            }
-        }
-    }
-
-    // Check CODEX_CONFIG_DIR env var
-    if let Ok(env_dir) = std::env::var("CODEX_CONFIG_DIR") {
-        let path = PathBuf::from(&env_dir);
-        if path.join("sessions").is_dir() || path.join("archived_sessions").is_dir() {
-            let display = display_config_path(&path, &home);
-            if !found.contains(&display) && display != "~/.codex" {
-                found.push(display);
-            }
-        }
-    }
+    let home = app_home_dir();
+    let mut found: Vec<String> = crate::codex_paths::discover_additional_codex_dirs(&home)
+        .into_iter()
+        .map(|path| crate::codex_paths::display_path(&path, &home))
+        .collect();
 
     found.sort();
     found
@@ -322,17 +301,8 @@ pub fn detect_codex_dirs() -> Vec<String> {
 
 #[tauri::command]
 pub fn validate_codex_dir(path: String) -> bool {
-    let home = dirs::home_dir().unwrap_or_default();
-    let expanded = expand_user_config_path(&path, &home);
-    // Guard against path traversal outside home directory
-    let canonical = match expanded.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-    if !canonical.starts_with(&home) {
-        return false;
-    }
-    canonical.join("sessions").is_dir() || canonical.join("archived_sessions").is_dir()
+    let home = app_home_dir();
+    crate::codex_paths::validate_codex_dir(&path, &home)
 }
 
 #[tauri::command]
@@ -403,15 +373,15 @@ fn get_machine_id() -> String {
     }
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = std::process::Command::new("reg")
-            .args([
-                "query",
-                r"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography",
-                "/v",
-                "MachineGuid",
-            ])
-            .output()
-        {
+        let mut command = std::process::Command::new("reg");
+        command.args([
+            "query",
+            r"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography",
+            "/v",
+            "MachineGuid",
+        ]);
+
+        if let Ok(output) = crate::child_process::output_no_window(&mut command) {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 if line.contains("MachineGuid") {
@@ -678,7 +648,7 @@ pub fn copy_png_to_clipboard(png_data: Vec<u8>) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-pub fn copy_png_to_clipboard(png_data: Vec<u8>) -> Result<(), String> {
+pub fn copy_png_to_clipboard(_png_data: Vec<u8>) -> Result<(), String> {
     // On Windows, decode PNG to bitmap and use CF_DIB
     // For simplicity, write PNG to temp file and use GDI+
     // Fallback: just return error, user can use native capture
@@ -851,8 +821,8 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
 pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Gdi::{
-        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-        GetWindowDC, ReleaseDC, SelectObject, SRCCOPY,
+        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetWindowDC,
+        ReleaseDC, SelectObject, SRCCOPY,
     };
     use windows::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
@@ -895,12 +865,12 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         SelectObject(hdc_mem, old_obj);
 
         // Clean up GDI objects before clipboard
-        DeleteDC(hdc_mem);
+        let _ = DeleteDC(hdc_mem);
         ReleaseDC(Some(hwnd), hdc_window);
 
         // Copy to clipboard
         if OpenClipboard(Some(hwnd)).is_err() {
-            DeleteObject(hbm.into());
+            let _ = DeleteObject(hbm.into());
             return Err("Failed to open clipboard".to_string());
         }
         let _ = EmptyClipboard();
@@ -910,7 +880,7 @@ pub fn capture_window(app: tauri::AppHandle) -> Result<(), String> {
         match result {
             Ok(_) => Ok(()),
             Err(_) => {
-                DeleteObject(hbm.into());
+                let _ = DeleteObject(hbm.into());
                 Err("Failed to copy to clipboard".to_string())
             }
         }
