@@ -100,7 +100,7 @@ npm run tauri build   # 生产构建
 | 提供商 | 路径 | 备注 |
 |--------|------|------|
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | 从 `~/.claude/stats-cache.json` 补充会话/工具调用数。支持多根目录。 |
-| **Codex** | `~/.codex/sessions/**/*.jsonl` | 支持多根目录。既有 JSONL 不可靠记录历史 session 使用的是 Fast 还是 Standard，因此 ai-token-monitor 不能仅凭源数据自动恢复这个区别。 |
+| **Codex** | `~/.codex/sessions/**/*.jsonl` | 支持多根目录。Windows 上还会通过 `\\wsl.localhost\...` / `\\wsl$\...` 自动发现可访问的 WSL Codex 主目录,因为 Windows 原生 Codex 默认使用 `%USERPROFILE%\.codex`,而 WSL 中的 Codex 默认使用 Linux home。既有 JSONL 不可靠记录历史 session 使用的是 Fast 还是 Standard，因此 ai-token-monitor 不能仅凭源数据自动恢复这个区别。 |
 
 ## 架构
 

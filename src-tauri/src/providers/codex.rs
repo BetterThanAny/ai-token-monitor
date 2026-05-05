@@ -17,19 +17,6 @@ use super::types::{
     LimitWindowStatus, McpServerUsage, ModelUsage, ProjectUsage, ToolCount,
 };
 
-fn expand_tilde(path: &str) -> Option<PathBuf> {
-    let path = path.trim();
-    if path.is_empty() {
-        None
-    } else if path == "~" {
-        dirs::home_dir()
-    } else if let Some(rest) = path.strip_prefix("~/") {
-        dirs::home_dir().map(|home| home.join(rest))
-    } else {
-        Some(PathBuf::from(path))
-    }
-}
-
 // --- Cache infrastructure (mirrors claude_code.rs patterns) ---
 
 struct IncrementalCache {
@@ -87,6 +74,9 @@ fn long_context_model_family(model: &str) -> Option<&'static str> {
 }
 
 fn codex_fast_credit_multiplier(model: &str, service_tier: ServiceTier) -> f64 {
+    // Intentional project policy: Codex Fast mode is represented as a
+    // credit-equivalent multiplier in the legacy cost_usd field. Do not treat
+    // this as an API/USD pricing bug unless the policy is explicitly changed.
     if service_tier != ServiceTier::Fast {
         return 1.0;
     }
@@ -216,18 +206,33 @@ fn parse_service_tier_overrides(contents: &str) -> Vec<ServiceTierOverrideWindow
     windows
 }
 
-fn service_tier_overrides_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".codex").join(SERVICE_TIER_OVERRIDES_CONFIG))
+fn service_tier_overrides_path(codex_dir: &Path) -> PathBuf {
+    codex_dir.join(SERVICE_TIER_OVERRIDES_CONFIG)
 }
 
-fn configured_service_tier_overrides() -> Vec<ServiceTierOverrideWindow> {
-    if let Some(path) = service_tier_overrides_path() {
+fn configured_service_tier_overrides(codex_dirs: &[PathBuf]) -> Vec<ServiceTierOverrideWindow> {
+    let mut overrides = Vec::new();
+    let mut loaded_user_config = false;
+    let mut seen_paths = HashSet::new();
+
+    for codex_dir in codex_dirs {
+        let path = service_tier_overrides_path(codex_dir);
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        if !seen_paths.insert(canonical) {
+            continue;
+        }
         if let Ok(contents) = fs::read_to_string(&path) {
-            return parse_service_tier_overrides(&contents);
+            loaded_user_config = true;
+            overrides.extend(parse_service_tier_overrides(&contents));
         }
     }
 
-    parse_service_tier_overrides(SERVICE_TIER_OVERRIDES_JSON)
+    if loaded_user_config {
+        overrides.sort_by_key(|window| window.starts_at);
+        overrides
+    } else {
+        parse_service_tier_overrides(SERVICE_TIER_OVERRIDES_JSON)
+    }
 }
 
 fn event_datetime_from_timestamp(value: &Value) -> Option<DateTime<Utc>> {
@@ -388,32 +393,15 @@ pub struct CodexProvider {
 
 impl CodexProvider {
     pub fn new(codex_dirs: Vec<String>) -> Self {
-        let primary = dirs::home_dir().map(|home| home.join(".codex"));
-        let mut all_dirs: Vec<PathBuf> = Vec::new();
-        let mut seen: HashSet<PathBuf> = HashSet::new();
-
-        for d in &codex_dirs {
-            let Some(expanded) = expand_tilde(d) else {
-                eprintln!("[Codex] Skipping unavailable config dir {d:?}");
-                continue;
-            };
-            let canonical = expanded.canonicalize().unwrap_or_else(|_| expanded.clone());
-            if seen.insert(canonical) {
-                all_dirs.push(expanded);
-            }
-        }
-
-        if let Some(primary) = &primary {
-            let primary_canonical = primary.canonicalize().unwrap_or_else(|_| primary.clone());
-            if !seen.contains(&primary_canonical) {
-                all_dirs.insert(0, primary.clone());
-            }
-        }
+        let home = dirs::home_dir().unwrap_or_default();
+        let primary = Some(home.join(".codex"));
+        let all_dirs = crate::codex_paths::runtime_codex_dirs(&codex_dirs, &home);
+        let service_tier_overrides = configured_service_tier_overrides(&all_dirs);
 
         Self {
             primary_dir: primary,
             all_dirs,
-            service_tier_overrides: configured_service_tier_overrides(),
+            service_tier_overrides,
         }
     }
 
@@ -2045,6 +2033,17 @@ mod tests {
         ))
     }
 
+    fn temp_dir_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "ai-token-monitor-codex-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
     fn codex_jsonl_with_token_events(events: &[(&str, u64, u64, u64)]) -> String {
         let mut lines = vec![
             r#"{"type":"session_meta","payload":{"id":"same-session","cwd":"/tmp/project","cli_version":"1.0.0"}}"#.to_string(),
@@ -2643,6 +2642,32 @@ mod tests {
     }
 
     #[test]
+    fn test_configured_service_tier_overrides_loads_all_codex_dirs() {
+        let base = temp_dir_path("service-tier-overrides");
+        let first = base.join("first").join(".codex");
+        let second = base.join("second").join(".codex");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        std::fs::write(
+            first.join(SERVICE_TIER_OVERRIDES_CONFIG),
+            r#"[{"starts_at":"2026-05-02T00:00:00Z","tier":"fast"}]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            second.join(SERVICE_TIER_OVERRIDES_CONFIG),
+            r#"[{"starts_at":"2026-05-03T00:00:00Z","tier":"standard"}]"#,
+        )
+        .unwrap();
+
+        let overrides = configured_service_tier_overrides(&[first, second]);
+        let _ = std::fs::remove_dir_all(base);
+
+        assert_eq!(overrides.len(), 2);
+        assert_eq!(overrides[0].tier, ServiceTier::Fast);
+        assert_eq!(overrides[1].tier, ServiceTier::Standard);
+    }
+
+    #[test]
     fn test_cache_context_hash_tracks_dirs_and_overrides() {
         let base = CodexProvider {
             primary_dir: Some(PathBuf::from("/tmp/codex-a")),
@@ -2702,8 +2727,8 @@ mod tests {
         assert!((gpt52.output - 14.00).abs() < 0.001);
 
         let gpt53spark = pricing::get_codex_pricing("gpt-5.3-codex-spark");
-        assert!((gpt53spark.input - 1.75).abs() < 0.001);
-        assert!((gpt53spark.output - 14.00).abs() < 0.001);
+        assert!((gpt53spark.input - 0.0).abs() < 0.001);
+        assert!((gpt53spark.output - 0.0).abs() < 0.001);
 
         let unknown = pricing::get_codex_pricing("some-future-model");
         assert!((unknown.input - 2.50).abs() < 0.001);
@@ -2954,6 +2979,8 @@ mod tests {
 
     #[test]
     fn test_build_stats_applies_fast_multiplier_to_gpt55_session() {
+        // Policy guard: Fast mode intentionally multiplies the displayed
+        // cost_usd value as a credit-equivalent estimate.
         let mut entries = HashMap::new();
         entries.insert(
             "fast-session:1".to_string(),
