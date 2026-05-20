@@ -55,7 +55,7 @@ A system tray app for macOS and Windows that tracks **Claude Code** and **Codex*
 
 ### Ön Koşullar
 
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) 20.19+ veya 22.12+
 - [Rust](https://rustup.rs/) araç zinciri
 - [Tauri CLI v2](https://v2.tauri.app/start/prerequisites/)
 - [Claude Code](https://claude.ai/claude-code) veya [Codex](https://openai.com/index/introducing-codex/) kurulu ve en az bir kez kullanılmış olmalıdır
@@ -65,9 +65,9 @@ A system tray app for macOS and Windows that tracks **Claude Code** and **Codex*
 ```bash
 git clone https://github.com/BetterThanAny/ai-token-monitor.git
 cd ai-token-monitor
-npm install
+npm ci
 npm run tauri dev     # geliştirme modu
-npm run tauri build   # üretim derlemesi
+npm run tauri:build:local   # üretim derlemesi
 ```
 
 ## Kullanım

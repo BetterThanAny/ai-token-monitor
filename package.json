@@ -1,13 +1,15 @@
 {
   "name": "ai-token-monitor",
   "private": true,
-  "version": "0.19.11",
+  "version": "0.19.12",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:build:local": "node scripts/build-local-dmg.mjs",
+    "package:macos-dmg": "node scripts/package-macos-dmg.mjs",
     "version": "node scripts/sync-version.mjs && git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock"
   },
   "dependencies": {

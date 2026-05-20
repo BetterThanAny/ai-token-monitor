@@ -55,7 +55,7 @@
 
 ### 先決條件
 
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) 20.19+ 或 22.12+
 - [Rust](https://rustup.rs/) 工具鏈
 - [Tauri CLI v2](https://v2.tauri.app/start/prerequisites/)
 - 已安裝 [Claude Code](https://claude.ai/claude-code) 或 [Codex](https://openai.com/index/introducing-codex/) 其中至少一個,且至少使用過一次
@@ -65,9 +65,9 @@
 ```bash
 git clone https://github.com/BetterThanAny/ai-token-monitor.git
 cd ai-token-monitor
-npm install
+npm ci
 npm run tauri dev     # 開發模式
-npm run tauri build   # 生產建置
+npm run tauri:build:local   # 生產建置
 ```
 
 ## 使用方法

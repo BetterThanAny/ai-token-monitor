@@ -55,7 +55,7 @@
 
 ### 前提条件
 
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) 20.19+ 或 22.12+
 - [Rust](https://rustup.rs/) 工具链
 - [Tauri CLI v2](https://v2.tauri.app/start/prerequisites/)
 - 已安装 [Claude Code](https://claude.ai/claude-code) 或 [Codex](https://openai.com/index/introducing-codex/) 中至少一个,并且至少使用过一次
@@ -65,10 +65,13 @@
 ```bash
 git clone https://github.com/BetterThanAny/ai-token-monitor.git
 cd ai-token-monitor
-npm install
+npm ci
 npm run tauri dev     # 开发模式
-npm run tauri build   # 生产构建
+npm run tauri:build:local   # 本地生产 DMG 构建
 ```
+
+本地 DMG 构建会关闭更新器产物,因此不需要 Tauri updater 签名私钥。正式
+updater 产物请使用 GitHub release workflow 构建。
 
 ## 使用方法
 
