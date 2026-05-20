@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { check, Update } from "@tauri-apps/plugin-updater";
+import { check as checkForUpdates, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -25,32 +25,43 @@ export function useUpdater(): UpdaterState {
   const [restartFailed, setRestartFailed] = useState(false);
   const updateRef = useRef<Update | null>(null);
 
+  const checkForUpdate = useCallback(async (cancelled?: () => boolean) => {
+    try {
+      const update = await checkForUpdates();
+      if (cancelled?.()) return;
+      setError(null);
+      if (update) {
+        updateRef.current = update;
+        setVersion(update.version);
+        setUpdateAvailable(true);
+      } else {
+        updateRef.current = null;
+        setVersion("");
+        setUpdateAvailable(false);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn("[updater] check failed:", e);
+      if (!cancelled?.()) {
+        setError(message);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
-    async function checkForUpdate() {
-      try {
-        const update = await check();
-        if (cancelled) return;
-        if (update) {
-          updateRef.current = update;
-          setVersion(update.version);
-          setUpdateAvailable(true);
-        }
-      } catch (e) {
-        console.warn("[updater] check failed:", e);
-      }
-    }
+    checkForUpdate(() => cancelled);
 
-    checkForUpdate();
-
-    const interval = setInterval(checkForUpdate, 30 * 60 * 1000);
+    const interval = setInterval(() => {
+      checkForUpdate(() => cancelled);
+    }, 30 * 60 * 1000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [checkForUpdate]);
 
   const download = useCallback(async () => {
     const update = updateRef.current;

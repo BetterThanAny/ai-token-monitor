@@ -256,7 +256,7 @@ export function Header({ stats, updater }: Props) {
           }}>
             {t("app.title")}
           </div>
-          {updater?.updateAvailable ? (
+          {updater?.updateAvailable || updater?.error ? (
             <UpdateIndicator updater={updater} t={t} />
           ) : (
             <div style={{
@@ -517,7 +517,7 @@ const indicatorWrapStyle: React.CSSProperties = {
 };
 
 function UpdateIndicator({ updater, t }: { updater: UpdaterState; t: ReturnType<typeof useI18n> }) {
-  const { version, downloading, downloaded, progress, error, restartFailed, download, install } = updater;
+  const { updateAvailable, version, downloading, downloaded, progress, error, restartFailed, download, install } = updater;
 
   const stopDrag = (e: React.MouseEvent) => e.stopPropagation();
 
@@ -525,7 +525,7 @@ function UpdateIndicator({ updater, t }: { updater: UpdaterState; t: ReturnType<
     return (
       <div style={indicatorWrapStyle} onMouseDown={stopDrag}>
         <span title={error} style={{ color: "var(--red, #ef4444)", cursor: "help" }}>{t("update.error")}</span>
-        <button onClick={download} style={indicatorBtnStyle}>{t("update.download")}</button>
+        {updateAvailable && <button onClick={download} style={indicatorBtnStyle}>{t("update.download")}</button>}
       </div>
     );
   }

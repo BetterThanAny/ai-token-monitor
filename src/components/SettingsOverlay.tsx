@@ -1320,6 +1320,9 @@ function SecretInput({
         <button
           type="button"
           aria-label="Clear stored webhook credential"
+          onPointerDown={(e) => {
+            e.preventDefault();
+          }}
           onClick={onClear}
           style={{
             width: 22,

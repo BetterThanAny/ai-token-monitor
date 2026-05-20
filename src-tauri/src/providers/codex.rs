@@ -172,6 +172,56 @@ fn parse_override_datetime(raw: &str) -> Option<DateTime<Utc>> {
         .map(|dt| dt.with_timezone(&Utc))
 }
 
+fn parse_service_tier_override(raw: RawServiceTierOverride) -> Option<ServiceTierOverrideWindow> {
+    if raw
+        .provider
+        .as_deref()
+        .is_some_and(|provider| !provider.eq_ignore_ascii_case("codex"))
+    {
+        return None;
+    }
+
+    let Some(starts_at) = parse_override_datetime(&raw.starts_at) else {
+        eprintln!(
+            "[Codex] Ignoring service tier override with invalid starts_at: {}",
+            raw.starts_at
+        );
+        return None;
+    };
+
+    let ends_at = match raw.ends_at.as_deref() {
+        Some(raw_ends_at) => {
+            let Some(parsed) = parse_override_datetime(raw_ends_at) else {
+                eprintln!(
+                    "[Codex] Ignoring service tier override with invalid ends_at: {}",
+                    raw_ends_at
+                );
+                return None;
+            };
+            if parsed <= starts_at {
+                eprintln!("[Codex] Ignoring service tier override with ends_at <= starts_at");
+                return None;
+            }
+            Some(parsed)
+        }
+        None => None,
+    };
+
+    let Some(tier) = service_tier_from_str(&raw.tier) else {
+        eprintln!(
+            "[Codex] Ignoring service tier override with invalid tier: {}",
+            raw.tier
+        );
+        return None;
+    };
+
+    Some(ServiceTierOverrideWindow {
+        starts_at,
+        ends_at,
+        tier,
+    })
+}
+
 fn parse_service_tier_overrides(contents: &str) -> Vec<ServiceTierOverrideWindow> {
     let trimmed = contents.trim();
     if trimmed.is_empty() {
@@ -185,22 +235,7 @@ fn parse_service_tier_overrides(contents: &str) -> Vec<ServiceTierOverrideWindow
 
     let mut windows: Vec<ServiceTierOverrideWindow> = raw_overrides
         .into_iter()
-        .filter(|raw| {
-            raw.provider
-                .as_deref()
-                .map(|provider| provider.eq_ignore_ascii_case("codex"))
-                .unwrap_or(true)
-        })
-        .filter_map(|raw| {
-            let starts_at = parse_override_datetime(&raw.starts_at)?;
-            let ends_at = raw.ends_at.as_deref().and_then(parse_override_datetime);
-            let tier = service_tier_from_str(&raw.tier)?;
-            Some(ServiceTierOverrideWindow {
-                starts_at,
-                ends_at,
-                tier,
-            })
-        })
+        .filter_map(parse_service_tier_override)
         .collect();
     windows.sort_by_key(|window| window.starts_at);
     windows
@@ -2638,6 +2673,61 @@ mod tests {
         assert_eq!(
             default_service_tier_for_event(&outside, &overrides),
             ServiceTier::Standard
+        );
+    }
+
+    #[test]
+    fn test_service_tier_override_rejects_invalid_ends_at() {
+        let overrides = parse_service_tier_overrides(
+            r#"[
+              {
+                "provider": "codex",
+                "starts_at": "2026-05-02T13:00:00+08:00",
+                "ends_at": "not-a-date",
+                "tier": "fast"
+              }
+            ]"#,
+        );
+
+        assert!(overrides.is_empty());
+    }
+
+    #[test]
+    fn test_service_tier_override_rejects_non_positive_window() {
+        let overrides = parse_service_tier_overrides(
+            r#"[
+              {
+                "provider": "codex",
+                "starts_at": "2026-05-02T13:00:00+08:00",
+                "ends_at": "2026-05-02T13:00:00+08:00",
+                "tier": "fast"
+              }
+            ]"#,
+        );
+
+        assert!(overrides.is_empty());
+    }
+
+    #[test]
+    fn test_service_tier_override_allows_missing_ends_at_as_open_ended() {
+        let overrides = parse_service_tier_overrides(
+            r#"[
+              {
+                "provider": "codex",
+                "starts_at": "2026-05-02T13:00:00+08:00",
+                "tier": "fast"
+              }
+            ]"#,
+        );
+        let inside: Value = serde_json::json!({
+            "timestamp": "2026-05-03T06:00:00.000Z"
+        });
+
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].ends_at, None);
+        assert_eq!(
+            default_service_tier_for_event(&inside, &overrides),
+            ServiceTier::Fast
         );
     }
 
