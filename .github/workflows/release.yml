@@ -342,9 +342,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.plan-release.outputs.tag }}
           RELEASE_NOTES: ${{ needs.plan-release.outputs.changelog }}
+          RELEASE_VERSION: ${{ needs.plan-release.outputs.version }}
+          RELEASE_PRERELEASE: ${{ inputs.platforms != 'all' }}
         run: |
           printf '%s\n' "$RELEASE_NOTES" > release-notes.md
-          mapfile -d '' FILES < <(find release-artifacts -type f -print0)
+          node scripts/prepare-release-assets.mjs release-artifacts release-upload
+          mapfile -d '' FILES < <(find release-upload -type f -print0)
           if [ "${#FILES[@]}" -eq 0 ]; then
             echo "No release artifacts were downloaded."
             exit 1
@@ -353,4 +356,4 @@ jobs:
             --title "$RELEASE_TAG" \
             --notes-file release-notes.md \
             --draft=false \
-            --prerelease=false
+            --prerelease="$RELEASE_PRERELEASE"
