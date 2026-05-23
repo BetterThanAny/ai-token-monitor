@@ -1336,20 +1336,25 @@ fn extract_client_name(value: &Value) -> Option<String> {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let source = payload.get("source").and_then(|v| v.as_str()).unwrap_or("");
-    let lower = format!("{} {}", originator, source).to_ascii_lowercase();
+    let originator_lower = originator.to_ascii_lowercase();
+    let source_lower = source.to_ascii_lowercase();
 
-    if lower.contains("vscode")
-        || lower.contains("cursor")
-        || lower.contains("editor")
-        || lower.contains("extension")
+    if originator_lower.contains("codex desktop") {
+        Some("Codex Desktop".to_string())
+    } else if originator_lower == "codex-tui"
+        || originator_lower == "codex_cli_rs"
+        || originator_lower.contains("codex cli")
+        || source_lower == "cli"
+    {
+        Some("Codex CLI".to_string())
+    } else if originator_lower == "paseo"
+        || source_lower.contains("vscode")
+        || source_lower.contains("cursor")
+        || source_lower.contains("editor")
+        || source_lower.contains("extension")
     {
         Some("Codex Editor".to_string())
-    } else if lower.contains("desktop") {
-        Some("Codex Desktop".to_string())
-    } else if payload.get("cli_version").is_some()
-        || lower.contains("cli")
-        || lower.contains("codex")
-    {
+    } else if payload.get("cli_version").is_some() {
         Some("Codex CLI".to_string())
     } else {
         None
@@ -2090,6 +2095,124 @@ mod tests {
             ));
         }
         lines.join("\n")
+    }
+
+    #[test]
+    fn test_extract_client_name_prefers_originator_over_source() {
+        let cases = [
+            (
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "originator": "Codex Desktop",
+                        "source": "vscode",
+                        "cli_version": "0.133.0-alpha.1"
+                    }
+                }),
+                Some("Codex Desktop"),
+            ),
+            (
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "originator": "codex-tui",
+                        "source": "cli",
+                        "cli_version": "0.130.0"
+                    }
+                }),
+                Some("Codex CLI"),
+            ),
+            (
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "originator": "codex_cli_rs",
+                        "source": "cli",
+                        "cli_version": "0.130.0"
+                    }
+                }),
+                Some("Codex CLI"),
+            ),
+            (
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "originator": "paseo",
+                        "source": "vscode",
+                        "cli_version": "0.128.0"
+                    }
+                }),
+                Some("Codex Editor"),
+            ),
+            (
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "originator": "Codex Desktop",
+                        "source": {
+                            "subagent": {
+                                "other": "guardian"
+                            }
+                        },
+                        "cli_version": "0.133.0-alpha.1"
+                    }
+                }),
+                Some("Codex Desktop"),
+            ),
+            (
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "originator": "paseo",
+                        "source": {
+                            "subagent": {
+                                "other": "guardian"
+                            }
+                        },
+                        "cli_version": "0.128.0"
+                    }
+                }),
+                Some("Codex Editor"),
+            ),
+            (
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "cli_version": "1.0.0"
+                    }
+                }),
+                Some("Codex CLI"),
+            ),
+        ];
+
+        for (value, expected) in cases {
+            assert_eq!(extract_client_name(&value).as_deref(), expected);
+        }
+    }
+
+    #[test]
+    fn test_parse_single_file_preserves_codex_desktop_with_vscode_source() {
+        let path = temp_jsonl_path("desktop-vscode-source");
+        std::fs::write(
+            &path,
+            [
+                r#"{"type":"session_meta","payload":{"id":"desktop-session","cwd":"/tmp/project","originator":"Codex Desktop","source":"vscode","cli_version":"0.133.0-alpha.1"}}"#,
+                r#"{"type":"turn_context","payload":{"model":"gpt-5.5"}}"#,
+                r#"{"timestamp":"2026-05-23T05:13:57Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":50,"cached_input_tokens":0,"total_tokens":150}}}}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let entries = CodexProvider::parse_single_file(&path, &[]);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(entries.len(), 1);
+        let entry = entries.values().next().unwrap();
+        assert_eq!(entry.client_name, "Codex Desktop");
+
+        let state = CodexProvider::build_account_state(&entries).unwrap();
+        assert_eq!(state.client_distribution[0].name, "Codex Desktop");
     }
 
     type CumulativeTokenEvent<'a> = (&'a str, u64, u64, u64, u64, u64, u64, &'a str, f64);

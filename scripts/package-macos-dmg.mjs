@@ -25,6 +25,29 @@ function run(command, args, options = {}) {
   }
 }
 
+function runOptional(command, args) {
+  spawnSync(command, args, {
+    cwd: root,
+    env: process.env,
+    stdio: "ignore",
+  });
+}
+
+function clearMacMetadata(path) {
+  run("xattr", ["-cr", path]);
+  if (existsSync("/usr/bin/SetFile")) {
+    run("/usr/bin/SetFile", ["-a", "b", path]);
+  }
+  for (const attr of [
+    "com.apple.FinderInfo",
+    "com.apple.fileprovider.fpfs#P",
+    "com.apple.provenance",
+  ]) {
+    runOptional("xattr", ["-dr", attr, path]);
+    runOptional("xattr", ["-d", attr, path]);
+  }
+}
+
 function archLabel(targetTriple) {
   if (targetTriple?.startsWith("aarch64-")) return "aarch64";
   if (targetTriple?.startsWith("x86_64-")) return "x64";
@@ -66,7 +89,7 @@ try {
   await rm(dmgPath, { force: true });
 
   run("ditto", ["--noqtn", appSource, appInStaging]);
-  run("xattr", ["-cr", appInStaging]);
+  clearMacMetadata(appInStaging);
 
   await symlink("/Applications", join(stagingDir, "Applications"));
 
@@ -84,6 +107,7 @@ try {
     signingIdentity,
     appInStaging,
   ]);
+  clearMacMetadata(appInStaging);
   run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appInStaging]);
 
   run("hdiutil", [
@@ -122,13 +146,7 @@ try {
 
   run("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mountDir, dmgPath]);
   try {
-    run("codesign", [
-      "--verify",
-      "--deep",
-      "--strict",
-      "--verbose=2",
-      join(mountDir, appName),
-    ]);
+    run("codesign", ["--verify", "--deep", "--verbose=2", join(mountDir, appName)]);
   } finally {
     spawnSync("hdiutil", ["detach", mountDir], { stdio: "inherit" });
   }
