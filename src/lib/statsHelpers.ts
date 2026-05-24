@@ -52,30 +52,21 @@ export function getModelTotalTokens(usage: ModelUsage): number {
   return usage.input_tokens + usage.output_tokens + usage.cache_read + usage.cache_write;
 }
 
-export function aggregateModelUsageFromDaily(daily: DailyUsage[]): Record<string, ModelUsage> {
-  const modelUsage: Record<string, ModelUsage> = {};
+export function aggregateModelTokensFromDaily(daily: DailyUsage[]): Record<string, number> {
+  const modelTokens: Record<string, number> = {};
   for (const day of daily) {
     for (const [model, tokens] of Object.entries(day.tokens)) {
-      const usage = modelUsage[model] ?? {
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_read: 0,
-        cache_write: 0,
-        cost_usd: 0,
-      };
-      usage.input_tokens += tokens;
-      modelUsage[model] = usage;
+      modelTokens[model] = (modelTokens[model] ?? 0) + tokens;
     }
   }
-  return modelUsage;
+  return modelTokens;
 }
 
-export function getMostUsedModel(modelUsage: Record<string, ModelUsage>): { name: string; totalTokens: number; cost: number } | null {
-  let best: { name: string; totalTokens: number; cost: number } | null = null;
-  for (const [name, u] of Object.entries(modelUsage)) {
-    const total = getModelTotalTokens(u);
+export function getMostUsedModel(modelTokens: Record<string, number>): { name: string; totalTokens: number } | null {
+  let best: { name: string; totalTokens: number } | null = null;
+  for (const [name, total] of Object.entries(modelTokens)) {
     if (!best || total > best.totalTokens) {
-      best = { name, totalTokens: total, cost: u.cost_usd };
+      best = { name, totalTokens: total };
     }
   }
   return best;

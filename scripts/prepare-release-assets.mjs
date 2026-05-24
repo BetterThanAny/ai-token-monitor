@@ -41,7 +41,9 @@ async function walkFiles(dir) {
 await rm(uploadDir, { force: true, recursive: true });
 await mkdir(uploadDir, { recursive: true });
 
-const sourceFiles = await walkFiles(artifactDir);
+const sourceFiles = (await walkFiles(artifactDir)).filter(
+  (sourcePath) => basename(sourcePath) !== "latest.json",
+);
 if (sourceFiles.length === 0) {
   throw new Error(`No release artifacts found in ${artifactDir}`);
 }

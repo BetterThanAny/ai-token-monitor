@@ -118,13 +118,80 @@ fn parse_valid_pricing_config(contents: &str) -> Result<PricingConfig, String> {
 }
 
 fn validate_pricing_config(cfg: &PricingConfig) -> Result<(), String> {
-    if cfg.claude.models.is_empty() {
-        return Err("claude provider has no models".to_string());
-    }
-    if cfg.codex.models.is_empty() {
-        return Err("codex provider has no models".to_string());
-    }
+    validate_provider_config("claude", &cfg.claude, false)?;
+    validate_provider_config("codex", &cfg.codex, true)?;
     Ok(())
+}
+
+fn validate_provider_config(
+    provider_name: &str,
+    provider: &ProviderConfig,
+    is_codex: bool,
+) -> Result<(), String> {
+    if provider.models.is_empty() {
+        return Err(format!("{provider_name} provider has no models"));
+    }
+
+    for (idx, entry) in provider.models.iter().enumerate() {
+        let model_name = if entry.match_pattern.trim().is_empty() {
+            format!("entry #{idx}")
+        } else {
+            entry.match_pattern.clone()
+        };
+        if entry.match_pattern.trim().is_empty() {
+            return Err(format!(
+                "{provider_name} pricing {model_name} has empty match pattern"
+            ));
+        }
+
+        validate_price(provider_name, &model_name, "input", entry.input)?;
+        validate_price(provider_name, &model_name, "output", entry.output)?;
+        if is_codex {
+            validate_price(
+                provider_name,
+                &model_name,
+                "cached_input",
+                entry.cached_input,
+            )?;
+        } else {
+            validate_price(provider_name, &model_name, "cache_read", entry.cache_read)?;
+            validate_price(provider_name, &model_name, "cache_write", entry.cache_write)?;
+            validate_price(
+                provider_name,
+                &model_name,
+                "cache_write_1h",
+                entry.cache_write_1h,
+            )?;
+        }
+    }
+
+    if provider
+        .models
+        .iter()
+        .all(|entry| entry.match_pattern != provider.default)
+    {
+        return Err(format!(
+            "{provider_name} provider default '{}' does not match any model",
+            provider.default
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_price(
+    provider_name: &str,
+    model_name: &str,
+    field_name: &str,
+    value: f64,
+) -> Result<(), String> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "{provider_name} pricing {model_name} has invalid {field_name} price: {value}"
+        ))
+    }
 }
 
 fn is_user_pricing_current(user_contents: &str, embedded_contents: &str) -> bool {
@@ -320,7 +387,7 @@ mod tests {
 
     #[test]
     fn embedded_json_parses() {
-        let cfg: PricingConfig = serde_json::from_str(EMBEDDED_PRICING).unwrap();
+        let cfg = parse_valid_pricing_config(EMBEDDED_PRICING).unwrap();
         assert!(!cfg.claude.models.is_empty());
         assert!(!cfg.codex.models.is_empty());
     }
@@ -356,6 +423,84 @@ mod tests {
         };
 
         assert!(err.contains("claude provider has no models"));
+    }
+
+    #[test]
+    fn newer_user_pricing_with_negative_rate_is_rejected() {
+        let user = r#"{
+            "version": "9.9.9",
+            "last_updated": "2026-05-03",
+            "claude": {"default": "sonnet", "models": [
+                {"match": "sonnet", "input": -3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.75, "cache_write_1h": 6.0}
+            ]},
+            "codex": {"default": "gpt", "models": [
+                {"match": "gpt", "input": 1.0, "output": 2.0, "cached_input": 0.1}
+            ]}
+        }"#;
+        let embedded = r#"{"version":"1.3.1"}"#;
+        let err = match load_user_pricing_config(user, embedded) {
+            Ok(_) => panic!("negative user pricing should be rejected"),
+            Err(err) => err,
+        };
+
+        assert!(err.contains("claude pricing sonnet has invalid input price"));
+    }
+
+    #[test]
+    fn validation_rejects_non_finite_rates() {
+        let cfg = PricingConfig {
+            version: "test".to_string(),
+            last_updated: "test".to_string(),
+            claude: ProviderConfig {
+                default: "sonnet".to_string(),
+                models: vec![pricing_entry("sonnet", f64::INFINITY)],
+            },
+            codex: ProviderConfig {
+                default: "gpt".to_string(),
+                models: vec![pricing_entry("gpt", 1.0)],
+            },
+        };
+
+        let err = validate_pricing_config(&cfg).expect_err("non-finite pricing should be rejected");
+        assert!(err.contains("claude pricing sonnet has invalid input price"));
+    }
+
+    #[test]
+    fn validation_rejects_default_without_matching_model() {
+        let cfg = PricingConfig {
+            version: "test".to_string(),
+            last_updated: "test".to_string(),
+            claude: ProviderConfig {
+                default: "missing".to_string(),
+                models: vec![pricing_entry("sonnet", 1.0)],
+            },
+            codex: ProviderConfig {
+                default: "gpt".to_string(),
+                models: vec![pricing_entry("gpt", 1.0)],
+            },
+        };
+
+        let err =
+            validate_pricing_config(&cfg).expect_err("missing provider default should be rejected");
+        assert!(err.contains("claude provider default 'missing' does not match any model"));
+    }
+
+    #[test]
+    fn validation_allows_zero_codex_spark_pricing() {
+        let cfg = PricingConfig {
+            version: "test".to_string(),
+            last_updated: "test".to_string(),
+            claude: ProviderConfig {
+                default: "sonnet".to_string(),
+                models: vec![pricing_entry("sonnet", 0.0)],
+            },
+            codex: ProviderConfig {
+                default: "gpt-5.3-codex-spark".to_string(),
+                models: vec![pricing_entry("gpt-5.3-codex-spark", 0.0)],
+            },
+        };
+
+        validate_pricing_config(&cfg).expect("zero pricing is allowed for intentional policies");
     }
 
     #[test]

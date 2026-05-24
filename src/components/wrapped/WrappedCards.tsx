@@ -1,8 +1,7 @@
 import { forwardRef } from "react";
 import { formatCost, formatTokens, formatDate } from "../../lib/format";
-import { getModelTotalTokens, shortenModelName } from "../../lib/statsHelpers";
+import { shortenModelName } from "../../lib/statsHelpers";
 import type { StreakInfo } from "../../lib/statsHelpers";
-import type { ModelUsage } from "../../lib/types";
 import { useI18n } from "../../i18n/I18nContext";
 
 export interface WrappedData {
@@ -10,13 +9,13 @@ export interface WrappedData {
   locale: string;
   totalCost: number;
   totalTokens: number;
-  topModel: { name: string; totalTokens: number; cost: number } | null;
+  topModel: { name: string; totalTokens: number } | null;
   busiestDay: { date: string; tokens: number };
   cacheHitRate: number;
   streaks: StreakInfo;
   totalMessages: number;
   totalSessions: number;
-  modelUsage: Record<string, ModelUsage>;
+  modelTokens: Record<string, number>;
 }
 
 interface CardProps {
@@ -77,8 +76,8 @@ const TopModelCard = forwardRef<HTMLDivElement, CardProps>(({ data }, ref) => {
   if (!top) return <EmptyCard ref={ref} gradient={GRADIENTS[1]} />;
 
   // Calculate usage percentages for top 3 models
-  const allModels = Object.entries(data.modelUsage)
-    .map(([name, u]) => ({ name: shortenModelName(name), total: getModelTotalTokens(u) }))
+  const allModels = Object.entries(data.modelTokens)
+    .map(([name, total]) => ({ name: shortenModelName(name), total }))
     .sort((a, b) => b.total - a.total)
     .slice(0, 3);
   const maxTotal = allModels[0]?.total ?? 1;

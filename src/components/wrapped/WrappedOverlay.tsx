@@ -11,7 +11,7 @@ import {
   getMostUsedModel,
   computeCacheHitRateFromDaily,
   computeStreaks,
-  aggregateModelUsageFromDaily,
+  aggregateModelTokensFromDaily,
 } from "../../lib/statsHelpers";
 import { CARDS, CARD_COUNT } from "./WrappedCards";
 import type { WrappedData } from "./WrappedCards";
@@ -44,7 +44,7 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
   const data = useMemo((): WrappedData => {
     const filterPeriod = period === "month" ? "month" : "year";
     const filtered = filterByPeriod(stats.daily, filterPeriod);
-    const modelUsage = aggregateModelUsageFromDaily(filtered);
+    const modelTokens = aggregateModelTokensFromDaily(filtered);
     const now = new Date();
     const periodLabel = period === "month"
       ? now.toLocaleDateString(prefs.language, { month: "long", year: "numeric" })
@@ -55,13 +55,13 @@ export function WrappedOverlay({ visible, onClose, stats }: Props) {
       locale: prefs.language,
       totalCost: computeTotalCost(filtered),
       totalTokens: computeTotalTokens(filtered),
-      topModel: getMostUsedModel(modelUsage),
+      topModel: getMostUsedModel(modelTokens),
       busiestDay: findBusiestDay(filtered),
       cacheHitRate: computeCacheHitRateFromDaily(filtered),
       streaks: computeStreaks(filtered),
       totalMessages: filtered.reduce((s, d) => s + d.messages, 0),
       totalSessions: filtered.reduce((s, d) => s + d.sessions, 0),
-      modelUsage,
+      modelTokens,
     };
   }, [stats, period, prefs.language]);
 

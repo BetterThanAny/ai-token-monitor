@@ -47,6 +47,9 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Release asset script tests
+        run: node --test scripts/*.test.mjs
+
       - name: Build frontend
         run: npm run build
 

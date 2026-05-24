@@ -1,5 +1,7 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
@@ -348,6 +350,145 @@ fn restrict_secret_file_permissions(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn atomic_write(path: &Path, bytes: &[u8], unix_mode: Option<u32>) -> Result<(), String> {
+    #[cfg(not(unix))]
+    let _ = unix_mode;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Path has no parent: {}", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
+
+    let (tmp_path, mut tmp_file) = create_temp_sibling(path)?;
+    let write_result = (|| -> Result<(), String> {
+        #[cfg(unix)]
+        if let Some(mode) = unix_mode {
+            use std::os::unix::fs::PermissionsExt;
+            tmp_file
+                .set_permissions(fs::Permissions::from_mode(mode))
+                .map_err(|e| format!("Failed to secure temp file {}: {}", tmp_path.display(), e))?;
+        }
+
+        tmp_file
+            .write_all(bytes)
+            .map_err(|e| format!("Failed to write temp file {}: {}", tmp_path.display(), e))?;
+        tmp_file
+            .sync_all()
+            .map_err(|e| format!("Failed to sync temp file {}: {}", tmp_path.display(), e))?;
+        Ok(())
+    })();
+
+    if let Err(err) = write_result {
+        drop(tmp_file);
+        let _ = fs::remove_file(&tmp_path);
+        return Err(err);
+    }
+    drop(tmp_file);
+
+    replace_file(&tmp_path, path)?;
+    sync_parent_dir(parent);
+
+    #[cfg(unix)]
+    if let Some(mode) = unix_mode {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))
+            .map_err(|e| format!("Failed to secure file {}: {}", path.display(), e))?;
+    }
+
+    Ok(())
+}
+
+fn create_temp_sibling(path: &Path) -> Result<(PathBuf, fs::File), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Path has no parent: {}", path.display()))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("Path has no valid file name: {}", path.display()))?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+
+    for attempt in 0..16 {
+        let tmp_path = parent.join(format!(
+            ".{file_name}.tmp-{}-{timestamp}-{attempt}",
+            std::process::id()
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => return Ok((tmp_path, file)),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(format!(
+                    "Failed to create temp file {}: {}",
+                    tmp_path.display(),
+                    err
+                ));
+            }
+        }
+    }
+
+    Err(format!(
+        "Failed to allocate temp file for {} after repeated attempts",
+        path.display()
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file(tmp_path: &Path, path: &Path) -> Result<(), String> {
+    fs::rename(tmp_path, path).map_err(|e| {
+        format!(
+            "Failed to replace {} with {}: {}",
+            path.display(),
+            tmp_path.display(),
+            e
+        )
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(tmp_path: &Path, path: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let from: Vec<u16> = tmp_path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    unsafe {
+        MoveFileExW(
+            PCWSTR(from.as_ptr()),
+            PCWSTR(to.as_ptr()),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    }
+    .map_err(|e| {
+        format!(
+            "Failed to replace {} with {}: {}",
+            path.display(),
+            tmp_path.display(),
+            e
+        )
+    })
+}
+
+#[cfg(unix)]
+fn sync_parent_dir(parent: &Path) {
+    if let Ok(dir) = fs::File::open(parent) {
+        let _ = dir.sync_all();
+    }
+}
+
+#[cfg(not(unix))]
+fn sync_parent_dir(_parent: &Path) {}
+
 fn get_machine_id() -> String {
     #[cfg(target_os = "macos")]
     {
@@ -466,7 +607,7 @@ fn load_ai_keys_from_file() -> Option<AiKeys> {
 }
 
 fn write_encrypted_keys(path: &Path, encrypted: &str) -> Result<(), String> {
-    fs::write(path, encrypted).map_err(|e| format!("Failed to write AI keys: {}", e))?;
+    atomic_write(path, encrypted.as_bytes(), Some(0o600))?;
     restrict_secret_file_permissions(path)
 }
 
@@ -569,7 +710,7 @@ pub fn get_preferences() -> UserPreferences {
 
     if prefs_changed {
         if let Ok(json) = serde_json::to_string_pretty(&prefs) {
-            let _ = fs::write(&path, &json);
+            let _ = atomic_write(&path, json.as_bytes(), None);
         }
     }
 
@@ -607,7 +748,8 @@ fn persist_preferences(prefs: &UserPreferences) -> Result<(), String> {
     }
     let json = serde_json::to_string_pretty(&file_prefs)
         .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
-    fs::write(&path, json).map_err(|e| format!("Failed to write preferences: {}", e))
+    atomic_write(&path, json.as_bytes(), None)
+        .map_err(|e| format!("Failed to write preferences: {}", e))
 }
 
 #[tauri::command]
@@ -964,6 +1106,40 @@ mod tests {
             display_config_path(&PathBuf::from("/var/tmp/.codex"), &home),
             "/var/tmp/.codex"
         );
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_file() {
+        let guard = TestHomeGuard::new();
+        let path = guard.path.join(".claude").join("atomic.txt");
+        fs::write(&path, "old").unwrap();
+
+        atomic_write(&path, b"new", None).unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+        let temp_files = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".atomic.txt.tmp-")
+            })
+            .count();
+        assert_eq!(temp_files, 0);
+    }
+
+    #[test]
+    fn corrupt_preferences_are_backed_up_and_defaulted() {
+        let _guard = TestHomeGuard::new();
+        let path = prefs_path();
+        fs::write(&path, "{\"include_codex\": true,").unwrap();
+
+        let prefs = get_preferences();
+
+        assert!(!prefs.include_codex);
+        assert!(path.with_extension("json.bak").exists());
     }
 
     #[test]
