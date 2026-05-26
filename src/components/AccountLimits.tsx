@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type {
   AccountState,
   BalanceInfo,
@@ -6,6 +6,12 @@ import type {
   LimitStatus,
   LimitWindowStatus,
 } from "../lib/types";
+import type { WeeklyResetSummary } from "../lib/accountLimitsDisplay";
+import {
+  displayLimitWindowName,
+  formatResetCountdown,
+  getWeeklyResetSummaries,
+} from "../lib/accountLimitsDisplay";
 import { formatCost, formatTokens } from "../lib/format";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../i18n/I18nContext";
@@ -146,6 +152,79 @@ function formatNumber(value?: number | null, unit?: string): string {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${unit ?? ""}`.trim();
 }
 
+function useMinuteNow(active: boolean): Date {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const interval = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(interval);
+  }, [active]);
+
+  return now;
+}
+
+function WeeklyResetRows({
+  summaries,
+  now,
+  withDivider,
+}: {
+  summaries: WeeklyResetSummary[];
+  now: Date;
+  withDivider: boolean;
+}) {
+  const t = useI18n();
+  const labels = {
+    unavailable: t("limits.weeklyResetUnavailable"),
+    resetting: t("limits.resetting"),
+    day: t("limits.countdown.day"),
+    hour: t("limits.countdown.hour"),
+    minute: t("limits.countdown.minute"),
+  };
+
+  return (
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      gap: 7,
+      paddingBottom: withDivider ? 12 : 0,
+      marginBottom: withDivider ? 12 : 0,
+      borderBottom: withDivider ? "1px solid var(--heat-0)" : "none",
+    }}>
+      <div style={{
+        color: "var(--text-secondary)",
+        fontSize: 11,
+        fontWeight: 800,
+      }}>
+        {t("limits.weeklyReset")}
+      </div>
+      {summaries.map((summary) => (
+        <div
+          key={summary.provider}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 10,
+            alignItems: "baseline",
+          }}
+        >
+          <span style={{ color: "var(--text-primary)", fontSize: 12, fontWeight: 800 }}>
+            {providerLabel(summary.provider)}
+          </span>
+          <span style={{
+            color: summary.resetsAt ? "var(--text-primary)" : "var(--text-secondary)",
+            fontSize: 12,
+            fontWeight: 800,
+            textAlign: "right",
+          }}>
+            {formatResetCountdown(summary.resetsAt, now, labels)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function LimitRow({ provider, window }: { provider: string; window: LimitWindowStatus }) {
   const t = useI18n();
   const color = statusColor(window.status);
@@ -164,7 +243,7 @@ function LimitRow({ provider, window }: { provider: string; window: LimitWindowS
             fontWeight: 600,
             color: "var(--text-secondary)",
           }}>
-            {window.name}
+            {displayLimitWindowName(provider, window)}
           </span>
         </div>
         <span style={{ fontSize: 13, fontWeight: 800, color }}>
@@ -309,8 +388,11 @@ export function AccountLimits({ states, loading = false, error = null }: Props) 
       message,
     })),
   );
+  const weeklyResetSummaries = getWeeklyResetSummaries(states);
+  const showWindowsCard = windows.length > 0 || weeklyResetSummaries.length > 0;
+  const now = useMinuteNow(showWindowsCard);
   const hasStale = states.some((state) => state.is_stale);
-  const hasData = windows.length > 0 || balances.length > 0 || clients.length > 0;
+  const hasData = showWindowsCard || balances.length > 0 || clients.length > 0;
 
   if (loading && states.length === 0) {
     return (
@@ -344,13 +426,22 @@ export function AccountLimits({ states, loading = false, error = null }: Props) 
         </Card>
       )}
 
-      {windows.length > 0 && (
+      {showWindowsCard && (
         <Card title={t("limits.windows")}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {windows.map(({ provider, window }) => (
-              <LimitRow key={`${provider}:${window.name}`} provider={provider} window={window} />
-            ))}
-          </div>
+          {weeklyResetSummaries.length > 0 && (
+            <WeeklyResetRows
+              summaries={weeklyResetSummaries}
+              now={now}
+              withDivider={windows.length > 0}
+            />
+          )}
+          {windows.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {windows.map(({ provider, window }) => (
+                <LimitRow key={`${provider}:${window.name}`} provider={provider} window={window} />
+              ))}
+            </div>
+          )}
         </Card>
       )}
 
