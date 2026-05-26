@@ -3,6 +3,7 @@ mod claude_usage;
 mod codex_paths;
 mod commands;
 mod providers;
+mod update_proxy;
 mod webhooks;
 
 use std::path::PathBuf;
@@ -879,6 +880,7 @@ pub fn run() {
             commands::copy_png_to_clipboard,
             commands::save_png_to_file,
             commands::get_pricing_table,
+            update_proxy::get_update_proxy,
             commands::get_ai_key_status,
             commands::test_webhook
         ])

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { check as checkForUpdates, Update } from "@tauri-apps/plugin-updater";
+import { check as checkForUpdates, type CheckOptions, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -15,6 +15,23 @@ export interface UpdaterState {
   install: () => void;
 }
 
+const UPDATE_CHECK_TIMEOUT_MS = 15_000;
+
+async function getUpdateCheckOptions(): Promise<CheckOptions> {
+  const options: CheckOptions = { timeout: UPDATE_CHECK_TIMEOUT_MS };
+
+  try {
+    const proxy = await invoke<string | null>("get_update_proxy");
+    if (proxy) {
+      options.proxy = proxy;
+    }
+  } catch (e) {
+    console.warn("[updater] proxy detection failed:", e);
+  }
+
+  return options;
+}
+
 export function useUpdater(): UpdaterState {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [version, setVersion] = useState("");
@@ -27,7 +44,7 @@ export function useUpdater(): UpdaterState {
 
   const checkForUpdate = useCallback(async (cancelled?: () => boolean) => {
     try {
-      const update = await checkForUpdates();
+      const update = await checkForUpdates(await getUpdateCheckOptions());
       if (cancelled?.()) return;
       setError(null);
       if (update) {
