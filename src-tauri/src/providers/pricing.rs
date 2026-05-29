@@ -77,6 +77,8 @@ fn config() -> &'static PricingConfig {
         if let Some(home) = dirs::home_dir() {
             let user_path = home.join(".claude").join("pricing.json");
             if let Ok(contents) = std::fs::read_to_string(&user_path) {
+                // A newer user pricing file remains authoritative; if it omits a
+                // newly embedded model, matching falls back within that file.
                 match load_user_pricing_config(&contents, EMBEDDED_PRICING) {
                     Ok(cfg) => {
                         eprintln!("[PRICING] Loaded from {}", user_path.display());
@@ -274,23 +276,46 @@ pub fn get_claude_pricing_for_speed(
 ) -> ClaudePricing {
     let mut pricing = get_claude_pricing(model);
     if is_claude_fast_mode(model, speed, service_tier) {
-        pricing.input = 30.0;
-        pricing.output = 150.0;
-        pricing.cache_read = 3.0;
-        pricing.cache_write_5m = 37.5;
-        pricing.cache_write_1h = 60.0;
+        if let Some(tier) = claude_fast_tier(model) {
+            pricing.input = tier.input;
+            pricing.output = tier.output;
+            pricing.cache_read = tier.input * 0.1;
+            pricing.cache_write_5m = tier.input * 1.25;
+            pricing.cache_write_1h = tier.input * 2.0;
+        }
     }
     pricing
 }
 
 pub fn is_claude_fast_mode(model: &str, speed: Option<&str>, service_tier: Option<&str>) -> bool {
-    let model = model.to_ascii_lowercase();
-    if !model.contains("opus-4-6") {
-        return false;
-    }
+    claude_fast_tier(model).is_some() && has_claude_fast_marker(speed, service_tier)
+}
 
+fn has_claude_fast_marker(speed: Option<&str>, service_tier: Option<&str>) -> bool {
     speed.is_some_and(|s| s.eq_ignore_ascii_case("fast"))
         || service_tier.is_some_and(|s| s.eq_ignore_ascii_case("fast"))
+}
+
+struct ClaudeFastTier {
+    input: f64,
+    output: f64,
+}
+
+fn claude_fast_tier(model: &str) -> Option<ClaudeFastTier> {
+    let model = model.to_ascii_lowercase();
+    if model.contains("opus-4-8") {
+        Some(ClaudeFastTier {
+            input: 10.0,
+            output: 50.0,
+        })
+    } else if model.contains("opus-4-7") || model.contains("opus-4-6") {
+        Some(ClaudeFastTier {
+            input: 30.0,
+            output: 150.0,
+        })
+    } else {
+        None
+    }
 }
 
 pub fn get_codex_pricing(model: &str) -> CodexPricing {
@@ -579,8 +604,40 @@ mod tests {
     }
 
     #[test]
+    fn claude_opus_47_fast_pricing() {
+        let p =
+            get_claude_pricing_for_speed("claude-opus-4-7-20260416", Some("fast"), Some("fast"));
+        assert!((p.input - 30.0).abs() < 0.001);
+        assert!((p.output - 150.0).abs() < 0.001);
+        assert!((p.cache_read - 3.0).abs() < 0.001);
+        assert!((p.cache_write_5m - 37.5).abs() < 0.001);
+        assert!((p.cache_write_1h - 60.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn claude_opus_48_pricing() {
+        let p = get_claude_pricing("claude-opus-4-8-20260528");
+        assert!((p.input - 5.0).abs() < 0.001);
+        assert!((p.output - 25.0).abs() < 0.001);
+        assert!((p.cache_read - 0.50).abs() < 0.001);
+        assert!((p.cache_write_5m - 6.25).abs() < 0.001);
+        assert!((p.cache_write_1h - 10.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn claude_opus_48_fast_pricing() {
+        let p =
+            get_claude_pricing_for_speed("claude-opus-4-8-20260528", Some("fast"), Some("fast"));
+        assert!((p.input - 10.0).abs() < 0.001);
+        assert!((p.output - 50.0).abs() < 0.001);
+        assert!((p.cache_read - 1.0).abs() < 0.001);
+        assert!((p.cache_write_5m - 12.5).abs() < 0.001);
+        assert!((p.cache_write_1h - 20.0).abs() < 0.001);
+    }
+
+    #[test]
     fn claude_fast_flag_does_not_apply_to_unsupported_models() {
-        let p = get_claude_pricing_for_speed("claude-opus-4-7", Some("fast"), Some("fast"));
+        let p = get_claude_pricing_for_speed("claude-opus-4-5", Some("fast"), Some("fast"));
         assert!((p.input - 5.0).abs() < 0.001);
         assert!((p.output - 25.0).abs() < 0.001);
     }
@@ -598,6 +655,24 @@ mod tests {
         assert!(
             (p.output - 25.0).abs() < 0.001,
             "Opus 4.7 output must be $25/MTok, got ${}",
+            p.output
+        );
+        assert!((p.cache_read - 0.50).abs() < 0.001);
+        assert!((p.cache_write_5m - 6.25).abs() < 0.001);
+        assert!((p.cache_write_1h - 10.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn claude_opus_48_not_billed_as_41() {
+        let p = get_claude_pricing("claude-opus-4-8-20260528");
+        assert!(
+            (p.input - 5.0).abs() < 0.001,
+            "Opus 4.8 input must be $5/MTok, got ${}",
+            p.input
+        );
+        assert!(
+            (p.output - 25.0).abs() < 0.001,
+            "Opus 4.8 output must be $25/MTok, got ${}",
             p.output
         );
         assert!((p.cache_read - 0.50).abs() < 0.001);
