@@ -994,7 +994,6 @@ impl CodexProvider {
                 fetched_at: None,
                 is_stale: false,
                 limit_windows: Vec::new(),
-                rate_limits: Vec::new(),
                 balance: None,
                 client_distribution,
                 diagnostics: Vec::new(),
@@ -1037,7 +1036,6 @@ impl CodexProvider {
             fetched_at: snapshot.observed_at.clone(),
             is_stale: snapshot_is_stale(&snapshot),
             limit_windows,
-            rate_limits: Vec::new(),
             balance,
             client_distribution,
             diagnostics: Vec::new(),
@@ -3179,7 +3177,6 @@ mod tests {
         let state = CodexProvider::build_account_state(&entries).unwrap();
         assert_eq!(state.provider, "codex");
         assert_eq!(state.limit_windows.len(), 1);
-        assert_eq!(state.rate_limits.len(), 0);
         assert_eq!(state.limit_windows[0].status, "warning");
         assert_eq!(state.client_distribution[0].name, "Codex CLI");
         assert_eq!(state.client_distribution[0].requests, 1);

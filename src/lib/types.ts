@@ -65,7 +65,6 @@ export interface AccountState {
   fetched_at?: string | null;
   is_stale: boolean;
   limit_windows: LimitWindowStatus[];
-  rate_limits: RateLimitStatus[];
   balance?: BalanceInfo | null;
   client_distribution: ClientUsage[];
   diagnostics?: string[];
@@ -81,18 +80,6 @@ export interface LimitWindowStatus {
   window_minutes?: number | null;
   starts_at?: string | null;
   ends_at?: string | null;
-  resets_at?: string | null;
-  status: LimitStatus;
-  source: string;
-}
-
-export interface RateLimitStatus {
-  name: string;
-  limit?: number | null;
-  remaining?: number | null;
-  used_percent?: number | null;
-  unit: string;
-  window_minutes?: number | null;
   resets_at?: string | null;
   status: LimitStatus;
   source: string;
@@ -172,16 +159,4 @@ export interface MonitoredWindows {
   seven_day_sonnet: boolean;
   seven_day_opus: boolean;
   extra_usage: boolean;
-}
-
-export interface UsageWindow {
-  utilization: number;
-  resets_at?: string | null;
-}
-
-export interface ExtraUsage {
-  is_enabled: boolean;
-  monthly_limit: number;
-  used_credits: number;
-  utilization: number;
 }

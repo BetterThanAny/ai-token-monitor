@@ -36,10 +36,6 @@ export const LANGUAGE_OPTIONS: { id: Locale; label: string; englishName: string 
   { id: "it", label: "Italiano", englishName: "Italian" },
 ];
 
-export const LANGUAGE_NAMES: Record<string, string> = Object.fromEntries(
-  LANGUAGE_OPTIONS.map((l) => [l.id, l.englishName]),
-);
-
 type TFunction = (key: string, params?: Record<string, string | number>) => string;
 
 const I18nContext = createContext<TFunction>((key) => key);

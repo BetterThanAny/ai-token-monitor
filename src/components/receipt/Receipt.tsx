@@ -7,6 +7,7 @@ import {
   computeTotalTokens,
   computeStreaks,
   computeCacheSavings,
+  aggregateModelTokensFromDaily,
   shortenModelName,
 } from "../../lib/statsHelpers";
 import type { Period } from "../../lib/statsHelpers";
@@ -55,18 +56,8 @@ export const Receipt = forwardRef<HTMLDivElement, Props>(
       const toolCalls = filtered.reduce((s, d) => s + d.tool_calls, 0);
       const streaks = computeStreaks(stats.daily);
 
-      // Aggregate model usage from filtered daily data
-      const modelMap = new Map<string, { tokens: number }>();
-      for (const day of filtered) {
-        for (const [model, tokens] of Object.entries(day.tokens)) {
-          const existing = modelMap.get(model) ?? { tokens: 0 };
-          existing.tokens += tokens;
-          modelMap.set(model, existing);
-        }
-      }
-
-      const models = Array.from(modelMap.entries())
-        .map(([name, info]) => ({ name: shortenModelName(name), tokens: info.tokens }))
+      const models = Object.entries(aggregateModelTokensFromDaily(filtered))
+        .map(([name, tokens]) => ({ name: shortenModelName(name), tokens }))
         .filter((m) => m.tokens > 0)
         .sort((a, b) => b.tokens - a.tokens);
 

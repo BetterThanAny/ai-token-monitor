@@ -72,17 +72,6 @@ export function getMostUsedModel(modelTokens: Record<string, number>): { name: s
   return best;
 }
 
-export function computeCacheHitRate(modelUsage: Record<string, ModelUsage>): number {
-  let totalInput = 0;
-  let totalCacheRead = 0;
-  for (const u of Object.values(modelUsage)) {
-    totalInput += u.input_tokens;
-    totalCacheRead += u.cache_read;
-  }
-  const denom = totalInput + totalCacheRead;
-  return denom > 0 ? (totalCacheRead / denom) * 100 : 0;
-}
-
 export function computeCacheHitRateFromDaily(daily: DailyUsage[]): number {
   const totalInput = daily.reduce((sum, d) => sum + d.input_tokens, 0);
   const totalCacheRead = daily.reduce((sum, d) => sum + d.cache_read_tokens, 0);

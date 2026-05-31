@@ -70,8 +70,6 @@ pub struct AccountState {
     #[serde(default)]
     pub limit_windows: Vec<LimitWindowStatus>,
     #[serde(default)]
-    pub rate_limits: Vec<RateLimitStatus>,
-    #[serde(default)]
     pub balance: Option<BalanceInfo>,
     #[serde(default)]
     pub client_distribution: Vec<ClientUsage>,
@@ -97,24 +95,6 @@ pub struct LimitWindowStatus {
     pub starts_at: Option<String>,
     #[serde(default)]
     pub ends_at: Option<String>,
-    #[serde(default)]
-    pub resets_at: Option<String>,
-    pub status: String,
-    pub source: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RateLimitStatus {
-    pub name: String,
-    #[serde(default)]
-    pub limit: Option<f64>,
-    #[serde(default)]
-    pub remaining: Option<f64>,
-    #[serde(default)]
-    pub used_percent: Option<f64>,
-    pub unit: String,
-    #[serde(default)]
-    pub window_minutes: Option<u32>,
     #[serde(default)]
     pub resets_at: Option<String>,
     pub status: String,
