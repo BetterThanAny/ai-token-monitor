@@ -305,11 +305,11 @@ fn parse_reset_value(value: Option<&Value>) -> Option<String> {
 
 fn parse_datetime_value(value: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
     if let Some(value) = value.as_i64() {
-        return chrono::DateTime::<chrono::Utc>::from_timestamp(value, 0);
+        return datetime_from_unix_timestamp(value);
     }
     if let Some(value) = value.as_f64() {
         if value.is_finite() {
-            return chrono::DateTime::<chrono::Utc>::from_timestamp(value as i64, 0);
+            return datetime_from_unix_timestamp(value as i64);
         }
     }
     value.as_str().and_then(parse_datetime_string)
@@ -318,11 +318,19 @@ fn parse_datetime_value(value: &Value) -> Option<chrono::DateTime<chrono::Utc>> 
 fn parse_datetime_string(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     let trimmed = value.trim();
     if let Ok(timestamp) = trimmed.parse::<i64>() {
-        return chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp, 0);
+        return datetime_from_unix_timestamp(timestamp);
     }
     chrono::DateTime::parse_from_rfc3339(trimmed)
         .ok()
         .map(|datetime| datetime.with_timezone(&chrono::Utc))
+}
+
+fn datetime_from_unix_timestamp(value: i64) -> Option<chrono::DateTime<chrono::Utc>> {
+    if value.unsigned_abs() >= 100_000_000_000 {
+        chrono::DateTime::<chrono::Utc>::from_timestamp_millis(value)
+    } else {
+        chrono::DateTime::<chrono::Utc>::from_timestamp(value, 0)
+    }
 }
 
 fn value_as_f64(value: &Value) -> Option<f64> {
@@ -394,6 +402,26 @@ mod tests {
         assert_eq!(
             usage.seven_day.unwrap().resets_at.as_deref(),
             Some("2026-05-08T12:00:00+00:00")
+        );
+    }
+
+    #[test]
+    fn parses_statusline_numeric_milliseconds_as_unix_milliseconds() {
+        let usage = parse_statusline_rate_limits_snapshot(
+            r#"{
+                "captured_at": 1777723200000,
+                "rate_limits": {
+                    "five_hour": {"used_percentage": 23.5, "resets_at": "1777723200000"}
+                }
+            }"#,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(usage.fetched_at, "2026-05-02T12:00:00+00:00");
+        assert_eq!(
+            usage.five_hour.unwrap().resets_at.as_deref(),
+            Some("2026-05-02T12:00:00+00:00")
         );
     }
 

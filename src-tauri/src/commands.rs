@@ -309,7 +309,7 @@ pub fn validate_codex_dir(path: String) -> bool {
 
 #[tauri::command]
 pub fn validate_claude_dir(path: String) -> bool {
-    let home = dirs::home_dir().unwrap_or_default();
+    let home = app_home_dir();
     let expanded = expand_user_config_path(&path, &home);
     // Guard against path traversal outside home directory
     let canonical = match expanded.canonicalize() {
@@ -320,6 +320,67 @@ pub fn validate_claude_dir(path: String) -> bool {
         return false;
     }
     canonical.join("projects").is_dir()
+}
+
+fn validate_claude_dir_for_preferences(path: &str, home: &Path) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Claude Code directory cannot be empty".to_string());
+    }
+
+    let expanded = expand_user_config_path(trimmed, home);
+    let home_canonical = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    let canonical = match expanded.canonicalize() {
+        Ok(path) => path,
+        Err(_) if trimmed == "~/.claude" => return Ok(()),
+        Err(_) => {
+            return Err(format!(
+                "Claude Code directory is invalid or missing: {}",
+                trimmed
+            ))
+        }
+    };
+
+    if !canonical.starts_with(&home_canonical) {
+        return Err("Claude Code directory must be inside home".to_string());
+    }
+    if !canonical.join("projects").is_dir() && trimmed != "~/.claude" {
+        return Err("Claude Code directory must contain a projects folder".to_string());
+    }
+    Ok(())
+}
+
+fn validate_codex_dir_for_preferences(
+    path: &str,
+    home: &Path,
+    include_codex: bool,
+) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Codex directory cannot be empty".to_string());
+    }
+    if !include_codex && trimmed == "~/.codex" {
+        return Ok(());
+    }
+    if crate::codex_paths::validate_codex_dir(trimmed, home) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Codex directory is invalid or no sessions folder was found: {}",
+            trimmed
+        ))
+    }
+}
+
+fn validate_preferences_for_persistence(prefs: &UserPreferences) -> Result<(), String> {
+    let home = app_home_dir();
+    for dir in &prefs.config_dirs {
+        validate_claude_dir_for_preferences(dir, &home)?;
+    }
+    for dir in &prefs.codex_dirs {
+        validate_codex_dir_for_preferences(dir, &home, prefs.include_codex)?;
+    }
+    Ok(())
 }
 
 const APP_SALT: &[u8] = b"ai-token-monitor-v1";
@@ -738,6 +799,8 @@ pub fn set_ai_key_field(field: String, value: Option<String>) -> Result<AiKeySta
 }
 
 fn persist_preferences(prefs: &UserPreferences) -> Result<(), String> {
+    validate_preferences_for_persistence(prefs)?;
+
     let mut file_prefs = prefs.clone();
     file_prefs.ai_keys = None; // Never write keys to preferences JSON
 
@@ -1170,6 +1233,39 @@ mod tests {
         );
         let stored_prefs = fs::read_to_string(prefs_path()).unwrap();
         assert!(!stored_prefs.contains("webhook_discord_url"));
+    }
+
+    #[test]
+    fn persist_preferences_rejects_claude_dirs_outside_home() {
+        let _guard = TestHomeGuard::new();
+        let outside = std::env::temp_dir().join(format!(
+            "ai-token-monitor-outside-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(outside.join("projects")).unwrap();
+
+        let prefs = UserPreferences {
+            config_dirs: vec![outside.display().to_string()],
+            ..UserPreferences::default()
+        };
+        let err = persist_preferences(&prefs)
+            .expect_err("Claude directories outside home should be rejected");
+
+        let _ = fs::remove_dir_all(outside);
+        assert!(err.contains("Claude Code directory must be inside home"));
+    }
+
+    #[test]
+    fn persist_preferences_allows_missing_default_dirs_on_first_run() {
+        let _guard = TestHomeGuard::new();
+        let prefs = UserPreferences::default();
+
+        persist_preferences(&prefs).unwrap();
+
+        assert!(prefs_path().exists());
     }
 
     #[test]

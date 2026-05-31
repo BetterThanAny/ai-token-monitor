@@ -519,6 +519,7 @@ impl CodexProvider {
         // Track previous snapshot for deduplication of identical consecutive token_count events
         let mut prev_snapshot: Option<CodexSnapshotDedupKey> = None;
         let mut seen_cumulative_snapshots: HashSet<CodexCumulativeDedupKey> = HashSet::new();
+        let mut previous_total_fallback_by_session: HashMap<String, TokenTotals> = HashMap::new();
 
         let reader = BufReader::with_capacity(64 * 1024, file);
         for line in reader.lines().map_while(Result::ok) {
@@ -590,7 +591,7 @@ impl CodexProvider {
                             continue;
                         }
 
-                        let usage = usage.unwrap_or(TokenUsage {
+                        let mut usage = usage.unwrap_or(TokenUsage {
                             input_tokens: 0,
                             output_tokens: 0,
                             cached_tokens: 0,
@@ -648,6 +649,41 @@ impl CodexProvider {
                         let Some(date) = resolve_entry_date(path_date.as_deref(), &value) else {
                             continue;
                         };
+
+                        if counts_usage && usage.source == TokenUsageSource::TotalFallback {
+                            if let Some(cumulative) = usage.cumulative {
+                                if let Some(previous) =
+                                    previous_total_fallback_by_session.get(&session_id)
+                                {
+                                    let totals_reset =
+                                        cumulative.total_tokens < previous.total_tokens;
+                                    let delta = if totals_reset {
+                                        cumulative
+                                    } else {
+                                        TokenTotals {
+                                            input_tokens: cumulative
+                                                .input_tokens
+                                                .saturating_sub(previous.input_tokens),
+                                            output_tokens: cumulative
+                                                .output_tokens
+                                                .saturating_sub(previous.output_tokens),
+                                            cached_tokens: cumulative
+                                                .cached_tokens
+                                                .saturating_sub(previous.cached_tokens),
+                                            total_tokens: cumulative
+                                                .total_tokens
+                                                .saturating_sub(previous.total_tokens),
+                                        }
+                                    };
+                                    usage.input_tokens = delta.input_tokens;
+                                    usage.output_tokens = delta.output_tokens;
+                                    usage.cached_tokens = delta.cached_tokens;
+                                    usage.total_tokens = delta.total_tokens;
+                                }
+                                previous_total_fallback_by_session
+                                    .insert(session_id.clone(), cumulative);
+                            }
+                        }
 
                         let model = if current_model.is_empty() {
                             "codex".to_string()
@@ -2097,6 +2133,19 @@ mod tests {
         lines.join("\n")
     }
 
+    fn codex_jsonl_with_total_fallback_events(events: &[(&str, u64, u64, u64)]) -> String {
+        let mut lines = vec![
+            r#"{"type":"session_meta","payload":{"id":"same-session","cwd":"/tmp/project","cli_version":"1.0.0"}}"#.to_string(),
+            r#"{"type":"turn_context","payload":{"model":"gpt-5.5"}}"#.to_string(),
+        ];
+        for (timestamp, input, output, total) in events {
+            lines.push(format!(
+                r#"{{"timestamp":"{timestamp}","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":{input},"output_tokens":{output},"cached_input_tokens":0,"total_tokens":{total}}}}}}}}}"#
+            ));
+        }
+        lines.join("\n")
+    }
+
     #[test]
     fn test_extract_client_name_prefers_originator_over_source() {
         let cases = [
@@ -2488,6 +2537,29 @@ mod tests {
         let stats = CodexProvider::build_stats(&entries);
         assert_eq!(stats.total_messages, 2);
         assert_eq!(stats.daily[0].tokens["gpt-5.5"], 180);
+    }
+
+    #[test]
+    fn test_total_fallback_cumulative_snapshots_are_counted_as_deltas() {
+        let path = temp_jsonl_path("total-fallback-delta");
+        std::fs::write(
+            &path,
+            codex_jsonl_with_total_fallback_events(&[
+                ("2026-05-02T10:00:00Z", 100, 50, 150),
+                ("2026-05-03T10:00:00Z", 300, 150, 450),
+            ]),
+        )
+        .unwrap();
+
+        let entries = CodexProvider::parse_single_file(&path, &[]);
+        let _ = std::fs::remove_file(&path);
+
+        let stats = CodexProvider::build_stats(&entries);
+        assert_eq!(stats.total_messages, 2);
+        let first = stats.daily.iter().find(|d| d.date == "2026-05-02").unwrap();
+        let second = stats.daily.iter().find(|d| d.date == "2026-05-03").unwrap();
+        assert_eq!(first.tokens["gpt-5.5"], 150);
+        assert_eq!(second.tokens["gpt-5.5"], 300);
     }
 
     #[test]

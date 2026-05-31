@@ -6,12 +6,15 @@ mod providers;
 mod update_proxy;
 mod webhooks;
 
+use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
 
 /// When true, the window will not auto-hide on focus loss (e.g. during dialog).
 static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
@@ -29,21 +32,229 @@ use providers::types::UserPreferences;
 
 use std::collections::HashMap;
 
+#[derive(Debug, Clone)]
 struct WindowAlertState {
     window_id: String,
     fired_thresholds: Vec<u32>,
     prev_utilization: f64,
 }
 
+#[derive(Debug, Default)]
 struct AlertState {
     windows: HashMap<String, WindowAlertState>,
     last_notification_at: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PersistedAlertState {
+    #[serde(default)]
+    windows: HashMap<String, PersistedWindowAlertState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedWindowAlertState {
+    window_id: String,
+    #[serde(default)]
+    fired_thresholds: Vec<u32>,
+    #[serde(default)]
+    prev_utilization: f64,
+}
+
+struct AlertWindowSample<'a> {
+    name: &'a str,
+    utilization: f64,
+    window_id: String,
+    resets_at: Option<String>,
+}
+
+#[derive(Default)]
+struct AlertEvaluation {
+    webhook_alerts: Vec<webhooks::WebhookAlertType>,
+    os_notification: Option<(String, String)>,
+    changed: bool,
 }
 
 static ALERT_STATE: Mutex<Option<AlertState>> = Mutex::new(None);
 
 fn utilization_reset_detected(prev_utilization: f64, utilization: f64) -> bool {
     prev_utilization > 5.0 && utilization <= 1.0
+}
+
+fn stable_window_id(name: &str, resets_at: Option<&str>) -> String {
+    match resets_at {
+        Some(resets_at) => {
+            // Take first 13 chars of ISO timestamp (e.g. "2026-04-03T11") for hour-level stability
+            let truncated: String = resets_at.chars().take(13).collect();
+            format!("{}:{}", name, truncated)
+        }
+        None => format!("{}:unknown-reset", name),
+    }
+}
+
+fn alert_state_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude")
+        .join("ai-token-monitor-alert-state.json")
+}
+
+fn alert_state_from_persisted(persisted: PersistedAlertState) -> AlertState {
+    AlertState {
+        windows: persisted
+            .windows
+            .into_iter()
+            .map(|(name, state)| {
+                (
+                    name,
+                    WindowAlertState {
+                        window_id: state.window_id,
+                        fired_thresholds: state.fired_thresholds,
+                        prev_utilization: state.prev_utilization,
+                    },
+                )
+            })
+            .collect(),
+        last_notification_at: None,
+    }
+}
+
+fn persisted_alert_state_from(state: &AlertState) -> PersistedAlertState {
+    PersistedAlertState {
+        windows: state
+            .windows
+            .iter()
+            .map(|(name, state)| {
+                (
+                    name.clone(),
+                    PersistedWindowAlertState {
+                        window_id: state.window_id.clone(),
+                        fired_thresholds: state.fired_thresholds.clone(),
+                        prev_utilization: state.prev_utilization,
+                    },
+                )
+            })
+            .collect(),
+    }
+}
+
+fn load_alert_state() -> AlertState {
+    fs::read_to_string(alert_state_path())
+        .ok()
+        .and_then(|content| serde_json::from_str::<PersistedAlertState>(&content).ok())
+        .map(alert_state_from_persisted)
+        .unwrap_or_default()
+}
+
+fn persist_alert_state(state: &AlertState) {
+    let path = alert_state_path();
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if let Err(error) = fs::create_dir_all(parent) {
+        eprintln!("[ALERT] Failed to create alert state directory: {error}");
+        return;
+    }
+    let persisted = persisted_alert_state_from(state);
+    let Ok(json) = serde_json::to_string_pretty(&persisted) else {
+        return;
+    };
+    if let Err(error) = fs::write(&path, json) {
+        eprintln!("[ALERT] Failed to persist alert state: {error}");
+    }
+}
+
+fn evaluate_usage_alerts(
+    state: &mut AlertState,
+    windows_to_check: &[AlertWindowSample<'_>],
+    thresholds: &[u32],
+    cooldown_ok: bool,
+    has_webhooks: bool,
+    notify_on_reset: bool,
+) -> AlertEvaluation {
+    let mut evaluation = AlertEvaluation::default();
+
+    for sample in windows_to_check {
+        let win_state = state
+            .windows
+            .entry(sample.name.to_string())
+            .or_insert_with(|| WindowAlertState {
+                window_id: sample.window_id.clone(),
+                fired_thresholds: Vec::new(),
+                prev_utilization: 0.0,
+            });
+
+        let window_changed = win_state.window_id != sample.window_id;
+        let utilization_reset =
+            utilization_reset_detected(win_state.prev_utilization, sample.utilization);
+        if window_changed || utilization_reset {
+            let was_active = win_state.prev_utilization > 5.0;
+            win_state.window_id = sample.window_id.clone();
+            win_state.fired_thresholds.clear();
+            evaluation.changed = true;
+
+            if was_active && has_webhooks && notify_on_reset {
+                evaluation
+                    .webhook_alerts
+                    .push(webhooks::WebhookAlertType::ResetCompleted {
+                        window_name: sample.name.to_string(),
+                    });
+            }
+        }
+
+        if (win_state.prev_utilization - sample.utilization).abs() > f64::EPSILON {
+            win_state.prev_utilization = sample.utilization;
+            evaluation.changed = true;
+        }
+
+        let new_thresholds: Vec<u32> = thresholds
+            .iter()
+            .filter(|&&t| sample.utilization >= t as f64)
+            .filter(|t| !win_state.fired_thresholds.contains(t))
+            .copied()
+            .collect();
+
+        if new_thresholds.is_empty() {
+            continue;
+        }
+
+        if !cooldown_ok {
+            continue;
+        }
+
+        let highest = new_thresholds.iter().copied().max().unwrap_or(50);
+
+        for t in &new_thresholds {
+            if !win_state.fired_thresholds.contains(t) {
+                win_state.fired_thresholds.push(*t);
+                evaluation.changed = true;
+            }
+        }
+
+        if sample.name == "Session (5h)" || evaluation.os_notification.is_none() {
+            let body = if highest >= 90 {
+                format!(
+                    "{} usage at {:.0}% — may be throttled soon",
+                    sample.name, sample.utilization
+                )
+            } else {
+                format!("{} usage at {:.0}%", sample.name, sample.utilization)
+            };
+            evaluation.os_notification = Some(("AI Token Monitor".to_string(), body));
+        }
+
+        if has_webhooks {
+            evaluation
+                .webhook_alerts
+                .push(webhooks::WebhookAlertType::ThresholdCrossed {
+                    window_name: sample.name.to_string(),
+                    utilization: sample.utilization,
+                    threshold: highest,
+                    resets_at: sample.resets_at.clone(),
+                });
+        }
+    }
+
+    evaluation
 }
 
 fn request_shutdown() {
@@ -91,74 +302,62 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle, usage: &claude_usage::Cl
         .cloned()
         .unwrap_or_default();
 
-    // Build list of (name, utilization, window_id, resets_at) for each monitored window.
+    // Build samples for each monitored window.
     // window_id combines the window name with resets_at (truncated to hour) so that:
     //   - It changes when the usage window resets → clears fired_thresholds
     //   - It doesn't change on minor timestamp drift within the same window
-    let mut windows_to_check: Vec<(&str, f64, String, Option<String>)> = Vec::new();
-
-    // Truncate resets_at to hour to avoid spurious resets from second-level drift
-    fn stable_window_id(name: &str, resets_at: Option<&str>) -> String {
-        match resets_at {
-            Some(resets_at) => {
-                // Take first 13 chars of ISO timestamp (e.g. "2026-04-03T11") for hour-level stability
-                let truncated = &resets_at[..resets_at.len().min(13)];
-                format!("{}:{}", name, truncated)
-            }
-            None => format!("{}:unknown-reset", name),
-        }
-    }
+    let mut windows_to_check: Vec<AlertWindowSample<'_>> = Vec::new();
 
     if monitored.five_hour {
         if let Some(w) = &usage.five_hour {
-            windows_to_check.push((
-                "Session (5h)",
-                w.utilization,
-                stable_window_id("5h", w.resets_at.as_deref()),
-                w.resets_at.clone(),
-            ));
+            windows_to_check.push(AlertWindowSample {
+                name: "Session (5h)",
+                utilization: w.utilization,
+                window_id: stable_window_id("5h", w.resets_at.as_deref()),
+                resets_at: w.resets_at.clone(),
+            });
         }
     }
     if monitored.seven_day {
         if let Some(w) = &usage.seven_day {
-            windows_to_check.push((
-                "Weekly",
-                w.utilization,
-                stable_window_id("7d", w.resets_at.as_deref()),
-                w.resets_at.clone(),
-            ));
+            windows_to_check.push(AlertWindowSample {
+                name: "Weekly",
+                utilization: w.utilization,
+                window_id: stable_window_id("7d", w.resets_at.as_deref()),
+                resets_at: w.resets_at.clone(),
+            });
         }
     }
     if monitored.seven_day_sonnet {
         if let Some(w) = &usage.seven_day_sonnet {
-            windows_to_check.push((
-                "Weekly Sonnet",
-                w.utilization,
-                stable_window_id("7d-sonnet", w.resets_at.as_deref()),
-                w.resets_at.clone(),
-            ));
+            windows_to_check.push(AlertWindowSample {
+                name: "Weekly Sonnet",
+                utilization: w.utilization,
+                window_id: stable_window_id("7d-sonnet", w.resets_at.as_deref()),
+                resets_at: w.resets_at.clone(),
+            });
         }
     }
     if monitored.seven_day_opus {
         if let Some(w) = &usage.seven_day_opus {
-            windows_to_check.push((
-                "Weekly Opus",
-                w.utilization,
-                stable_window_id("7d-opus", w.resets_at.as_deref()),
-                w.resets_at.clone(),
-            ));
+            windows_to_check.push(AlertWindowSample {
+                name: "Weekly Opus",
+                utilization: w.utilization,
+                window_id: stable_window_id("7d-opus", w.resets_at.as_deref()),
+                resets_at: w.resets_at.clone(),
+            });
         }
     }
     if monitored.extra_usage {
         if let Some(w) = &usage.extra_usage {
             if w.is_enabled {
                 // Extra usage resets monthly; use monthly_limit as part of ID
-                windows_to_check.push((
-                    "Extra Usage",
-                    w.utilization,
-                    format!("extra:{}", w.monthly_limit),
-                    None,
-                ));
+                windows_to_check.push(AlertWindowSample {
+                    name: "Extra Usage",
+                    utilization: w.utilization,
+                    window_id: format!("extra:{}", w.monthly_limit),
+                    resets_at: None,
+                });
             }
         }
     }
@@ -175,10 +374,7 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle, usage: &claude_usage::Cl
         }
     };
 
-    let state = state_guard.get_or_insert_with(|| AlertState {
-        windows: HashMap::new(),
-        last_notification_at: None,
-    });
+    let state = state_guard.get_or_insert_with(load_alert_state);
 
     // Cooldown: at least 60 seconds between notifications
     let cooldown_ok = state
@@ -186,96 +382,24 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle, usage: &claude_usage::Cl
         .map(|last| last.elapsed().as_secs() >= 60)
         .unwrap_or(true);
 
-    let mut webhook_alerts: Vec<webhooks::WebhookAlertType> = Vec::new();
-    let mut os_notification: Option<(String, String)> = None;
-
-    for (name, utilization, window_id, resets_at) in &windows_to_check {
-        let win_state = state
-            .windows
-            .entry(name.to_string())
-            .or_insert_with(|| WindowAlertState {
-                window_id: window_id.clone(),
-                fired_thresholds: Vec::new(),
-                prev_utilization: 0.0,
-            });
-
-        // Reset detection: if window changed or utilization dropped to ~0
-        let window_changed = win_state.window_id != *window_id;
-        let utilization_reset =
-            utilization_reset_detected(win_state.prev_utilization, *utilization);
-        if window_changed || utilization_reset {
-            // Check if this is a reset (prev was > 0)
-            let was_active = win_state.prev_utilization > 5.0;
-            win_state.window_id = window_id.clone();
-            win_state.fired_thresholds.clear();
-
-            if was_active
-                && has_webhooks
-                && webhook_config
-                    .as_ref()
-                    .map(|c| c.notify_on_reset)
-                    .unwrap_or(false)
-            {
-                webhook_alerts.push(webhooks::WebhookAlertType::ResetCompleted {
-                    window_name: name.to_string(),
-                });
-            }
-        }
-
-        win_state.prev_utilization = *utilization;
-
-        // Find newly crossed thresholds
-        let new_thresholds: Vec<u32> = thresholds
-            .iter()
-            .filter(|&&t| *utilization >= t as f64)
-            .filter(|t| !win_state.fired_thresholds.contains(t))
-            .copied()
-            .collect();
-
-        if new_thresholds.is_empty() {
-            continue;
-        }
-
-        if !cooldown_ok {
-            continue;
-        }
-
-        let highest = new_thresholds.iter().copied().max().unwrap_or(50);
-
-        // Mark ALL crossed thresholds as fired to prevent re-sending lower ones
-        // on subsequent polls while usage remains high. Only the highest is sent.
-        for t in &new_thresholds {
-            if !win_state.fired_thresholds.contains(t) {
-                win_state.fired_thresholds.push(*t);
-            }
-        }
-
-        // OS notification (only for five_hour to avoid spam, or if it's the highest alert)
-        if *name == "Session (5h)" || os_notification.is_none() {
-            let body = if highest >= 90 {
-                format!(
-                    "{} usage at {:.0}% — may be throttled soon",
-                    name, utilization
-                )
-            } else {
-                format!("{} usage at {:.0}%", name, utilization)
-            };
-            os_notification = Some(("AI Token Monitor".to_string(), body));
-        }
-
-        // Webhook alerts for all monitored windows
-        if has_webhooks {
-            webhook_alerts.push(webhooks::WebhookAlertType::ThresholdCrossed {
-                window_name: name.to_string(),
-                utilization: *utilization,
-                threshold: highest,
-                resets_at: resets_at.clone(),
-            });
-        }
+    let notify_on_reset = webhook_config
+        .as_ref()
+        .map(|c| c.notify_on_reset)
+        .unwrap_or(false);
+    let evaluation = evaluate_usage_alerts(
+        state,
+        &windows_to_check,
+        &thresholds,
+        cooldown_ok,
+        has_webhooks,
+        notify_on_reset,
+    );
+    if evaluation.changed {
+        persist_alert_state(state);
     }
 
     // Fire OS notification
-    if let Some((title, body)) = os_notification {
+    if let Some((title, body)) = evaluation.os_notification {
         use tauri_plugin_notification::NotificationExt;
         let _ = app_handle
             .notification()
@@ -287,8 +411,9 @@ fn check_and_fire_alerts(app_handle: &tauri::AppHandle, usage: &claude_usage::Cl
     }
 
     // Fire webhook alerts asynchronously
-    if !webhook_alerts.is_empty() {
+    if !evaluation.webhook_alerts.is_empty() {
         if let Some(config) = webhook_config {
+            let webhook_alerts = evaluation.webhook_alerts;
             tauri::async_runtime::spawn(async move {
                 let secrets = match commands::get_ai_keys() {
                     Some(s) => s,
@@ -312,6 +437,38 @@ mod tests {
         assert!(utilization_reset_detected(42.0, 1.0));
         assert!(!utilization_reset_detected(42.0, 2.0));
         assert!(!utilization_reset_detected(0.0, 0.0));
+    }
+
+    #[test]
+    fn stable_window_id_truncates_non_ascii_reset_without_panicking() {
+        let id = stable_window_id("5h", Some("hours later太"));
+        assert_eq!(id, "5h:hours later太");
+    }
+
+    #[test]
+    fn restored_alert_state_suppresses_already_fired_thresholds_after_restart() {
+        let mut state = alert_state_from_persisted(PersistedAlertState {
+            windows: HashMap::from([(
+                "Session (5h)".to_string(),
+                PersistedWindowAlertState {
+                    window_id: "5h:2026-05-02T12".to_string(),
+                    fired_thresholds: vec![50, 80],
+                    prev_utilization: 85.0,
+                },
+            )]),
+        });
+        let windows = vec![AlertWindowSample {
+            name: "Session (5h)",
+            utilization: 85.0,
+            window_id: "5h:2026-05-02T12".to_string(),
+            resets_at: Some("2026-05-02T12:00:00+00:00".to_string()),
+        }];
+
+        let evaluation =
+            evaluate_usage_alerts(&mut state, &windows, &[50, 80, 90], true, true, false);
+
+        assert!(evaluation.webhook_alerts.is_empty());
+        assert!(evaluation.os_notification.is_none());
     }
 
     #[test]
