@@ -625,6 +625,16 @@ mod tests {
     }
 
     #[test]
+    fn claude_fable_5_pricing() {
+        let p = get_claude_pricing("claude-fable-5");
+        assert!((p.input - 10.0).abs() < 0.001);
+        assert!((p.output - 50.0).abs() < 0.001);
+        assert!((p.cache_read - 1.0).abs() < 0.001);
+        assert!((p.cache_write_5m - 12.5).abs() < 0.001);
+        assert!((p.cache_write_1h - 20.0).abs() < 0.001);
+    }
+
+    #[test]
     fn claude_opus_48_fast_pricing() {
         let p =
             get_claude_pricing_for_speed("claude-opus-4-8-20260528", Some("fast"), Some("fast"));
