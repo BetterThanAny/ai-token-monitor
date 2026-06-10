@@ -16,9 +16,15 @@ function run(command, args) {
   }
 }
 
+// signingIdentity null skips tauri's internal codesign. On iCloud-synced
+// paths the File Provider tags fresh bundles with FinderInfo xattrs that make
+// codesign fail; package-macos-dmg.mjs clears those xattrs and signs instead.
 const localConfig = JSON.stringify({
   bundle: {
     createUpdaterArtifacts: false,
+    macOS: {
+      signingIdentity: null,
+    },
   },
 });
 
