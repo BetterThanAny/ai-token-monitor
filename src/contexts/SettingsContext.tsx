@@ -182,7 +182,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       .then(() => {
         if (shouldRefreshStats) emit("stats-updated").catch(() => {});
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("[settings] failed to persist preferences", err);
+      });
   }, [prefs, ready]);
 
   const updatePrefs = useCallback((partial: Partial<UserPreferences>) => {

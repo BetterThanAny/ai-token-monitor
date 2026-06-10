@@ -320,6 +320,11 @@ pub fn validate_claude_dir(path: String) -> bool {
     canonical.join("projects").is_dir()
 }
 
+fn dir_is_inside_home_lexically(expanded: &Path, home: &Path) -> bool {
+    let home_canonical = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    expanded.starts_with(home) || expanded.starts_with(&home_canonical)
+}
+
 fn validate_claude_dir_for_preferences(path: &str, home: &Path) -> Result<(), String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -332,10 +337,14 @@ fn validate_claude_dir_for_preferences(path: &str, home: &Path) -> Result<(), St
         Ok(path) => path,
         Err(_) if trimmed == "~/.claude" => return Ok(()),
         Err(_) => {
-            return Err(format!(
-                "Claude Code directory is invalid or missing: {}",
-                trimmed
-            ))
+            // A directory that was valid when added may have been deleted later.
+            // Keep the preference so settings stay persistable; only the home
+            // boundary is enforced. Providers simply skip dirs without data.
+            if dir_is_inside_home_lexically(&expanded, home) {
+                eprintln!("[PREFS] Claude config dir missing, keeping preference: {trimmed}");
+                return Ok(());
+            }
+            return Err("Claude Code directory must be inside home".to_string());
         }
     };
 
@@ -343,7 +352,7 @@ fn validate_claude_dir_for_preferences(path: &str, home: &Path) -> Result<(), St
         return Err("Claude Code directory must be inside home".to_string());
     }
     if !canonical.join("projects").is_dir() && trimmed != "~/.claude" {
-        return Err("Claude Code directory must contain a projects folder".to_string());
+        eprintln!("[PREFS] Claude config dir has no projects folder, keeping preference: {trimmed}");
     }
     Ok(())
 }
@@ -361,13 +370,24 @@ fn validate_codex_dir_for_preferences(
         return Ok(());
     }
     if crate::codex_paths::validate_codex_dir(trimmed, home) {
-        Ok(())
-    } else {
-        Err(format!(
-            "Codex directory is invalid or no sessions folder was found: {}",
-            trimmed
-        ))
+        return Ok(());
     }
+    let Some(expanded) = crate::codex_paths::expand_home_path(trimmed, home) else {
+        return Err(format!("Codex directory is invalid: {}", trimmed));
+    };
+    // Same rationale as the Claude path above: a dir that was valid when added
+    // may have been deleted or lost its sessions folder later. Keep it as long
+    // as it stays inside home (or is a WSL Codex home on Windows).
+    if dir_is_inside_home_lexically(&expanded, home)
+        || crate::codex_paths::looks_like_windows_wsl_path_string(&expanded.to_string_lossy())
+    {
+        eprintln!("[PREFS] Codex dir missing or without sessions, keeping preference: {trimmed}");
+        return Ok(());
+    }
+    Err(format!(
+        "Codex directory is invalid or no sessions folder was found: {}",
+        trimmed
+    ))
 }
 
 fn validate_preferences_for_persistence(prefs: &UserPreferences) -> Result<(), String> {
@@ -1254,6 +1274,31 @@ mod tests {
 
         let _ = fs::remove_dir_all(outside);
         assert!(err.contains("Claude Code directory must be inside home"));
+    }
+
+    #[test]
+    fn persist_preferences_allows_dirs_that_no_longer_exist_inside_home() {
+        // Directories are validated when added; if the user deletes one later,
+        // persistence must keep working or every settings change is lost.
+        let guard = TestHomeGuard::new();
+        let missing_claude = guard.path.join(".claude-work");
+        let missing_codex = guard.path.join(".codex-work");
+        assert!(!missing_claude.exists());
+        assert!(!missing_codex.exists());
+
+        let prefs = UserPreferences {
+            config_dirs: vec![
+                "~/.claude".to_string(),
+                missing_claude.display().to_string(),
+            ],
+            codex_dirs: vec![missing_codex.display().to_string()],
+            include_codex: true,
+            ..UserPreferences::default()
+        };
+
+        persist_preferences(&prefs)
+            .expect("missing dirs inside home must not block persistence");
+        assert!(prefs_path().exists());
     }
 
     #[test]

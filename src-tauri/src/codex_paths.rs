@@ -187,8 +187,7 @@ pub fn runtime_codex_dirs(config_dirs: &[String], home: &Path) -> Vec<PathBuf> {
     paths
 }
 
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn looks_like_windows_wsl_path_string(raw: &str) -> bool {
+pub(crate) fn looks_like_windows_wsl_path_string(raw: &str) -> bool {
     let normalized = raw.replace('/', "\\").to_ascii_lowercase();
     let stripped = normalized
         .strip_prefix("\\\\?\\unc\\")
