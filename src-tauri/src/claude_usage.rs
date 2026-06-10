@@ -142,12 +142,12 @@ fn parse_statusline_rate_limits_snapshot(
         return Err("Claude statusLine quota snapshot does not contain rate_limits.".to_string());
     }
 
-    let five_hour = parse_statusline_usage_window(rate_limits.get("five_hour"), "five_hour")?;
-    let seven_day = parse_statusline_usage_window(rate_limits.get("seven_day"), "seven_day")?;
+    let five_hour = parse_statusline_usage_window(rate_limits.get("five_hour"), "five_hour");
+    let seven_day = parse_statusline_usage_window(rate_limits.get("seven_day"), "seven_day");
     let seven_day_sonnet =
-        parse_statusline_usage_window(rate_limits.get("seven_day_sonnet"), "seven_day_sonnet")?;
+        parse_statusline_usage_window(rate_limits.get("seven_day_sonnet"), "seven_day_sonnet");
     let seven_day_opus =
-        parse_statusline_usage_window(rate_limits.get("seven_day_opus"), "seven_day_opus")?;
+        parse_statusline_usage_window(rate_limits.get("seven_day_opus"), "seven_day_opus");
     let extra_usage = parse_statusline_extra_usage(
         rate_limits
             .get("extra_usage")
@@ -196,33 +196,30 @@ fn parse_statusline_rate_limits_snapshot(
     })
 }
 
-fn parse_statusline_usage_window(
-    value: Option<&Value>,
-    label: &str,
-) -> Result<Option<UsageWindow>, String> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
+fn parse_statusline_usage_window(value: Option<&Value>, label: &str) -> Option<UsageWindow> {
+    let value = value?;
     if value.is_null() {
-        return Ok(None);
+        return None;
     }
-    let used_percentage = value
+    // An incomplete window must not discard the rest of the snapshot — skip it
+    // and let the remaining windows drive quota display and alerts.
+    let Some(used_percentage) = value
         .get("used_percentage")
         .or_else(|| value.get("used_percent"))
         .or_else(|| value.get("utilization"))
         .and_then(value_as_f64)
         .map(clamp_percentage)
-        .ok_or_else(|| {
-            format!(
-                "Claude statusLine quota snapshot window `{}` is missing used_percentage.",
-                label
-            )
-        })?;
+    else {
+        eprintln!(
+            "[STATUSLINE] Skipping quota window `{label}` without used_percentage."
+        );
+        return None;
+    };
 
-    Ok(Some(UsageWindow {
+    Some(UsageWindow {
         utilization: used_percentage,
         resets_at: parse_reset_value(value.get("resets_at")),
-    }))
+    })
 }
 
 fn parse_statusline_extra_usage(value: Option<&Value>) -> Option<ExtraUsage> {
@@ -507,6 +504,24 @@ mod tests {
     }
 
     #[test]
+    fn keeps_valid_windows_when_another_window_is_missing_used_percentage() {
+        let usage = parse_statusline_rate_limits_snapshot(
+            r#"{
+                "captured_at": "2026-05-02T12:00:00Z",
+                "rate_limits": {
+                    "five_hour": {"resets_at": 1777713600},
+                    "seven_day": {"used_percentage": 41.2}
+                }
+            }"#,
+            None,
+        )
+        .expect("one incomplete window must not discard the whole snapshot");
+
+        assert!(usage.five_hour.is_none());
+        assert_eq!(usage.seven_day.unwrap().utilization, 41.2);
+    }
+
+    #[test]
     fn rejects_statusline_snapshot_without_usable_rate_limits() {
         let err = parse_statusline_rate_limits_snapshot(
             r#"{"rate_limits":{"five_hour":{"resets_at":1777713600}}}"#,
@@ -514,6 +529,6 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(err.contains("used_percentage"));
+        assert!(err.contains("usable rate_limits"));
     }
 }
