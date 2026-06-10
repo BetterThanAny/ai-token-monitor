@@ -503,6 +503,11 @@ impl CodexProvider {
         // so per-event timestamps are more accurate for "today" stats.
         let path_date = extract_date_from_path(path);
 
+        // Dedup keys must be file-scoped: forked/parallel rollout files share a
+        // session id, and events at the same line number in different files are
+        // distinct API calls. Session aggregation uses the session_id field.
+        let file_key = path.to_string_lossy();
+
         let mut session_id = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -691,7 +696,7 @@ impl CodexProvider {
                             current_model.clone()
                         };
 
-                        let key = format!("{}:{}", session_id, line_index);
+                        let key = format!("{}:{}", file_key, line_index);
                         entries.insert(
                             key,
                             CodexEntry {
@@ -2678,6 +2683,48 @@ mod tests {
         assert!(!entries.contains_key("stale:1"));
         assert!(!entries.contains_key("stale:2"));
         assert_eq!(keys_by_file.get(&path).map(HashSet::len), Some(1));
+    }
+
+    #[test]
+    fn test_forked_session_files_do_not_overwrite_each_other() {
+        // Codex fork/parallel attempts write multiple rollout files that share
+        // one session id. Events at the same line number in different files are
+        // distinct API calls and must all survive the merged entries map.
+        let dir = temp_dir_path("forked-session");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_a = dir.join("rollout-a.jsonl");
+        let file_b = dir.join("rollout-b.jsonl");
+        std::fs::write(
+            &file_a,
+            codex_jsonl_with_token_events(&[("2026-05-05T18:11:36Z", 100, 50, 150)]),
+        )
+        .unwrap();
+        std::fs::write(
+            &file_b,
+            codex_jsonl_with_token_events(&[("2026-05-05T18:11:42Z", 200, 70, 270)]),
+        )
+        .unwrap();
+
+        let entries_a = CodexProvider::parse_single_file(&file_a, &[]);
+        let entries_b = CodexProvider::parse_single_file(&file_b, &[]);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(entries_a.len(), 1);
+        assert_eq!(entries_b.len(), 1);
+
+        let mut merged = entries_a;
+        merged.extend(entries_b);
+        assert_eq!(
+            merged.len(),
+            2,
+            "entries from forked rollout files must not overwrite each other"
+        );
+
+        let stats = CodexProvider::build_stats(&merged);
+        let total_tokens: u64 = stats.daily.iter().flat_map(|d| d.tokens.values()).sum();
+        assert_eq!(total_tokens, 150 + 270);
+        // Both events belong to the same logical session.
+        assert_eq!(stats.total_sessions, 1);
     }
 
     #[test]
